@@ -1,0 +1,41 @@
+# --- Core numeric / diarization ---
+numpy==1.26.2
+pyannote-audio==3.1.1
+
+# --- OpenAI / LLM orchestration ---
+openai>=1.12,<2.0
+
+langchain>=0.2.7,<0.3
+langchain-core>=0.2.10
+langchain-community>=0.2.6
+langchain-chroma>=0.1.4
+
+# --- HF stack (버전 미고정 시 자주 깨짐) ---
+transformers==4.41.2
+datasets[audio]==2.19.1
+accelerate==0.30.1
+
+# --- Web / API ---
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+python-dotenv>=1.0,<2.0
+python-multipart>=0.0.9,<1.0
+pydantic-settings>=2.2,<3.0
+orjson>=3.10,<4.0
+
+# --- Utils / notebooks (개발용) ---
+ipykernel
+jupyter
+jupyterlab
+ipython
+matplotlib
+pandas
+beautifulsoup4
+
+# --- Audio helpers (실시간/신호 처리에 자주 필요) ---
+soundfile>=0.12,<1.0
+webrtcvad>=2.0,<3.0
+librosa==0.10.2.post1
+
+# --- PDF ---
+pymupdf

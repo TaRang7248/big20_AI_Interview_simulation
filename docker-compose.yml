@@ -1,0 +1,113 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-interview-api
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+
+    working_dir: /workspace
+
+    volumes:
+      - ./app:/workspace/app
+      - ./data:/workspace/data
+      - ./storage:/workspace/storage
+      - ./notebooks:/workspace/notebooks
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+    depends_on:
+      - postgres
+      - redis
+      - chroma
+    restart: unless-stopped
+
+
+  notebook:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-interview-notebook
+    env_file:
+      - .env
+    ports:
+      - "8888:8888"
+
+    working_dir: /workspace
+
+    volumes:
+      - ./app:/workspace/app
+      - ./data:/workspace/data
+      - ./storage:/workspace/storage
+      - ./notebooks:/workspace/notebooks
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    command:
+      [
+        "bash",
+        "-c",
+        "jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root"
+      ]
+
+    depends_on:
+      - postgres
+      - redis
+      - chroma
+    restart: unless-stopped
+
+
+  postgres:
+    image: postgres:16
+    container_name: ai-interview-postgres
+    environment:
+      POSTGRES_USER: interview
+      POSTGRES_PASSWORD: interview
+      POSTGRES_DB: interviewdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ai-interview-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  chroma:
+    image: chromadb/chroma:latest
+    container_name: ai-interview-chroma
+    ports:
+      - "8001:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+    volumes:
+      - chroma_data:/chroma/chroma
+    restart: unless-stopped
+
+volumes:
+  pg_data:
+  redis_data:
+  chroma_data:
