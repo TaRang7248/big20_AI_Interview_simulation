@@ -1,15 +1,16 @@
 # big20_AI_Interview_simulation
-빅데이터20기 ChairKing팀 파이널 프로젝트: AI 모의면접 시스템
+빅데이터20기 Kingterview팀 파이널 프로젝트: AI 모의면접 시스템
 
 ## 팀원 (초성 영문 대문자, 메일주소)
 - 윤지훈(YJH)  lookjihoon911@gmail.com
-- 임명혁(LMH)
-- 이하량(LHR)
-- 임다윗(LDW)
-- 윤여림(YYL)
-- 최시현(CSH)
+- 임명혁(LMH)  idmh1111@gmail.com
+- 이하량(LHR)  ihalyang50@gmail.com
+- 임다윗(LDW)  tkwp3022@gmail.com
+- 윤여림(YYL)  hario3ov@gmail.com
+- 최시현(CSH)  seehchoi@gmail.com
 
-### file dir
+### file dir C:/big20/big20_AI_Interview_simulation
+
 
 
 ## Directory
