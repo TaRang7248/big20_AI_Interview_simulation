@@ -143,7 +143,7 @@ celerybeat.pid
 .interview_env/
 env/
 venv/
-interview_env/
+interview_env
 ENV/
 env.bak/
 venv.bak/
