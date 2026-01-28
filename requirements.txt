@@ -32,6 +32,8 @@ websockets
 openai
 langchain
 langchain-openai
+langchain-ollama
+langchain-community
 langgraph
 tiktoken
 
