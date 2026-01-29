@@ -3,17 +3,13 @@ import json
 from dataclasses import dataclass, asdict
 from typing import List, Dict
 
-# ----------------------------
 # 1) 전처리
-# ----------------------------
 def clean_text(s: str) -> str:
     s = s.replace("\u200b", "").strip()  # zero-width 제거
     s = re.sub(r"\s+", " ", s)           # 공백 정리
     return s
 
-# ----------------------------
 # 2) 질문 분류 (룰 기반)
-# ----------------------------
 def classify_question(q: str) -> str:
     q_lower = q.lower()
 
@@ -35,10 +31,7 @@ def classify_question(q: str) -> str:
 
     return "other"
 
-# ----------------------------
 # 3) 답변 생성 (템플릿 기반)
-#    - 지금은 정답 데이터가 없으니 "일관된 구조"가 핵심
-# ----------------------------
 TEMPLATES: Dict[str, str] = {
     "job_understanding": (
         "해당 직무는 조직의 목표 달성을 위해 필요한 정보를 수집·정리하고, "
@@ -83,21 +76,18 @@ TEMPLATES: Dict[str, str] = {
     ),
 }
 
-def generate_answer(q: str, q_type: str, target_min_chars: int = 650) -> str:
+def generate_answer(q: str, q_type: str, target_min_chars: int = 350) -> str:
     base = TEMPLATES.get(q_type, TEMPLATES["other"])
-    # 너무 짧으면 문장 반복 없이 "확장 문장"을 덧붙여 길이를 맞춘다
     if len(base) < target_min_chars:
         add = (
             " 또한 업무를 수행하며 발생하는 이슈를 기록하고, 원인-대응-결과를 남겨 "
             "다음 반복 작업에서 동일한 문제가 재발하지 않도록 관리하겠습니다."
         )
-        while len(base) < target_min_chars:
-            base += add
+        # ver0.8: 무한 반복(while) 대신 1회만 덧붙여 과다 부풀림 방지
+        base += add
     return base
 
-# ----------------------------
 # 4) 평가(정답 없이 가능한 평가)
-# ----------------------------
 def evaluate_answer(q: str, a: str) -> Dict[str, object]:
     score = 0
     feedback = []
@@ -123,46 +113,82 @@ def evaluate_answer(q: str, a: str) -> Dict[str, object]:
 
     return {"score": int(score), "feedback": feedback}
 
-# ----------------------------
 # 5) 실행
-# ----------------------------
+
 @dataclass
 class QAItem:
+    session_id: str
+    turn: int
     question: str
     q_type: str
-    answer: str
+    user_answer: str
+    model_answer: str
     score: int
     feedback: List[str]
 
-def build_dataset(questions: List[str]) -> List[QAItem]:
-    items = []
-    for q in questions:
-        q_clean = clean_text(q)
+
+
+FOLLOW_UP: Dict[str, str] = {
+    "motivation": "좋아요. 그 동기를 뒷받침하는 구체적인 경험 한 가지를 말해줄 수 있나요?",
+    "experience": "그 상황에서 본인이 맡은 역할과 결과를 조금 더 구체적으로 말해볼까요?",
+    "competency": "그 역량을 보여준 사례를 하나 더 들어볼 수 있나요?",
+    "job_understanding": "그 직무에서 성과를 판단하는 기준(지표)은 무엇이라고 생각하나요?",
+    "other": "조금 더 구체적으로(상황-행동-결과) 순서로 말해볼까요?",
+}
+
+def next_question(prev_type: str) -> str:
+    return FOLLOW_UP.get(prev_type, FOLLOW_UP["other"])
+
+
+
+def run_interview(session_id: str, first_question: str, max_turns: int = 5) -> List[QAItem]:
+    items: List[QAItem] = []
+    current_question = first_question
+
+    for turn in range(1, max_turns + 1):
+        q_clean = clean_text(current_question)
         q_type = classify_question(q_clean)
-        answer = generate_answer(q_clean, q_type)
-        eval_res = evaluate_answer(q_clean, answer)
+
+        print(f"\n[Q{turn}] {q_clean}")
+        user_input = input("A> ").strip()
+        if user_input.lower() in ["exit", "quit"]:
+            break
+
+        user_clean = clean_text(user_input)
+
+        # 모델 답변(여기서는 템플릿 기반 예시답안 역할)
+        model_answer = generate_answer(q_clean, q_type)
+
+        # 사용자의 답변을 평가(룰 기반)
+        eval_res = evaluate_answer(q_clean, user_clean)
+
         items.append(QAItem(
+            session_id=session_id,
+            turn=turn,
             question=q_clean,
             q_type=q_type,
-            answer=answer,
+            user_answer=user_clean,
+            model_answer=model_answer,
             score=eval_res["score"],
             feedback=eval_res["feedback"],
         ))
+
+        # 다음 질문
+        current_question = next_question(q_type)
+
     return items
+
 
 def save_jsonl(items: List[QAItem], path: str):
     with open(path, "w", encoding="utf-8") as f:
         for it in items:
             f.write(json.dumps(asdict(it), ensure_ascii=False) + "\n")
 
-if __name__ == "__main__":
-    # 예시: 질문만 넣어도 됨
-    questions = [
-        "지원 직무의 특징과 역할에 대해 아는 대로 말해주세요! (700자)",
-        "희망하는 직무를 수행함에 있어서 요구되는 역량이 무엇이라 생각하며, 이 역량을 갖추기 위한 노력 또는 특별한 경험을 기술하여 주십시오",
-        "직무관련 경험기술서 상단에 작성한 직무관련 경험사항에 대해 상세히 기술해 주시기 바랍니다.",
-    ]
 
-    items = build_dataset(questions)
-    save_jsonl(items, "outputs.jsonl")
+if __name__ == "__main__":
+    session_id = "local_session_001"
+    first_question = "지원 직무의 특징과 역할에 대해 아는 대로 말해주세요! (700자)"
+
+    items = run_interview(session_id, first_question, max_turns=5)
+    save_jsonl(items, "turn_outputs.jsonl")
     print("saved:", len(items))
