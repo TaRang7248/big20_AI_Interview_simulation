@@ -116,30 +116,54 @@
 </head>
 
 <body>
-    <div class="container">
+    <div class="container" id="start-container">
+        <h1>AI 모의 면접 시작</h1>
+        <p style="text-align: center; color: #6b7280; margin-bottom: 2rem;">
+            준비가 되셨나요? '면접 시작' 버튼을 누르면 AI가 질문을 생성하여 면접이 시작됩니다.
+        </p>
+        <button id="start-interview-btn" style="font-size: 1.1rem; padding: 1rem;">면접 시작하기</button>
+    </div>
+
+    <div class="container" id="interview-container" style="display: none;">
         <h1>AI Text Interview</h1>
 
         <div class="section">
-            <div style="margin-bottom: 0.5rem;">
-                <label><input type="radio" name="source" value="llm" checked> LLM 생성</label>
-                <label style="margin-left: 1rem;"><input type="radio" name="source" value="json"> JSON 파일</label>
-            </div>
-            <button id="get-question-btn">질문 불러오기</button>
-            <div id="question-box">질문이 여기에 표시됩니다.</div>
+            <div id="question-box" style="line-height: 1.6;">질문을 생성하고 있습니다...</div>
         </div>
 
-        <div class="section" id="answer-section" style="display: none;">
-            <textarea id="user-answer" placeholder="답변을 입력하세요..."></textarea>
-            <button id="submit-answer-btn" style="margin-top: 0.5rem;">답변 제출</button>
-            <div id="loading-msg" class="loading" style="display: none;">평가 중...</div>
+        <div class="section" id="answer-section">
+            <textarea id="user-answer" placeholder="여기에 답변을 입력하세요..."></textarea>
+            <button id="submit-answer-btn" style="margin-top: 1rem; background-color: #10b981;">답변 제출</button>
+            <div id="loading-msg" class="loading" style="display: none; margin-top: 1rem;">
+                <span style="display: inline-block; animation: pulse 1.5s infinite;">심층 평가 중입니다...</span>
+            </div>
         </div>
 
         <div id="result-box">
             <div class="score" id="result-score"></div>
+            <div style="border-top: 1px solid #eee; margin: 1rem 0;"></div>
             <div class="feedback" id="result-feedback"></div>
-            <div class="feedback" id="result-improvements" style="margin-top: 0.5rem; color: #374151;"></div>
+            <div class="feedback" id="result-improvements"
+                style="margin-top: 0.75rem; color: #4b5563; background: #f8fafc; padding: 0.75rem; border-radius: 0.5rem; border-left: 4px solid #10b981;">
+            </div>
+            <button id="next-question-btn" style="margin-top: 1.5rem; background-color: var(--primary);">다음 질문
+                받기</button>
         </div>
     </div>
+
+    <style>
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+    </style>
 
     <script src="/static/script.js"></script>
 </body>

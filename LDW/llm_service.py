@@ -14,33 +14,33 @@ def load_questions_from_json(file_path: str):
     with open(file_path, 'r', encoding='utf-8') as f:
         return json.load(f)
 
-def get_interview_question(use_json=False, file_path=None):
-    """Generates an interview question using LLM with context from JSON or loads from JSON."""
+def get_interview_question(file_path=None):
+    """Generates a new interview question using LLM based on examples in JSON."""
     examples = ""
     if file_path and os.path.exists(file_path):
         questions = load_questions_from_json(file_path)
         if questions:
             import random
-            # If use_json is True, we return a random question from the file.
-            # If False (default LLM mode), we use some questions as context to generate a NEW one.
-            if use_json:
-                selected = random.choice(questions)
-                return selected.get("질문", "질문을 찾을 수 없습니다.")
-            
-            # Use 3 random questions as examples for the LLM
-            sample_size = min(len(questions), 3)
+            # Use 5 random questions as context to understand the style and topics
+            sample_size = min(len(questions), 5)
             samples = random.sample(questions, sample_size)
+            # Only provide questions as samples to prevent the LLM from generating answers
             examples = "\n".join([f"- {q.get('질문')}" for q in samples])
 
-    system_prompt = "You are a professional HR interviewer for a software engineer role."
-    user_content = "Generate one new and challenging interview question in Korean."
+    system_prompt = """당신은 소프트웨어 엔지니어 채용을 담당하는 전문 면접관입니다.
+제공된 기존 질문 리스트를 참고하여, 해당 주제들과 유사한 수준의 전문성을 갖춘 '새로운' 질문을 한 개 생성해야 합니다.
+이미 존재하는 질문을 그대로 사용하지 말고, 새로운 관점이나 세부적인 기술 내용을 묻는 독창적인 질문을 만드세요.
+
+**중요: 답변 예시나 부연 설명 없이 오직 '질문' 내용만 한 문장 혹은 한 단락으로 출력하세요.**"""
+
+    user_content = "실무적인 소프트웨어 엔지니어 면접 질문을 한국어로 한 개 생성해 주세요."
     
     if examples:
-        user_content = f"""Here are some existing interview questions for reference:
+        user_content = f"""다음은 우리 회사의 기존 면접 질문 예시들입니다:
 {examples}
 
-Based on these, generate a NEW, unique, and challenging interview question for a software engineer role in Korean. 
-The question should be professional and technical."""
+위 질문들과 겹치지 않는 '새롭고' 도전적인 면접 질문을 기술적으로 깊이 있게 한 개만 생성해 주세요.
+질문은 한국어로 작성하며, 질문 외에 어떠한 텍스트(답변 예시 등)도 포함하지 마세요."""
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
