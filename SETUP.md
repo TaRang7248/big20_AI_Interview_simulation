@@ -78,7 +78,7 @@ pip check
 `interview_env_test.py`를 실행해서 핵심 모듈 import / CUDA 인식을 확인합니다.
 
 ```cmd
-python .\app\interview_env_test.py
+python .\test\interview_env_test.py
 ```
 
 정상이라면 다음과 같은 정보를 출력합니다:
