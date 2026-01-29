@@ -6,9 +6,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:013579@localhost:5432/interview")
+# Force SQLite for this vertical slice to ensure it runs locally without Postgres dependency
+DATABASE_URL = "sqlite:///./interview.db"
 
-engine = create_engine(DATABASE_URL)
+connect_args = {}
+if "sqlite" in DATABASE_URL:
+    connect_args = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
