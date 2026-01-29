@@ -9,15 +9,22 @@ const nextBtn = document.getElementById('next-question-btn');
 const userAnswer = document.getElementById('user-answer');
 const loadingMsg = document.getElementById('loading-msg');
 
+let lastAnswer = '';
+
 async function fetchQuestion() {
     questionBox.innerText = 'AI가 질문을 생성하고 있습니다...';
     answerSection.style.display = 'block';
     resultBox.style.display = 'none';
+    const currentAnswer = userAnswer.value;
     userAnswer.value = '';
     submitBtn.disabled = true;
 
     try {
-        const response = await fetch('/interview/question');
+        let url = '/interview/question';
+        if (lastAnswer) {
+            url += `?last_answer=${encodeURIComponent(lastAnswer)}`;
+        }
+        const response = await fetch(url);
         const data = await response.json();
 
         if (data.question) {
@@ -35,6 +42,7 @@ async function fetchQuestion() {
 startBtn.addEventListener('click', () => {
     startContainer.style.display = 'none';
     interviewContainer.style.display = 'block';
+    lastAnswer = ''; // Reset for new interview
     fetchQuestion();
 });
 
@@ -47,6 +55,7 @@ submitBtn.addEventListener('click', async () => {
         return;
     }
 
+    lastAnswer = answer; // Store for the next follow-up question
     submitBtn.disabled = true;
     loadingMsg.style.display = 'block';
     resultBox.style.display = 'none';
