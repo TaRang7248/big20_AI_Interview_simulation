@@ -29,13 +29,13 @@ sys.path.append(root_dir)
 load_dotenv() 
 
 def main(): # 프로그램의 메인 로직을 담는 함수
-    print("AI 면접 시스템을 시작합니다... (On-premise Llama 3 사용)")
+    print("AI 면접 시스템을 시작합니다")
 
-    # 1. RAG 초기화 및 이력서 인덱싱
-    # DB 연결 문자열은 환경 변수에서 읽거나 기본값 사용 (사용자 환경에 맞게 수정 필요)
-    db_url = os.getenv("DATABASE_URL", "postgresql+psycopg2://postgres:postgres@localhost:5432/interview_db")
+    # 환경 변수를 사용해 데이터베이스 연결 정보를 안전하게 가져오고, 이를 바탕으로 RAG(검색 증강 생성) 시스템을 초기화
+    db_url = os.getenv("DATABASE_URL")
     print(f"Connecting to Vector DB: {db_url} (Check .env if fails)")
     
+    # 객체 초기화: 위에서 가져온 DB 주소를 ResumeRAG라는 클래스에 전달. 클래스 내부에서 DB 주소를 받아 PostgreSQL(PGVector)에 접속하고, 지원자의 이력서 데이터를 조회할 준비를 마친다.
     rag = ResumeRAG(connection_string=db_url)
     
     # 이력서 파일 확인
@@ -45,12 +45,13 @@ def main(): # 프로그램의 메인 로직을 담는 함수
         do_index = input("이력서를 DB에 새로 인덱싱하시겠습니까? (y/n, default: n): ").strip().lower()
         if do_index == 'y':
             rag.clear_collection() # 기존 데이터 삭제 (중복 방지)
+            # PDF 파일을 읽어서 텍스트로 쪼갠 뒤, 벡터(숫자)로 변환하여 DB에 저장
             rag.load_and_index_pdf(resume_path)
     else:
         print(f"Warning: '{resume_path}' 파일을 찾을 수 없습니다. RAG 기능이 제한될 수 있습니다.")
         print("CSH 폴더에 'resume.pdf'를 배치해주세요.")
 
-    # Retriever 생성
+    # 인덱싱(Indexing)되어 DB에 저장된 방대한 데이터 중, 질문과 가장 관련 있는 내용을 골라내는 '검색기'를 가져오는 코드
     retriever = rag.get_retriever()
     
     # LLM 초기화 (Ollama 로컬 모델 사용)
@@ -90,9 +91,11 @@ def main(): # 프로그램의 메인 로직을 담는 함수
             if not user_input.strip():
                 continue
 
-            # RAG: 사용자 답변과 관련된 이력서 내용 검색
-            # (초기 자기소개 등에서도 이력서 전체 맥락이 필요할 수 있으나, 여기서는 대화 흐름에 따른 Context 검색 구현)
+            # 사용자의 질문(user_input)을 바탕으로 DB에서 관련 있는 문서 조각들을 실제로 가져온다
+            # 질문을 벡터(숫자)로 바꾼 뒤, DB에 저장된 이력서 조각들 중 숫자가 가장 비슷한 것들을 골라낸다
+            # 결과값인 retrieved_docs는 문서 객체들의 리스트(List) 형태이다 (예: [문서1, 문서2, 문서3])
             retrieved_docs = retriever.invoke(user_input)
+            # 리스트 형태의 문서들을 AI가 읽기 편하도록 하나의 긴 텍스트로 합치는 과정
             context_text = "\n".join([doc.page_content for doc in retrieved_docs])
             
             # 검색된 컨텍스트가 있다면 프롬프트에 주입
