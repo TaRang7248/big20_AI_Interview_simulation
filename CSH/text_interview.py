@@ -7,8 +7,8 @@ import os
 import sys
 # .env 파일에 저장된 비밀 정보(OpenAI API 키 등)를 읽어와서 시스템 환경 변수로 등록해 주는 도구
 from dotenv import load_dotenv
-# LangChain에서 제공하는 OpenAI 전용 채팅 모델 연결 도구. 이를 통해 GPT-4o 같은 모델과 대화할 수 있다.
-from langchain_openai import ChatOpenAI
+# LangChain에서 제공하는 Ollama 전용 채팅 모델 연결 도구. 이를 통해 Llama 3 같은 모델과 대화할 수 있다.
+from langchain_ollama import ChatOllama
 # ChatPromptTemplate: AI에게 줄 명령문(프롬프트)의 틀을 만든다
 # MessagesPlaceholder: 대화 내용이 들어갈 '빈자리'를 만든다. 이전 대화 기록을 통째로 갈아 끼울 때 사용.
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -27,15 +27,10 @@ sys.path.append(root_dir)
 load_dotenv() 
 
 def main(): # 프로그램의 메인 로직을 담는 함수
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("Error: .env 파일에 OPENAI_API_KEY가 설정되지 않았습니다.")
-        return # 함수 종료
+    print("AI 면접 시스템을 시작합니다... (On-premise Llama 3 사용)")
 
-    print("AI 면접 시스템을 시작합니다...")
-
-    # LLM 초기화 (모델은 필요에 따라 변경 가능, 예: gpt-3.5-turbo, gpt-4)
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+    # LLM 초기화 (Ollama 로컬 모델 사용)
+    llm = ChatOllama(model="llama3", temperature=0.7)
 
     # 시스템 프롬프트: 면접관의 페르소나 설정
     system_prompt = """당신은 IT 기업의 30년차 수석 개발자 면접관입니다.
