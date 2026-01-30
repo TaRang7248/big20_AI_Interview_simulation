@@ -7,6 +7,7 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
+from YJH.chains.rag_chain import retrieve_interview_context
 
 # --- 1. 상태(State) 정의 ---
 # 면접의 전체 맥락을 저장하는 메모리 구조입니다.
@@ -69,35 +70,48 @@ def node_analyze_answer(state: InterviewState):
 def node_generate_question(state: InterviewState):
     """
     다음 질문을 생성하는 노드입니다.
-    이전 평가 결과(last_assessment)에 따라 꼬리 질문을 할지, 새로운 주제로 갈지 결정합니다.
+    RAG를 활용하여 적응형 질문을 생성합니다.
     """
     phase = state["phase"]
     assessment = state.get("last_assessment", {})
     q_count = state["question_count"]
     
-    # 기본 시스템 프롬프트 (면접관 페르소나) 
+    # 1. RAG 검색을 위한 쿼리 생성
+    # 지원자의 마지막 답변이나 현재 직무(예: 백엔드 개발자)를 쿼리로 사용
+    last_message = state["messages"][-1].content if state["messages"] else ""
+    query = f"면접 단계: {phase}, 지원자 답변: {last_message}"
+    
+    # 2. PostgreSQL에서 관련 질문/루브릭 검색 (TODO 해결!) [cite: 196, 202]
+    rag_context = retrieve_interview_context(query)
+    
+    # 기본 시스템 프롬프트
     system_prompt = f"""
     당신은 면접관입니다. 현재 면접 단계는 '{phase}'입니다.
-    정중하지만 핵심을 찌르는 질문을 하십시오.
-    질문은 한 번에 하나만 하세요.
+    
+    [참고 자료(RAG)]
+    데이터베이스에서 검색된 관련 질문 후보입니다:
+    {rag_context}
+    
+    위 참고 자료를 바탕으로, 지원자의 수준에 맞는 날카로운 질문을 하나만 생성하세요.
     """
     
     instructions = ""
     
     # 로직 분기: 꼬리 질문 vs 새 질문
     if assessment.get("follow_up_needed"):
-        instructions = f"지원자의 이전 답변({assessment.get('reasoning')})이 부족했습니다. 구체적인 사례를 묻거나 기술적 원리를 묻는 꼬리 질문을 하세요."
+        instructions = f"지원자의 답변이 부족하거나 흥미롭습니다({assessment.get('reasoning')}). 참고 자료를 활용해 심층적인 꼬리 질문을 하세요."
     else:
-        # TODO: 여기서 RAG 체인을 호출하여 다음 질문 토픽을 가져오는 것이 이상적입니다.
-        # 이번 단계에서는 하드코딩된 예시를 사용합니다.
-        instructions = "지원자의 답변이 훌륭했습니다. 다음 주제로 넘어가세요. 관련된 다른 기술 질문을 던지세요."
+        instructions = "이전 답변이 충분합니다. 참고 자료에 있는 다른 주제의 질문으로 넘어가세요."
 
     # 종료 조건 체크
-    if q_count >= 5: # 예: 5턴 이후 종료
-        instructions = "면접을 마무리하는 단계입니다. 지원자에게 수고했다는 말과 함께 마지막으로 하고 싶은 말이 있는지 물어보세요."
-        # 상태 업데이트를 위해 phase 변경은 로직상 필요할 수 있음
+    if q_count >= 5: 
+        instructions = "면접을 마무리하는 단계입니다. 수고했다는 말과 함께 마지막 발언 기회를 주세요."
 
-    msg = llm.invoke([SystemMessage(content=system_prompt + "\n" + instructions)] + state["messages"])
+    # LLM 호출
+    msg = llm.invoke([
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=instructions) # 문맥 강화를 위해 HumanMessage로 지시 전달
+    ])
     
     return {"messages": [msg], "question_count": q_count + 1}
 
