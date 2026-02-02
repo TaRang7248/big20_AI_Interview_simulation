@@ -53,12 +53,12 @@ class DeepgramService:
         dg_connection = self.client.listen.live.v("1")
 
         # 이벤트 핸들러 정의
-        def on_message(self, result, **kwargs):
+        def on_message(result, **kwargs):
             sentence = result.channel.alternatives[0].transcript
             if len(sentence) > 0:
                 print(f"Transcript: {sentence}")
 
-        def on_error(self, error, **kwargs):
+        def on_error(error, **kwargs):
             logger.error(f"Deepgram Error: {error}")
 
         # 이벤트 연결
@@ -96,7 +96,7 @@ class DeepgramService:
 
         try:
             while True:
-                data = stream.read(1024)
+                data = stream.read(1024, exception_on_overflow=False)
                 dg_connection.send(data)
         except KeyboardInterrupt:
             print("\n🛑 중단하는 중...")
