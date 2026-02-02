@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>AI Interview - Video</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+    video { width: 45%; max-width: 560px; background: #000; margin-right: 16px; }
+    .row { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+    #logs { margin-top: 12px; font-size: 14px; white-space: pre-wrap; background: #f7f7f7; padding: 8px; border-radius: 6px; }
+    button { padding: 8px 12px; }
+  </style>
+</head>
+<body>
+  <h2>화상 면접 (프리뷰)</h2>
+  <div class="row">
+    <div>
+      <div>내 카메라</div>
+      <video id="localVideo" autoplay playsinline muted></video>
+    </div>
+    <div>
+      <div>서버 반환(에코) 비디오</div>
+      <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+  </div>
+  <div style="margin-top:12px;">
+    <button id="startBtn">면접 시작</button>
+    <button id="stopBtn">종료</button>
+  </div>
+  <div id="logs"></div>
+
+  <script>
+    const log = (msg) => {
+      const box = document.getElementById('logs');
+      const time = new Date().toLocaleTimeString();
+      box.textContent += `[${time}] ${msg}\n`;
+    };
+
+    let pc;
+    let localStream;
+
+    async function start() {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: { echoCancellation: true, noiseSuppression: true }
+        });
+        document.getElementById('localVideo').srcObject = localStream;
+
+        pc = new RTCPeerConnection();
+        pc.ontrack = (e) => {
+          document.getElementById('remoteVideo').srcObject = e.streams[0];
+        };
+        pc.onconnectionstatechange = () => log(`PC state: ${pc.connectionState}`);
+
+        localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const resp = await fetch('/offer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
+        });
+        const answer = await resp.json();
+        await pc.setRemoteDescription(answer);
+        log('WebRTC 연결이 설정되었습니다.');
+      } catch (err) {
+        log('오류: ' + err);
+      }
+    }
+
+    async function stop() {
+      try {
+        if (pc) pc.close();
+        if (localStream) localStream.getTracks().forEach(t => t.stop());
+        log('연결 종료.');
+      } catch (e) { log('종료 오류: ' + e); }
+    }
+
+    document.getElementById('startBtn').onclick = start;
+    document.getElementById('stopBtn').onclick = stop;
+  </script>
+</body>
+</html>
