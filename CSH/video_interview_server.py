@@ -13,6 +13,8 @@ from aiortc import RTCPeerConnection # WebRTC의 핵심으로, 내 컴퓨터와 
 from aiortc.contrib.media import MediaBlackhole # 들어오는 미디어(영상/음성) 데이터를 기록하지 않고 그냥 '블랙홀'처럼 흡수해버리는 도구
 import numpy as np
 from deepface import DeepFace
+import uuid
+import redis
 
 # app이라는 이름으로 FastAPI 서버 객체를 생성
 app = FastAPI(title="AI Interview - Video Server")
@@ -24,10 +26,46 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # 현재 서버에 연결된 '실시간 영상 통로(Peer Connection)'들을 담아두는 바구니를 만드는 줄
 pcs: Set[RTCPeerConnection] = set()
+pc_sessions: Dict[RTCPeerConnection, str] = {}
 
 # 최신 감정 분석 결과 캐시 (간단 구현)
 last_emotion: Optional[Dict] = None
 _emotion_lock = asyncio.Lock()
+
+# Redis 연결 설정 (환경 변수 REDIS_URL 사용, 기본 로컬)
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+_r: Optional[redis.Redis] = None
+_ts_available: Optional[bool] = None
+
+def _get_redis() -> redis.Redis:
+    global _r
+    if _r is None:
+        _r = redis.from_url(REDIS_URL)
+    return _r
+
+def _push_timeseries(key: str, ts_ms: int, value: float, labels: Dict[str, str]):
+    """RedisTimeSeries가 있으면 TS.ADD, 없으면 ZADD로 대체 저장."""
+    global _ts_available
+    r = _get_redis()
+    try:
+        if _ts_available is not False:
+            args = ["TS.ADD", key, ts_ms, value, "LABELS"]
+            for k, v in labels.items():
+                args.extend([k, v])
+            r.execute_command(*args)
+            _ts_available = True
+            return
+    except redis.exceptions.ResponseError:
+        _ts_available = False
+    except Exception:
+        _ts_available = False
+    # Fallback: Sorted Set (member=ts, score=value)
+    try:
+        r.zadd(key, {str(ts_ms): float(value)})
+        if labels:
+            r.hset(key + ":labels", mapping=labels)
+    except Exception:
+        pass
 
 # 사용자(클라이언트)가 서버에 보낼 'SDP offer' 형식을 미리 정의
 # SDP(Session Description Protocol): 통신 사양
@@ -54,6 +92,8 @@ async def index() -> str:
 async def offer(offer: Offer):
     pc = RTCPeerConnection()
     pcs.add(pc)
+    session_id = uuid.uuid4().hex
+    pc_sessions[pc] = session_id
 
     @pc.on("iceconnectionstatechange")
     async def on_ice_state_change():
@@ -68,7 +108,7 @@ async def offer(offer: Offer):
         if track.kind == "video":
             pc.addTrack(track)
             # 병렬로 감정 분석 태스크 실행
-            asyncio.create_task(_analyze_emotions(track))
+            asyncio.create_task(_analyze_emotions(track, session_id))
         else:
             # Consume audio to keep the pipeline alive without echoing
             bh = MediaBlackhole()
@@ -77,7 +117,7 @@ async def offer(offer: Offer):
     await pc.setRemoteDescription({"sdp": offer.sdp, "type": offer.type})
     answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
-    return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
+    return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "session_id": session_id}
 
 
 async def _consume_audio(track, sink: MediaBlackhole):
@@ -88,7 +128,7 @@ async def _consume_audio(track, sink: MediaBlackhole):
     except Exception:
         pass
 
-async def _analyze_emotions(track):
+async def _analyze_emotions(track, session_id: str):
     """영상 프레임을 주기적으로 받아 DeepFace로 감정 분석을 수행하고 캐시에 저장."""
     # 분석 샘플링 주기(초): 초당 1프레임(FPS)
     sample_period = 1.0
@@ -143,6 +183,11 @@ async def _analyze_emotions(track):
                 async with _emotion_lock:
                     global last_emotion
                     last_emotion = data
+                # RedisTimeSeries에 저장
+                ts_ms = int(time.time() * 1000)
+                for emo, prob in probabilities.items():
+                    key = f"emotion:{session_id}:{emo}"
+                    _push_timeseries(key, ts_ms, float(prob), {"session_id": session_id, "type": "emotion"})
             except Exception:
                 # 분석 실패는 조용히 넘기고 다음 프레임에서 재시도
                 pass
@@ -157,6 +202,26 @@ async def on_shutdown():
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros, return_exceptions=True)
     pcs.clear()
+
+# 타임시리즈 조회 엔드포인트
+@app.get("/emotion/timeseries")
+async def emotion_timeseries(session_id: str, emotion: str, limit: int = 100):
+    r = _get_redis()
+    key = f"emotion:{session_id}:{emotion}"
+    data = []
+    try:
+        if _ts_available:
+            # 전체 범위에서 최근 limit만 반환
+            res = r.execute_command("TS.RANGE", key, 0, int(time.time() * 1000))
+            if isinstance(res, list):
+                data = res[-limit:]
+        else:
+            # Sorted Set fallback: 최근 limit
+            res = r.zrevrange(key, 0, limit - 1, withscores=True)
+            data = [[int(m.decode()) if isinstance(m, bytes) else int(m), s] for m, s in res]
+    except Exception:
+        data = []
+    return {"session_id": session_id, "emotion": emotion, "points": data}
 
 # 최신 감정 분석 결과를 제공하는 간단한 엔드포인트
 @app.get("/emotion")
