@@ -7,8 +7,10 @@ import os
 import sys
 # .env 파일에 저장된 비밀 정보(OpenAI API 키 등)를 읽어와서 시스템 환경 변수로 등록해 주는 도구
 from dotenv import load_dotenv
-# LangChain에서 제공하는 OpenAI 전용 채팅 모델 연결 도구. 이를 통해 GPT-4o 같은 모델과 대화할 수 있다.
-from langchain_openai import ChatOpenAI
+# LangChain에서 제공하는 Ollama 전용 채팅 모델 연결 도구. 이를 통해 Llama 3 같은 모델과 대화할 수 있다.
+from langchain_ollama import ChatOllama
+# RAG 기능을 위한 모듈 임포트
+from resume_rag import ResumeRAG
 # ChatPromptTemplate: AI에게 줄 명령문(프롬프트)의 틀을 만든다
 # MessagesPlaceholder: 대화 내용이 들어갈 '빈자리'를 만든다. 이전 대화 기록을 통째로 갈아 끼울 때 사용.
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -27,21 +29,45 @@ sys.path.append(root_dir)
 load_dotenv() 
 
 def main(): # 프로그램의 메인 로직을 담는 함수
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        print("Error: .env 파일에 OPENAI_API_KEY가 설정되지 않았습니다.")
-        return # 함수 종료
+    print("AI 면접 시스템을 시작합니다")
 
-    print("AI 면접 시스템을 시작합니다...")
+    # 환경 변수를 사용해 데이터베이스 연결 정보를 안전하게 가져오고, 이를 바탕으로 RAG(검색 증강 생성) 시스템을 초기화
+    db_url = os.getenv("DATABASE_URL")
+    print(f"Connecting to Vector DB: {db_url} (Check .env if fails)")
+    
+    # 객체 초기화: 위에서 가져온 DB 주소를 ResumeRAG라는 클래스에 전달. 클래스 내부에서 DB 주소를 받아 PostgreSQL(PGVector)에 접속하고, 지원자의 이력서 데이터를 조회할 준비를 마친다.
+    rag = ResumeRAG(connection_string=db_url)
+    
+    # 이력서 파일 확인
+    resume_path = os.path.join(current_dir, "resume.pdf")
+    if os.path.exists(resume_path):
+        print(f"'{resume_path}' 파일이 발견되었습니다.")
+        do_index = input("이력서를 DB에 새로 인덱싱하시겠습니까? (y/n, default: n): ").strip().lower()
+        if do_index == 'y':
+            rag.clear_collection() # 기존 데이터 삭제 (중복 방지)
+            # PDF 파일을 읽어서 텍스트로 쪼갠 뒤, 벡터(숫자)로 변환하여 DB에 저장
+            rag.load_and_index_pdf(resume_path)
+    else:
+        print(f"Warning: '{resume_path}' 파일을 찾을 수 없습니다. RAG 기능이 제한될 수 있습니다.")
+        print("CSH 폴더에 'resume.pdf'를 배치해주세요.")
 
-    # LLM 초기화 (모델은 필요에 따라 변경 가능, 예: gpt-3.5-turbo, gpt-4)
-    llm = ChatOpenAI(model="gpt-4o", temperature=0.7)
+    # 인덱싱(Indexing)되어 DB에 저장된 방대한 데이터 중, 질문과 가장 관련 있는 내용을 골라내는 '검색기'를 가져오는 코드
+    retriever = rag.get_retriever()
+    
+    # LLM 초기화 (Ollama 로컬 모델 사용)
+    llm = ChatOllama(model="llama3", temperature=0.7)
 
     # 시스템 프롬프트: 면접관의 페르소나 설정
     system_prompt = """당신은 IT 기업의 30년차 수석 개발자 면접관입니다.
-지원자의 기술 스택과 경험에 대해 심도 있는 질문을 던지세요.
-답변이 부실하면 구체적인 예시를 요구하거나 꼬리 질문을 하세요.
-꼬리 질문은 2~3번 정도로 제한하고, 다른 질문으로 넘어가세요.
+지원자의 이력서 내용과 답변을 바탕으로 기술 스택과 경험에 대해 심도 있는 질문을 던지세요.
+제공된 '참고용 이력서 내용'을 적극 활용하여 구체적인 질문을 하세요.
+
+[중요 규칙]
+1. 답변이 부실하면 구체적인 예시를 요구하거나 꼬리 질문을 하세요.
+2. 꼬리 질문은 주제당 최대 2번까지만 허용합니다. 
+3. 동일한 기술적 주제에 대해 2번의 답변을 들었다면, "알겠습니다. 다음은..."이라며 주제를 전환하세요.
+4. 질문은 한 번에 하나만 하세요.
+
 질문을 할 때 너무 공격적이지 않게, 정중하지만 날카로운 태도를 유지하세요.
 면접은 자기소개로 시작합니다."""
 
@@ -62,20 +88,41 @@ def main(): # 프로그램의 메인 로직을 담는 함수
                 print("\nAI 면접관: 면접을 종료합니다. 수고하셨습니다.")
                 break
             
-            # 아무 내용도 입력하지 않고 엔터만 쳤을 때를 처리. 내용이 비어있으면 AI에게 빈 값을 보낼 필요가 없으므로, 아래 로직(AI 호출 등)을 무시하고 다시 루프의 처음으로 돌아가 입력을 다시 기다린다.
             if not user_input.strip():
                 continue
 
-            # 사용자 입력을 대화 기록에 추가
-            chat_history.append(HumanMessage(content=user_input))
+            # 사용자의 질문(user_input)을 바탕으로 DB에서 관련 있는 문서 조각들을 실제로 가져온다
+            # 질문을 벡터(숫자)로 바꾼 뒤, DB에 저장된 이력서 조각들 중 숫자가 가장 비슷한 것들을 골라낸다
+            # 결과값인 retrieved_docs는 문서 객체들의 리스트(List) 형태이다 (예: [문서1, 문서2, 문서3])
+            retrieved_docs = retriever.invoke(user_input)
+            # 리스트 형태의 문서들을 AI가 읽기 편하도록 하나의 긴 텍스트로 합치는 과정
+            context_text = "\n".join([doc.page_content for doc in retrieved_docs])
+            
+            # 검색된 컨텍스트가 있다면 프롬프트에 주입
+            # context_message라는 변수를 생성하고 초기값을 None으로 설정. 검색 결과가 없을 경우를 대비해 변수를 미리 초기화해두는 과정.
+            context_message = None
+            # context_text: 벡터 DB 등에서 검색해온 텍스트 데이터
+            if context_text:
+                context_message = SystemMessage(content=f"--- [RAG System] 참고용 이력서 관련 내용 ---\n{context_text}\n------------------------------------------")
+
+            # 사용자의 질문(user_input)과 이전 대화 기록(chat_history)을 합쳐서 AI 모델에게 전달할 최종 메시지 리스트를 만드는 과정
+            messages_for_inference = list(chat_history)
+            messages_for_inference.append(HumanMessage(content=user_input))
+            
+            # AI 모델은 [이전 대화 내역 + 현재 질문]에 더해 [참고해야 할 이력서 데이터]까지 한꺼번에 전달 받게 된다
+            if context_message:
+                messages_for_inference.append(context_message)
 
             # LLM 응답 생성
-            # stream을 사용하여 타자기 효과를 낼 수도 있지만, 여기서는 간단히 invoke 사용
-            response = llm.invoke(chat_history)
+            print("\n(AI가 생각 중입니다... 내용을 분석하고 있습니다...)")
+            response = llm.invoke(messages_for_inference)
             
+            # AI가 생성한 답변 중 텍스트 내용(content)만 추출하여 화면에 출력
             print(f"\nAI 면접관: {response.content}")
 
-            # AI 응답을 대화 기록에 추가
+            # 실제 대화 기록에는 User Input과 AI Response만 저장 (Context는 중복 저장 안 함)
+            # 방금 나눈 대화를 메모리(대화 기록)에 저장하여, 다음 질문을 했을 때 AI가 앞선 내용을 기억할 수 있게 만드는 과정
+            chat_history.append(HumanMessage(content=user_input))
             chat_history.append(response)
 
         except KeyboardInterrupt:
