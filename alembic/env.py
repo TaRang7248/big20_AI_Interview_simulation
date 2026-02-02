@@ -9,7 +9,7 @@ from sqlalchemy import pool
 from dotenv import load_dotenv
 
 from IMH.db.base import Base
-from IMH.models import user, auth_token, candidate_profile, interview, transcript, event_log  # noqa: F401
+from IMH.models import user, auth_token, candidate_profile, interview, transcript, event_log, qa  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

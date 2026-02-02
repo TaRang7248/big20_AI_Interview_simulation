@@ -18,6 +18,7 @@ bcrypt==3.2.2
 
 # --- Data / DB ---
 sqlalchemy
+pgvector
 alembic
 psycopg2-binary
 asyncpg

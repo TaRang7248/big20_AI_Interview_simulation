@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     """
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    POSTGRES_CONNECTION_STRING: str: str
+    POSTGRES_CONNECTION_STRING: str
     TOKEN_TTL_MINUTES: int = 60 * 24
 
 
