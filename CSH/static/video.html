@@ -28,6 +28,7 @@
     <button id="stopBtn">종료</button>
   </div>
   <div id="logs"></div>
+  <div id="emotionBox" style="margin-top:12px;font-size:16px;"></div>
 
   <script>
     const log = (msg) => {
@@ -38,6 +39,7 @@
 
     let pc;
     let localStream;
+    let emotionTimer;
 
     async function start() {
       try {
@@ -69,12 +71,26 @@
       } catch (err) {
         log('오류: ' + err);
       }
+      // 감정 폴링 시작
+      if (!emotionTimer) {
+        emotionTimer = setInterval(async () => {
+          try {
+            const r = await fetch('/emotion');
+            const j = await r.json();
+            if (j.status !== 'no_data') {
+              document.getElementById('emotionBox').textContent =
+                `현재 감정: ${j.dominant_emotion}  |  점수: ${JSON.stringify(j.scores)}`;
+            }
+          } catch (e) {}
+        }, 1000);
+      }
     }
 
     async function stop() {
       try {
         if (pc) pc.close();
         if (localStream) localStream.getTracks().forEach(t => t.stop());
+        if (emotionTimer) { clearInterval(emotionTimer); emotionTimer = null; }
         log('연결 종료.');
       } catch (e) { log('종료 오류: ' + e); }
     }
