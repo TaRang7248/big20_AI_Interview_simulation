@@ -78,8 +78,13 @@
             const r = await fetch('/emotion');
             const j = await r.json();
             if (j.status !== 'no_data') {
-              document.getElementById('emotionBox').textContent =
-                `현재 감정: ${j.dominant_emotion}  |  점수: ${JSON.stringify(j.scores)}`;
+              const p = j.probabilities || {};
+              const lines = [
+                `현재 감정: ${j.dominant_emotion ?? 'N/A'}`,
+                `행복: ${(p.happy ?? 0)*100|0}%  슬픔: ${(p.sad ?? 0)*100|0}%  분노: ${(p.angry ?? 0)*100|0}%`,
+                `놀람: ${(p.surprise ?? 0)*100|0}%  공포: ${(p.fear ?? 0)*100|0}%  혐오: ${(p.disgust ?? 0)*100|0}%  중립: ${(p.neutral ?? 0)*100|0}%`
+              ];
+              document.getElementById('emotionBox').textContent = lines.join('\n');
             }
           } catch (e) {}
         }, 1000);
