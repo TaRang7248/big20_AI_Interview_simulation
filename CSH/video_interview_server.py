@@ -1,4 +1,5 @@
 import asyncio # 파이썬에서 비동기(Async) 작업을 처리하기 위한 도구
+import time # 프레임 샘플링(초당 1프레임) 제어를 위한 시간 측정 도구
 import os # 컴퓨터 시스템의 환경(파일 경로, 환경 변수 등)에 접근할 때 사용
 from typing import Set, Optional, Dict 
 
@@ -89,16 +90,21 @@ async def _consume_audio(track, sink: MediaBlackhole):
 
 async def _analyze_emotions(track):
     """영상 프레임을 주기적으로 받아 DeepFace로 감정 분석을 수행하고 캐시에 저장."""
-    # 처리량 완화를 위한 샘플링 간격(초)
-    throttle_sec = 0.75
+    # 분석 샘플링 주기(초): 초당 1프레임(FPS)
+    sample_period = 1.0
+    last_ts = 0.0
     try:
         while True:
             frame = await track.recv()
-            # VideoFrame을 OpenCV BGR 이미지로 변환
+            now = time.monotonic()
+            # 샘플링 간격을 만족할 때만 분석 수행 (1 FPS)
+            if now - last_ts < sample_period:
+                continue
+            last_ts = now
+            # VideoFrame을 OpenCV BGR 이미지로 변환 (분석 시점에만 변환)
             try:
                 img = frame.to_ndarray(format="bgr24")
             except Exception:
-                await asyncio.sleep(throttle_sec)
                 continue
 
             # 선택적으로 리사이즈로 속도 최적화
@@ -125,7 +131,6 @@ async def _analyze_emotions(track):
                 # 분석 실패는 조용히 넘기고 다음 프레임에서 재시도
                 pass
 
-            await asyncio.sleep(throttle_sec)
     except Exception:
         # 트랙 종료 등
         pass
