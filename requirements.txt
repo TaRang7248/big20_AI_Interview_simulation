@@ -42,6 +42,8 @@ pypdf
 # --- Audio / STT pipeline helpers ---
 soundfile
 librosa
+deepgram-sdk
+pyaudio
 
 # --- Speaker diarization / audio analysis (pin은 constraints로 관리) ---
 pyannote-audio
