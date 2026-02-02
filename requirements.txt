@@ -7,12 +7,14 @@
 fastapi
 uvicorn[standard]
 pydantic
+pydantic[email]
 python-dotenv
 httpx
 
 # --- Auth / Security (선택: 필요 시 사용) ---
 python-jose[cryptography]
-passlib[bcrypt]
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
 
 # --- Data / DB ---
 sqlalchemy
