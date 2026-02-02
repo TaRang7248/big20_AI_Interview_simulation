@@ -99,17 +99,17 @@ def main(): # 프로그램의 메인 로직을 담는 함수
             context_text = "\n".join([doc.page_content for doc in retrieved_docs])
             
             # 검색된 컨텍스트가 있다면 프롬프트에 주입
+            # context_message라는 변수를 생성하고 초기값을 None으로 설정. 검색 결과가 없을 경우를 대비해 변수를 미리 초기화해두는 과정.
             context_message = None
+            # context_text: 벡터 DB 등에서 검색해온 텍스트 데이터
             if context_text:
                 context_message = SystemMessage(content=f"--- [RAG System] 참고용 이력서 관련 내용 ---\n{context_text}\n------------------------------------------")
-                # 디버깅용: 검색된 내용이 있는지 출력해볼 수 있음 (선택 사항)
-                # print(f"(Debug) Retrieved Context Length: {len(context_text)}")
 
-            # 대화 기록 구성: [System, History..., User Input, (Context - Inserted temporarily)]
-            # 주의: ChatHistory에 영구 저장하지 않고, 이번 턴의 추론에만 사용
+            # 사용자의 질문(user_input)과 이전 대화 기록(chat_history)을 합쳐서 AI 모델에게 전달할 최종 메시지 리스트를 만드는 과정
             messages_for_inference = list(chat_history)
             messages_for_inference.append(HumanMessage(content=user_input))
             
+            # AI 모델은 [이전 대화 내역 + 현재 질문]에 더해 [참고해야 할 이력서 데이터]까지 한꺼번에 전달 받게 된다
             if context_message:
                 messages_for_inference.append(context_message)
 
@@ -117,9 +117,11 @@ def main(): # 프로그램의 메인 로직을 담는 함수
             print("\n(AI가 생각 중입니다... 내용을 분석하고 있습니다...)")
             response = llm.invoke(messages_for_inference)
             
+            # AI가 생성한 답변 중 텍스트 내용(content)만 추출하여 화면에 출력
             print(f"\nAI 면접관: {response.content}")
 
             # 실제 대화 기록에는 User Input과 AI Response만 저장 (Context는 중복 저장 안 함)
+            # 방금 나눈 대화를 메모리(대화 기록)에 저장하여, 다음 질문을 했을 때 AI가 앞선 내용을 기억할 수 있게 만드는 과정
             chat_history.append(HumanMessage(content=user_input))
             chat_history.append(response)
 
@@ -128,9 +130,6 @@ def main(): # 프로그램의 메인 로직을 담는 함수
             break
         except Exception as e:
             print(f"\n오류가 발생했습니다: {e}")
-            # 에러 상세 출력 (디버깅용)
-            import traceback
-            traceback.print_exc()
             break
 
 if __name__ == "__main__":
