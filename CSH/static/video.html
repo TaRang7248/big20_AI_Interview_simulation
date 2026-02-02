@@ -66,8 +66,9 @@
           body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
         });
         const answer = await resp.json();
+        window.sessionId = answer.session_id;
         await pc.setRemoteDescription(answer);
-        log('WebRTC 연결이 설정되었습니다.');
+        log('WebRTC 연결이 설정되었습니다. 세션ID: ' + (window.sessionId || 'N/A'));
       } catch (err) {
         log('오류: ' + err);
       }
