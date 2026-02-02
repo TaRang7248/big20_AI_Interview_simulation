@@ -1,6 +1,6 @@
 import asyncio # 파이썬에서 비동기(Async) 작업을 처리하기 위한 도구
 import os # 컴퓨터 시스템의 환경(파일 경로, 환경 변수 등)에 접근할 때 사용
-from typing import Set # '집합(Set)'이라는 데이터 타입을 명시하기 위해 사용
+from typing import Set, Optional, Dict 
 
 from fastapi import FastAPI, Request # FastAPI 웹 프레임워크에서 핵심 기능을 가져오기
 from fastapi.responses import HTMLResponse # 서버가 답변을 줄 때 'HTML 웹페이지' 형태로 응답하기 위해 사용
@@ -10,6 +10,8 @@ from pydantic import BaseModel # 데이터의 형식을 미리 정해두고 검�
 # WebRTC(실시간 통신) 관련 도구
 from aiortc import RTCPeerConnection # WebRTC의 핵심으로, 내 컴퓨터와 상대방 컴퓨터를 직접 연결하는 '통로'
 from aiortc.contrib.media import MediaBlackhole # 들어오는 미디어(영상/음성) 데이터를 기록하지 않고 그냥 '블랙홀'처럼 흡수해버리는 도구
+import numpy as np
+from deepface import DeepFace
 
 # app이라는 이름으로 FastAPI 서버 객체를 생성
 app = FastAPI(title="AI Interview - Video Server")
@@ -21,6 +23,10 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 # 현재 서버에 연결된 '실시간 영상 통로(Peer Connection)'들을 담아두는 바구니를 만드는 줄
 pcs: Set[RTCPeerConnection] = set()
+
+# 최신 감정 분석 결과 캐시 (간단 구현)
+last_emotion: Optional[Dict] = None
+_emotion_lock = asyncio.Lock()
 
 # 사용자(클라이언트)가 서버에 보낼 'SDP offer' 형식을 미리 정의
 # SDP(Session Description Protocol): 통신 사양
@@ -60,6 +66,8 @@ async def offer(offer: Offer):
         # Echo back only video to avoid audio feedback
         if track.kind == "video":
             pc.addTrack(track)
+            # 병렬로 감정 분석 태스크 실행
+            asyncio.create_task(_analyze_emotions(track))
         else:
             # Consume audio to keep the pipeline alive without echoing
             bh = MediaBlackhole()
@@ -79,9 +87,60 @@ async def _consume_audio(track, sink: MediaBlackhole):
     except Exception:
         pass
 
+async def _analyze_emotions(track):
+    """영상 프레임을 주기적으로 받아 DeepFace로 감정 분석을 수행하고 캐시에 저장."""
+    # 처리량 완화를 위한 샘플링 간격(초)
+    throttle_sec = 0.75
+    try:
+        while True:
+            frame = await track.recv()
+            # VideoFrame을 OpenCV BGR 이미지로 변환
+            try:
+                img = frame.to_ndarray(format="bgr24")
+            except Exception:
+                await asyncio.sleep(throttle_sec)
+                continue
+
+            # 선택적으로 리사이즈로 속도 최적화
+            h, w = img.shape[:2]
+            if max(h, w) > 720:
+                scale = 720 / max(h, w)
+                img = np.ascontiguousarray(
+                    cv2.resize(img, (int(w * scale), int(h * scale)))
+                ) if 'cv2' in globals() else img
+
+            # DeepFace 감정 분석
+            try:
+                res = DeepFace.analyze(img, actions=["emotion"], enforce_detection=False)
+                # 결과 정규화
+                item = res[0] if isinstance(res, list) and res else res
+                data = {
+                    "dominant_emotion": item.get("dominant_emotion"),
+                    "scores": item.get("emotion"),
+                }
+                async with _emotion_lock:
+                    global last_emotion
+                    last_emotion = data
+            except Exception:
+                # 분석 실패는 조용히 넘기고 다음 프레임에서 재시도
+                pass
+
+            await asyncio.sleep(throttle_sec)
+    except Exception:
+        # 트랙 종료 등
+        pass
+
 # FastAPI 서버가 종료될 때 이 함수를 자동으로 실행하라는 명령
 @app.on_event("shutdown")
 async def on_shutdown():
     coros = [pc.close() for pc in pcs]
     await asyncio.gather(*coros, return_exceptions=True)
     pcs.clear()
+
+# 최신 감정 분석 결과를 제공하는 간단한 엔드포인트
+@app.get("/emotion")
+async def emotion():
+    async with _emotion_lock:
+        if last_emotion is None:
+            return {"status": "no_data"}
+        return last_emotion
