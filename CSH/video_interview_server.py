@@ -120,9 +120,25 @@ async def _analyze_emotions(track):
                 res = DeepFace.analyze(img, actions=["emotion"], enforce_detection=False)
                 # 결과 정규화
                 item = res[0] if isinstance(res, list) and res else res
+                scores = item.get("emotion") or {}
+                # 7가지 기본 감정 확률 분포
+                keys_map = {
+                    "happy": "happy",
+                    "sad": "sad",
+                    "angry": "angry",
+                    "surprise": "surprise",
+                    "fear": "fear",
+                    "disgust": "disgust",
+                    "neutral": "neutral",
+                }
+                raw = {k: float(scores.get(src, 0.0)) for k, src in keys_map.items()}
+                total = sum(raw.values()) or 1.0
+                probabilities = {k: (v / total) for k, v in raw.items()}
+
                 data = {
                     "dominant_emotion": item.get("dominant_emotion"),
-                    "scores": item.get("emotion"),
+                    "probabilities": probabilities,  # 0.0~1.0 분포
+                    "raw_scores": raw,               # 원본 점수(스케일 불변)
                 }
                 async with _emotion_lock:
                     global last_emotion
