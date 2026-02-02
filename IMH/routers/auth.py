@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from IMH.core.exceptions import AuthenticationError
 from IMH.core.security import new_token, token_expiry, verify_password
 from IMH.db.session import get_db
 from IMH.models.auth_token import AuthToken
@@ -11,6 +14,7 @@ from IMH.models.user import User
 from IMH.schemas.auth import LoginIn, LoginOut
 
 router: APIRouter = APIRouter()
+logger = logging.getLogger("IMH.auth")
 
 
 @router.post("/login", response_model=LoginOut)
@@ -31,7 +35,10 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)) -> LoginOu
     user: User | None = res.scalar_one_or_none()
 
     if user is None or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        logger.warning(f"Login failed for email: {payload.email}")
+        raise AuthenticationError()
+
+    logger.info(f"User logged in: {user.id} ({user.email})")
 
     token: str = new_token()
     db.add(AuthToken(user_id=user.id, token=token, expires_at=token_expiry()))

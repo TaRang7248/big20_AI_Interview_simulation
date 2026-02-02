@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
+from IMH.common.time import utc_now
 from IMH.db.base import Base
 
 
@@ -21,4 +22,4 @@ class CandidateProfile(Base):
     target_company: Mapped[str] = mapped_column(String(200), nullable=False)
     skills: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from passlib.context import CryptContext
 
+from IMH.common.time import utc_now
 from IMH.core.config import settings
 
 pwd_context: CryptContext = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -53,5 +54,5 @@ def token_expiry(now: datetime | None = None) -> datetime:
     Returns:
         datetime: 만료 시각(UTC).
     """
-    base = now or datetime.utcnow()
+    base = now or utc_now()
     return base + timedelta(minutes=settings.TOKEN_TTL_MINUTES)

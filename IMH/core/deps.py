@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Callable
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from IMH.common.time import utc_now
+from IMH.core.exceptions import AuthenticationError, PermissionDeniedError
 from IMH.db.session import get_db
 from IMH.models.auth_token import AuthToken
 from IMH.models.user import User, UserRole
@@ -32,18 +33,18 @@ async def get_current_user(
         HTTPException: 토큰 누락/불일치/만료/사용자 없음.
     """
     if cred is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+        raise AuthenticationError(message="Missing token")
 
     token: str = cred.credentials
     res = await db.execute(select(AuthToken).where(AuthToken.token == token))
     t: AuthToken | None = res.scalar_one_or_none()
 
-    if t is None or t.expires_at < datetime.utcnow():
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid/expired token")
+    if t is None or t.expires_at < utc_now():
+        raise AuthenticationError(message="Invalid/expired token")
 
     user: User | None = await db.get(User, t.user_id)
     if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+        raise AuthenticationError(message="User not found")
 
     return user
 
@@ -71,7 +72,7 @@ def require_role(*roles: UserRole) -> Callable[[User], User]:
             HTTPException: 권한 없음(403).
         """
         if user.role not in roles:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+            raise PermissionDeniedError(message="Forbidden")
         return user
 
     return _guard

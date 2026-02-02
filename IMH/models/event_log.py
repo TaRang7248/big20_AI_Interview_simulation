@@ -6,6 +6,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Enum, ForeignKey, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
+from IMH.common.time import utc_now
 from IMH.db.base import Base
 
 
@@ -37,4 +38,4 @@ class EventLog(Base):
     # 세션 기준 상대시간(ms)
     t_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)

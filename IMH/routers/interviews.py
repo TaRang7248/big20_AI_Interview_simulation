@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+import logging
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from IMH.core.deps import get_current_user
+from IMH.core.exceptions import NotFoundError, PermissionDeniedError
 from IMH.db.session import get_db
 from IMH.models.candidate_profile import CandidateProfile
 from IMH.models.event_log import EventLog, EventType
@@ -12,6 +15,7 @@ from IMH.models.user import User, UserRole
 from IMH.schemas.interview import InterviewCreateIn, InterviewOut
 
 router: APIRouter = APIRouter()
+logger = logging.getLogger("IMH.interviews")
 
 
 @router.post("", response_model=InterviewOut)
@@ -39,10 +43,10 @@ async def create_interview(
     """
     profile: CandidateProfile | None = await db.get(CandidateProfile, payload.profile_id)
     if profile is None:
-        raise HTTPException(status_code=404, detail="Profile not found")
+        raise NotFoundError(message="Profile not found")
 
     if user.role == UserRole.candidate and profile.user_id != user.id:
-        raise HTTPException(status_code=403, detail="Cannot create interview for other user's profile")
+        raise PermissionDeniedError(message="Cannot create interview for other user's profile")
 
     interview = Interview(profile_id=profile.id)
     db.add(interview)
@@ -58,4 +62,5 @@ async def create_interview(
 
     await db.commit()
     await db.refresh(interview)
+    logger.info(f"Interview created: {interview.id} for user: {user.id} (profile: {profile.id})")
     return interview
