@@ -1,6 +1,8 @@
 import asyncio # 파이썬에서 비동기(Async) 작업을 처리하기 위한 도구
 import time # 프레임 샘플링(초당 1프레임) 제어를 위한 시간 측정 도구
 import os # 컴퓨터 시스템의 환경(파일 경로, 환경 변수 등)에 접근할 때 사용
+
+# Python에서 Type Hinting을 위해 사용하는 모듈
 from typing import Set, Optional, Dict 
 
 from fastapi import FastAPI, Request # FastAPI 웹 프레임워크에서 핵심 기능을 가져오기
@@ -11,9 +13,13 @@ from pydantic import BaseModel # 데이터의 형식을 미리 정해두고 검�
 # WebRTC(실시간 통신) 관련 도구
 from aiortc import RTCPeerConnection # WebRTC의 핵심으로, 내 컴퓨터와 상대방 컴퓨터를 직접 연결하는 '통로'
 from aiortc.contrib.media import MediaBlackhole # 들어오는 미디어(영상/음성) 데이터를 기록하지 않고 그냥 '블랙홀'처럼 흡수해버리는 도구
+# 이미지 데이터가 NumPy 배열(ndarray)이기 때문에, 이를 다루기 위해 필요한 라이브러리
 import numpy as np
+# 서버로 들어온 영상 프레임을 실시간으로 분석해 감정을 파악하기 위한 도구
 from deepface import DeepFace
+# 감정 분석 시스템에서 '누가 어떤 감정을 느끼고 있는가'를 추적하기 위한 고유 식별자(Unique ID)를 생성하는 데 사용
 import uuid
+# 분석된 결과를 실시간으로 저장하고 공유하는 캐시
 import redis
 
 # app이라는 이름으로 FastAPI 서버 객체를 생성
