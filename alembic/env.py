@@ -26,12 +26,12 @@ if config.config_file_name is not None:
 # target_metadata = mymodel.Base.metadata
 # .env 로드 (alembic 명령 실행 위치가 루트라는 가정)
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set. Check your .env")
+POSTGRES_CONNECTION_STRING = os.getenv("POSTGRES_CONNECTION_STRING")
+if not POSTGRES_CONNECTION_STRING:
+    raise RuntimeError("POSTGRES_CONNECTION_STRING is not set. Check your .env")
 
 # alembic.ini의 sqlalchemy.url 값을 런타임에 덮어쓰기
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+config.set_main_option("sqlalchemy.url", POSTGRES_CONNECTION_STRING)
 
 target_metadata = Base.metadata
 
