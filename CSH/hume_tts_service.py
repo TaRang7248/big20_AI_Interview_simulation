@@ -4,21 +4,129 @@ Hume AI TTS 서비스
 - 면접관의 음성을 자연스럽고 감정적으로 생성
 """
 
-import os
-import asyncio
-import base64
-import json
-import wave
-import io
-from typing import Optional, Callable, Dict, Any
-from dataclasses import dataclass
-from dotenv import load_dotenv
+# 외부 라이브러리 및 시스템 도구
+import os # 컴퓨터의 파일 경로, 환경 변수 등에 접근 (API 키 읽기용)
+import asyncio # 비동기 통신(실시간 대화)을 위한 필수 도구
+import base64 # 음성 데이터(바이너리)를 텍스트 형태로 변환하여 전송하기 위함
+import json # 데이터를 주고받을 때 쓰는 표준 형식(JSON) 처리
+import httpx # HTTP 클라이언트 (OAuth2 토큰 인증용)
 
-load_dotenv()
+# 오디오 처리 관련 도구
+import wave # .wav 파일을 만들거나 읽는 등 오디오 파일 형식 처리
+import io # 메모리 상에서 데이터를 파일처럼 다루게 해주는 도구 (임시 저장소)
+
+# 타입 힌트와 데이터 구조 (가독성 향상)
+from typing import Optional, Callable, Dict, Any # 코드의 안정성을 위해 타입을 명시
+from dataclasses import dataclass # 간단한 데이터 보관용 클래스를 만들기 위함
+
+# 환경 변수 관리
+from dotenv import load_dotenv # .env 파일에서 API Key를 불러오는 도구
+
+load_dotenv() # 프로젝트 폴더 안에 있는 .env 파일을 찾아 그 안에 적힌 설정값들을 컴퓨터의 환경 변수로 등록해주는 함수
 
 # Hume AI API 키 설정
 HUME_API_KEY = os.getenv("HUME_API_KEY")
+HUME_SECRET_KEY = os.getenv("HUME_SECRET_KEY")  # OAuth2 인증용 Secret Key
 HUME_CONFIG_ID = os.getenv("HUME_CONFIG_ID")  # EVI 설정 ID (선택사항)
+
+# 토큰 캐싱용 전역 변수
+_cached_access_token: Optional[str] = None
+_token_expires_at: float = 0
+
+
+def get_hume_access_token() -> Optional[str]:
+    """
+    Hume AI OAuth2 토큰 인증
+    
+    API_KEY와 SECRET_KEY를 사용하여 액세스 토큰을 획득합니다.
+    토큰은 캐싱되어 재사용됩니다.
+    
+    Returns:
+        액세스 토큰 또는 None (인증 실패 시)
+    """
+    global _cached_access_token, _token_expires_at
+    import time
+    
+    # 캐시된 토큰이 유효한지 확인 (만료 5분 전에 갱신)
+    if _cached_access_token and time.time() < _token_expires_at - 300:
+        return _cached_access_token
+    
+    if not HUME_API_KEY or not HUME_SECRET_KEY:
+        print("⚠️ HUME_API_KEY 또는 HUME_SECRET_KEY가 설정되지 않았습니다.")
+        return None
+    
+    try:
+        # OAuth2 Client Credentials 인증
+        auth = f"{HUME_API_KEY}:{HUME_SECRET_KEY}"
+        encoded_auth = base64.b64encode(auth.encode()).decode()
+        
+        resp = httpx.request(
+            method="POST",
+            url="https://api.hume.ai/oauth2-cc/token",
+            headers={"Authorization": f"Basic {encoded_auth}"},
+            data={"grant_type": "client_credentials"},
+        )
+        
+        if resp.status_code == 200:
+            token_data = resp.json()
+            _cached_access_token = token_data.get('access_token')
+            # 토큰 만료 시간 설정 (기본 1시간, expires_in이 있으면 사용)
+            expires_in = token_data.get('expires_in', 3600)
+            _token_expires_at = time.time() + expires_in
+            print("✅ Hume AI 토큰 인증 성공")
+            return _cached_access_token
+        else:
+            print(f"❌ Hume AI 토큰 인증 실패: {resp.status_code} - {resp.text}")
+            return None
+            
+    except Exception as e:
+        print(f"❌ Hume AI 토큰 인증 오류: {e}")
+        return None
+
+
+async def get_hume_access_token_async() -> Optional[str]:
+    """
+    Hume AI OAuth2 토큰 인증 (비동기 버전)
+    
+    Returns:
+        액세스 토큰 또는 None (인증 실패 시)
+    """
+    global _cached_access_token, _token_expires_at
+    import time
+    
+    # 캐시된 토큰이 유효한지 확인
+    if _cached_access_token and time.time() < _token_expires_at - 300:
+        return _cached_access_token
+    
+    if not HUME_API_KEY or not HUME_SECRET_KEY:
+        print("⚠️ HUME_API_KEY 또는 HUME_SECRET_KEY가 설정되지 않았습니다.")
+        return None
+    
+    try:
+        auth = f"{HUME_API_KEY}:{HUME_SECRET_KEY}"
+        encoded_auth = base64.b64encode(auth.encode()).decode()
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url="https://api.hume.ai/oauth2-cc/token",
+                headers={"Authorization": f"Basic {encoded_auth}"},
+                data={"grant_type": "client_credentials"},
+            )
+            
+            if resp.status_code == 200:
+                token_data = resp.json()
+                _cached_access_token = token_data.get('access_token')
+                expires_in = token_data.get('expires_in', 3600)
+                _token_expires_at = time.time() + expires_in
+                print("✅ Hume AI 토큰 인증 성공 (async)")
+                return _cached_access_token
+            else:
+                print(f"❌ Hume AI 토큰 인증 실패: {resp.status_code} - {resp.text}")
+                return None
+                
+    except Exception as e:
+        print(f"❌ Hume AI 토큰 인증 오류: {e}")
+        return None
 
 
 @dataclass
@@ -122,35 +230,58 @@ class HumeTTSService:
     async def generate_speech_simple(
         self, 
         text: str,
-        output_file: Optional[str] = None
+        output_file: Optional[str] = None,
+        use_token_auth: bool = True
     ) -> Optional[str]:
         """
         간단한 TTS 생성 (REST API 사용)
         
         Hume AI의 TTS REST API를 사용하여 텍스트를 음성으로 변환
+        OAuth2 토큰 인증 또는 API 키 인증을 지원합니다.
         
         Args:
             text: 변환할 텍스트
             output_file: 저장할 파일 경로 (선택)
+            use_token_auth: True면 OAuth2 토큰 인증, False면 API 키 인증
             
         Returns:
             저장된 파일 경로 또는 None
         """
         import aiohttp
         
-        if not self.api_key:
-            print("❌ HUME_API_KEY가 필요합니다.")
-            return None
-        
         print(f"🔊 [Hume TTS] 음성 생성 중... (텍스트 길이: {len(text)})")
         
         # Hume AI TTS REST API 엔드포인트
         url = "https://api.hume.ai/v0/evi/tts"
         
-        headers = {
-            "X-Hume-Api-Key": self.api_key,
-            "Content-Type": "application/json"
-        }
+        # 인증 헤더 설정
+        if use_token_auth and HUME_SECRET_KEY:
+            # OAuth2 토큰 인증 사용
+            access_token = await get_hume_access_token_async()
+            if not access_token:
+                print("❌ 토큰 인증 실패, API 키 인증으로 폴백합니다.")
+                if not self.api_key:
+                    print("❌ HUME_API_KEY도 설정되지 않았습니다.")
+                    return None
+                headers = {
+                    "X-Hume-Api-Key": self.api_key,
+                    "Content-Type": "application/json"
+                }
+            else:
+                headers = {
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json"
+                }
+                print("🔐 토큰 인증 사용 중")
+        else:
+            # API 키 인증 사용
+            if not self.api_key:
+                print("❌ HUME_API_KEY가 필요합니다.")
+                return None
+            headers = {
+                "X-Hume-Api-Key": self.api_key,
+                "Content-Type": "application/json"
+            }
         
         payload = {
             "text": text,
@@ -318,12 +449,37 @@ def create_tts_router():
     @router.get("/status")
     async def status():
         """TTS 서비스 상태 확인"""
+        # 토큰 인증 가능 여부 확인
+        token_auth_available = bool(HUME_API_KEY and HUME_SECRET_KEY)
+        
         return {
             "service": "Hume AI TTS",
             "api_key_configured": bool(HUME_API_KEY),
+            "secret_key_configured": bool(HUME_SECRET_KEY),
+            "token_auth_available": token_auth_available,
             "config_id_configured": bool(HUME_CONFIG_ID),
-            "is_speaking": interviewer_voice.is_speaking
+            "is_speaking": interviewer_voice.is_speaking,
+            "auth_method": "OAuth2 Token" if token_auth_available else "API Key"
         }
+    
+    @router.get("/test-token")
+    async def test_token():
+        """OAuth2 토큰 인증 테스트"""
+        if not HUME_API_KEY or not HUME_SECRET_KEY:
+            raise HTTPException(
+                status_code=400, 
+                detail="HUME_API_KEY와 HUME_SECRET_KEY가 모두 필요합니다."
+            )
+        
+        token = await get_hume_access_token_async()
+        if token:
+            return {
+                "success": True,
+                "message": "토큰 인증 성공",
+                "token_preview": f"{token[:20]}..." if len(token) > 20 else token
+            }
+        else:
+            raise HTTPException(status_code=500, detail="토큰 인증 실패")
     
     return router
 
@@ -336,17 +492,32 @@ async def test_hume_tts():
     print("Hume AI TTS 테스트")
     print("=" * 50)
     
+    # 인증 정보 확인
+    print(f"\n📋 인증 정보:")
+    print(f"   - HUME_API_KEY: {'✅ 설정됨' if HUME_API_KEY else '❌ 없음'}")
+    print(f"   - HUME_SECRET_KEY: {'✅ 설정됨' if HUME_SECRET_KEY else '❌ 없음'}")
+    
     if not HUME_API_KEY:
-        print("❌ HUME_API_KEY가 설정되지 않았습니다.")
+        print("\n❌ HUME_API_KEY가 설정되지 않았습니다.")
         print("   .env 파일에 다음을 추가하세요:")
         print("   HUME_API_KEY=your_api_key_here")
+        print("   HUME_SECRET_KEY=your_secret_key_here")
         return
+    
+    # 토큰 인증 테스트
+    if HUME_SECRET_KEY:
+        print("\n🔐 OAuth2 토큰 인증 테스트...")
+        token = await get_hume_access_token_async()
+        if token:
+            print(f"   ✅ 토큰 획득 성공: {token[:20]}...")
+        else:
+            print("   ❌ 토큰 획득 실패")
     
     interviewer = HumeInterviewerVoice()
     
     # 테스트 질문
     test_text = "자기소개를 해주시겠습니까?"
-    print(f"\n테스트 텍스트: {test_text}")
+    print(f"\n🎤 테스트 텍스트: {test_text}")
     
     result = await interviewer.speak_question(test_text)
     
