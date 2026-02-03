@@ -522,6 +522,79 @@
       }
     }
     
+    // ========== Hume AI TTS 기능 ==========
+    let audioContext = null;
+    let currentAudio = null;
+    
+    // TTS 상태 확인
+    async function checkTTSStatus() {
+      try {
+        const resp = await fetch('/tts/status');
+        const status = await resp.json();
+        if (status.api_key_configured) {
+          log('✅ Hume AI TTS 서비스 활성화됨');
+        } else {
+          log('⚠️ Hume AI TTS: API 키 미설정 (음성 기능 제한)');
+        }
+        return status;
+      } catch (e) {
+        log('⚠️ TTS 서비스 연결 불가');
+        return null;
+      }
+    }
+    
+    // TTS로 면접관 음성 재생
+    async function speakText(text, emotion = 'neutral') {
+      try {
+        setInterviewerSpeaking(true);
+        log(`🎤 면접관: "${text.substring(0, 30)}..."`);
+        
+        const resp = await fetch('/tts/speak', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, emotion })
+        });
+        
+        if (resp.ok) {
+          const audioBlob = await resp.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          
+          // 이전 오디오 정지
+          if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+          }
+          
+          // 새 오디오 재생
+          currentAudio = new Audio(audioUrl);
+          currentAudio.onended = () => {
+            setInterviewerSpeaking(false);
+            URL.revokeObjectURL(audioUrl);
+          };
+          currentAudio.onerror = () => {
+            setInterviewerSpeaking(false);
+            log('❌ 오디오 재생 오류');
+          };
+          
+          await currentAudio.play();
+        } else {
+          // TTS 실패 시 애니메이션만 표시
+          setTimeout(() => setInterviewerSpeaking(false), 2000);
+        }
+      } catch (e) {
+        console.error('TTS Error:', e);
+        // 폴백: TTS 없이 애니메이션만
+        setTimeout(() => setInterviewerSpeaking(false), 2000);
+      }
+    }
+    
+    // 면접 질문 음성으로 읽기
+    async function askQuestion(questionText) {
+      document.getElementById('questionText').textContent = questionText;
+      document.getElementById('questionBox').classList.add('active');
+      await speakText(questionText, 'professional');
+    }
+    
     // ========== WebRTC 및 면접 로직 ==========
     const log = (msg) => {
       const box = document.getElementById('logs');
@@ -598,11 +671,9 @@
         
         updateStatus(true);
         document.getElementById('questionBox').classList.add('active');
-        document.getElementById('questionText').textContent = '자기소개를 해주세요.';
         
-        // 면접관 인사 애니메이션
-        setInterviewerSpeaking(true);
-        setTimeout(() => setInterviewerSpeaking(false), 3000);
+        // 면접관 인사 (TTS 사용)
+        await askQuestion('안녕하세요. 오늘 면접을 진행하게 된 AI 면접관입니다. 먼저 간단한 자기소개를 부탁드립니다.');
         
         const dashboardLink = document.getElementById('dashboardLink');
         dashboardLink.href = '/static/dashboard.html?session_id=' + window.sessionId;
@@ -639,8 +710,11 @@
     document.getElementById('startBtn').onclick = start;
     document.getElementById('stopBtn').onclick = stop;
     
-    // 초기 로그
-    log('시스템 준비 완료. 면접 시작 버튼을 클릭하세요.');
+    // 초기화: TTS 상태 확인 및 로그
+    (async function init() {
+      log('시스템 준비 완료. 면접 시작 버튼을 클릭하세요.');
+      await checkTTSStatus();
+    })();
   </script>
 </body>
 </html>
