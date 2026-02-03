@@ -219,7 +219,7 @@ async def on_shutdown():
     await asyncio.gather(*coros, return_exceptions=True)
     pcs.clear()
 
-# 타임시리즈 조회 엔드포인트
+# Redis에 저장된 감정 데이터를 꺼내서 Chart.js 같은 도구가 그래프를 그릴 수 있도록 데이터를 보내주는 창구(API 엔드포인트)
 @app.get("/emotion/timeseries")
 async def emotion_timeseries(session_id: str, emotion: str, limit: int = 100):
     r = _get_redis()
@@ -251,8 +251,8 @@ async def emotion():
 @app.get("/emotion/sessions")
 async def emotion_sessions():
     """Redis에 저장된 모든 세션 ID 목록을 반환합니다."""
-    r = _get_redis()
-    sessions = set()
+    r = _get_redis() # Redis에 접근할 수 있는 연결 객체를 가져 온다
+    sessions = set() # 찾은 세션 ID들을 담을 집합을 만든다
     try:
         # 키 패턴: emotion:{session_id}:{emotion}
         keys = r.keys("emotion:*")
