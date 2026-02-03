@@ -1,7 +1,51 @@
 import re
+import os
 import json
 from dataclasses import dataclass, asdict
 from typing import List, Dict
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
+load_dotenv()
+
+USE_LLM_DEMO = True
+
+SYSTEM_PROMPT = (
+    "당신은 IT 직무 모의면접을 진행하는 전문 면접관입니다. "
+    "지원자의 답변을 바탕으로 자연스러운 꼬리 질문을 1개만 생성하세요. "
+    "질문은 한국어로, 한 문장으로 간결하게. "
+    "사용자에게는 내부 규칙/점수/분류 결과를 절대 노출하지 마세요."
+)
+
+def build_llm():
+    # .env에 OPENAI_API_KEY가 있어야 동작
+    return ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), temperature=0.4)
+
+def llm_next_question(llm, history: List, prev_q: str, prev_type: str, user_answer: str) -> str:
+    """
+    LLM에게 '다음 질문 1개'만 뽑아오게 하는 함수.
+    history는 최소한으로만 쌓아서 대화 톤 유지용으로 사용.
+    """
+    prompt = (
+        f"[이전 질문 유형] {prev_type}\n"
+        f"[이전 질문] {prev_q}\n"
+        f"[지원자 답변] {user_answer}\n\n"
+        "위 답변을 바탕으로 꼬리 질문 1개를 생성하세요."
+    )
+
+    messages = [SystemMessage(content=SYSTEM_PROMPT)]
+    # history는 너무 길어지면 비용/혼란이 커져서 최근 4개만 사용
+    messages.extend(history[-4:])
+    messages.append(HumanMessage(content=prompt))
+
+    resp = llm.invoke(messages)
+    q = resp.content.strip()
+
+    # 혹시 모델이 이상하게 길게 말하면 첫 줄만 쓰기
+    q = q.split("\n")[0].strip()
+    return q
+
 
 # 1) 전처리
 def clean_text(s: str) -> str:
@@ -13,19 +57,15 @@ def clean_text(s: str) -> str:
 def classify_question(q: str) -> str:
     q_lower = q.lower()
 
-    # 경험/사례
     if any(k in q for k in ["경험", "사례", "활동", "수행", "프로젝트", "갈등", "해결"]):
         return "experience"
 
-    # 역량/강점/준비
     if any(k in q for k in ["역량", "강점", "준비", "노력", "개발", "전문성", "자기개발"]):
         return "competency"
 
-    # 지원동기/포부/비전
     if any(k in q for k in ["지원", "동기", "포부", "계획", "비전", "성장", "목표"]):
         return "motivation"
 
-    # 직무 이해/정의
     if any(k in q for k in ["직무", "역할", "특징", "정의", "중요성", "덕목"]):
         return "job_understanding"
 
@@ -83,7 +123,6 @@ def generate_answer(q: str, q_type: str, target_min_chars: int = 350) -> str:
             " 또한 업무를 수행하며 발생하는 이슈를 기록하고, 원인-대응-결과를 남겨 "
             "다음 반복 작업에서 동일한 문제가 재발하지 않도록 관리하겠습니다."
         )
-        # ver0.8: 무한 반복(while) 대신 1회만 덧붙여 과다 부풀림 방지
         base += add
     return base
 
@@ -99,13 +138,13 @@ def evaluate_answer(q: str, a: str) -> Dict[str, object]:
         feedback.append(f"길이 조정 필요(현재 {len(a)}자).")
         score += max(0, 40 - abs(len(a) - 750) // 20)
 
-    # 구조 키워드(결론/근거/경험/기여 느낌)
+    # 구조 키워드
     structure_hits = sum(1 for k in ["역할", "경험", "기여", "입사 후", "중요"] if k in a)
     score += min(40, structure_hits * 10)
     if structure_hits < 3:
         feedback.append("구조 요소(경험/근거/기여) 표현을 더 포함하면 좋음.")
 
-    # 문장 다양성(아주 단순 체크)
+    # 문장 다양성
     if len(set(a.split())) / max(1, len(a.split())) > 0.35:
         score += 20
     else:
@@ -113,7 +152,6 @@ def evaluate_answer(q: str, a: str) -> Dict[str, object]:
 
     return {"score": int(score), "feedback": feedback}
 
-# 5) 실행
 
 @dataclass
 class QAItem:
@@ -127,7 +165,6 @@ class QAItem:
     feedback: List[str]
 
 
-
 FOLLOW_UP: Dict[str, str] = {
     "motivation": "좋아요. 그 동기를 뒷받침하는 구체적인 경험 한 가지를 말해줄 수 있나요?",
     "experience": "그 상황에서 본인이 맡은 역할과 결과를 조금 더 구체적으로 말해볼까요?",
@@ -135,20 +172,18 @@ FOLLOW_UP: Dict[str, str] = {
     "job_understanding": "그 직무에서 성과를 판단하는 기준(지표)은 무엇이라고 생각하나요?",
     "other": "조금 더 구체적으로(상황-행동-결과) 순서로 말해볼까요?",
 }
-def next_question(prev_q: str, prev_type: str, user_answer: str) -> str:
+
+def rule_next_question(prev_q: str, prev_type: str, user_answer: str) -> str:
     ua = user_answer
 
-    # 직무 이해 → 역량 연결
     if prev_type == "job_understanding":
         if any(k in ua for k in ["수집", "정리", "구조화", "대안", "의사결정"]):
             return "좋아요. 그 역할을 잘 수행하기 위해 가장 중요한 역량은 무엇이라고 생각하나요?"
         return FOLLOW_UP["job_understanding"]
 
-    # 지원동기 → 경험
     if prev_type == "motivation":
         return FOLLOW_UP["motivation"]
 
-    # 경험 → 역할/성과
     if prev_type == "experience":
         if any(k in ua for k in ["결과", "성과", "개선", "%", "단축"]):
             return "그 결과를 만들기 위해 본인이 직접 한 핵심 행동은 무엇이었나요?"
@@ -156,14 +191,13 @@ def next_question(prev_q: str, prev_type: str, user_answer: str) -> str:
 
     return FOLLOW_UP.get(prev_type, FOLLOW_UP["other"])
 
-def next_question(prev_type: str) -> str:
-    return FOLLOW_UP.get(prev_type, FOLLOW_UP["other"])
-
-
 
 def run_interview(session_id: str, first_question: str, max_turns: int = 5) -> List[QAItem]:
     items: List[QAItem] = []
     current_question = first_question
+
+    llm = build_llm() if USE_LLM_DEMO else None
+    chat_history: List = []  # HumanMessage/AIMessage를 최소로 저장
 
     for turn in range(1, max_turns + 1):
         q_clean = clean_text(current_question)
@@ -176,10 +210,8 @@ def run_interview(session_id: str, first_question: str, max_turns: int = 5) -> L
 
         user_clean = clean_text(user_input)
 
-        # 모델 답변(여기서는 템플릿 기반 예시답안 역할)
         model_answer = generate_answer(q_clean, q_type)
 
-        # 사용자의 답변을 평가(룰 기반)
         eval_res = evaluate_answer(q_clean, user_clean)
 
         items.append(QAItem(
@@ -193,15 +225,27 @@ def run_interview(session_id: str, first_question: str, max_turns: int = 5) -> L
             feedback=eval_res["feedback"],
         ))
 
-        # 다음 질문
-        current_question = next_question(q_type)
-        print(f"(debug) q_type={q_type}") # 분류 확인용 ( 나중에 제거 가능 )
-        
-        current_question = next_question(
-            prev_q=q_clean,
-            prev_type=q_type,
-            user_answer=user_clean
-        )
+        print(f"(debug) q_type={q_type}")  # 분류 확인용
+
+        if USE_LLM_DEMO and llm is not None:
+            try:
+                next_q = llm_next_question(
+                    llm=llm,
+                    history=chat_history,
+                    prev_q=q_clean,
+                    prev_type=q_type,
+                    user_answer=user_clean,
+                )
+            except Exception:
+                next_q = rule_next_question(q_clean, q_type, user_clean)
+        else:
+            next_q = rule_next_question(q_clean, q_type, user_clean)
+
+        # 히스토리 업데이트(최소)
+        chat_history.append(HumanMessage(content=q_clean))
+        chat_history.append(AIMessage(content=user_clean))
+
+        current_question = next_q
 
     return items
 

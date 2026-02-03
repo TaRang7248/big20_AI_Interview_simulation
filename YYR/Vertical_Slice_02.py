@@ -1,7 +1,15 @@
 import re
+import os
 import json
 from dataclasses import dataclass, asdict
 from typing import List, Dict
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+
+load_dotenv()
+
+USE_LLM_DEMO = True
 
 # 1) 전처리
 def clean_text(s: str) -> str:
@@ -85,7 +93,7 @@ def generate_answer(q: str, q_type: str, target_min_chars: int = 350) -> str:
         )
         # ver0.8: 무한 반복(while) 대신 1회만 덧붙여 과다 부풀림 방지
         base += add
-    return base
+    return base        
 
 # 4) 평가(정답 없이 가능한 평가)
 def evaluate_answer(q: str, a: str) -> Dict[str, object]:
