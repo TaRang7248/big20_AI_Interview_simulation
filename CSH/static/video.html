@@ -2,56 +2,542 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>AI Interview - Video</title>
+  <title>AI Interview - 화상 면접</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
-    video { width: 45%; max-width: 560px; background: #000; margin-right: 16px; }
-    .row { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-    #logs { margin-top: 12px; font-size: 14px; white-space: pre-wrap; background: #f7f7f7; padding: 8px; border-radius: 6px; }
-    button { padding: 8px 12px; margin-right: 8px; }
-    .dashboard-link { 
-      display: inline-block; 
-      margin-top: 12px; 
-      padding: 10px 16px; 
-      background: linear-gradient(90deg, #00d9ff, #00ff88); 
-      color: #1a1a2e; 
-      text-decoration: none; 
-      border-radius: 8px; 
-      font-weight: 600;
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #fff;
     }
-    .dashboard-link:hover { opacity: 0.9; }
+    
+    .header {
+      background: rgba(0,0,0,0.3);
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      backdrop-filter: blur(10px);
+    }
+    .header h1 {
+      font-size: 24px;
+      background: linear-gradient(90deg, #00d9ff, #00ff88);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .header .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #666;
+      animation: pulse 2s infinite;
+    }
+    .status-dot.connected { background: #00ff88; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .main-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      padding: 24px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    
+    .video-panel {
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .panel-header {
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.3);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel-header .icon { font-size: 20px; }
+    
+    /* 면접관 아바타 패널 */
+    #avatarContainer {
+      width: 100%;
+      height: 400px;
+      background: linear-gradient(180deg, #1e3a5f 0%, #0d1b2a 100%);
+      position: relative;
+    }
+    #avatarCanvas {
+      width: 100%;
+      height: 100%;
+    }
+    .avatar-name {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(0,0,0,0.6);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      backdrop-filter: blur(5px);
+    }
+    .avatar-speaking {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(0, 217, 255, 0.3);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      display: none;
+      animation: speaking 1s infinite;
+    }
+    .avatar-speaking.active { display: block; }
+    @keyframes speaking {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.7; transform: scale(1.05); }
+    }
+    
+    /* 내 카메라 */
+    #localVideo {
+      width: 100%;
+      height: 400px;
+      object-fit: cover;
+      background: #000;
+    }
+    
+    /* 컨트롤 패널 */
+    .control-panel {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      padding: 20px;
+    }
+    .btn {
+      padding: 14px 32px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-start {
+      background: linear-gradient(135deg, #00d9ff, #00ff88);
+      color: #1a1a2e;
+    }
+    .btn-start:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,217,255,0.4); }
+    .btn-stop {
+      background: linear-gradient(135deg, #ff4757, #ff6b81);
+      color: #fff;
+    }
+    .btn-stop:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(255,71,87,0.4); }
+    .btn-dashboard {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.2);
+      text-decoration: none;
+    }
+    .btn-dashboard:hover { background: rgba(255,255,255,0.2); }
+    
+    /* 정보 패널 */
+    .info-panel {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    .info-box {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .info-box h3 {
+      margin-bottom: 12px;
+      font-size: 14px;
+      color: #00d9ff;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    /* 감정 분석 박스 */
+    #emotionBox {
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .emotion-bar {
+      display: flex;
+      align-items: center;
+      margin: 8px 0;
+    }
+    .emotion-label {
+      width: 60px;
+      font-size: 13px;
+    }
+    .emotion-progress {
+      flex: 1;
+      height: 8px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 0 12px;
+    }
+    .emotion-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    .emotion-value {
+      width: 40px;
+      text-align: right;
+      font-size: 12px;
+      color: #aaa;
+    }
+    
+    /* 로그 박스 */
+    #logs {
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: #aaa;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    #logs::-webkit-scrollbar { width: 6px; }
+    #logs::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+    
+    /* 질문 표시 영역 */
+    .question-box {
+      grid-column: 1 / -1;
+      background: rgba(0, 217, 255, 0.1);
+      border: 1px solid rgba(0, 217, 255, 0.3);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      display: none;
+    }
+    .question-box.active { display: block; }
+    .question-box h3 { color: #00d9ff; margin-bottom: 12px; }
+    .question-text { font-size: 18px; line-height: 1.6; }
   </style>
 </head>
 <body>
-  <h2>화상 면접 (프리뷰)</h2>
-  <div class="row">
-    <div>
-      <div>내 카메라</div>
+  <header class="header">
+    <h1>🎯 AI 모의면접 시스템</h1>
+    <div class="status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">대기 중</span>
+    </div>
+  </header>
+
+  <div class="main-container">
+    <!-- 면접관 아바타 -->
+    <div class="video-panel">
+      <div class="panel-header">
+        <span class="icon">🤖</span>
+        <span>AI 면접관</span>
+      </div>
+      <div id="avatarContainer">
+        <canvas id="avatarCanvas"></canvas>
+        <div class="avatar-name">👔 면접관 AI</div>
+        <div class="avatar-speaking" id="speakingIndicator">🎤 말하는 중...</div>
+      </div>
+    </div>
+
+    <!-- 내 카메라 -->
+    <div class="video-panel">
+      <div class="panel-header">
+        <span class="icon">👤</span>
+        <span>나의 화면</span>
+      </div>
       <video id="localVideo" autoplay playsinline muted></video>
     </div>
-    <div>
-      <div>서버 반환(에코) 비디오</div>
-      <video id="remoteVideo" autoplay playsinline></video>
+
+    <!-- 현재 질문 표시 -->
+    <div class="question-box" id="questionBox">
+      <h3>📝 현재 질문</h3>
+      <p class="question-text" id="questionText">면접을 시작하면 질문이 표시됩니다.</p>
+    </div>
+
+    <!-- 컨트롤 버튼 -->
+    <div class="control-panel">
+      <button class="btn btn-start" id="startBtn">
+        <span>▶</span> 면접 시작
+      </button>
+      <button class="btn btn-stop" id="stopBtn">
+        <span>⏹</span> 종료
+      </button>
+      <a class="btn btn-dashboard" id="dashboardLink" href="/static/dashboard.html" target="_blank">
+        <span>📊</span> 감정 분석 대시보드
+      </a>
+    </div>
+
+    <!-- 정보 패널 -->
+    <div class="info-panel">
+      <div class="info-box">
+        <h3>📈 실시간 감정 분석</h3>
+        <div id="emotionBox">
+          <div class="emotion-bar">
+            <span class="emotion-label">행복</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-happy" style="width:0%;background:#00ff88;"></div></div>
+            <span class="emotion-value" id="val-happy">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">중립</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-neutral" style="width:0%;background:#888;"></div></div>
+            <span class="emotion-value" id="val-neutral">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">슬픔</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-sad" style="width:0%;background:#5a9fd4;"></div></div>
+            <span class="emotion-value" id="val-sad">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">분노</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-angry" style="width:0%;background:#ff4757;"></div></div>
+            <span class="emotion-value" id="val-angry">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">놀람</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-surprise" style="width:0%;background:#ffa502;"></div></div>
+            <span class="emotion-value" id="val-surprise">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">공포</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-fear" style="width:0%;background:#a55eea;"></div></div>
+            <span class="emotion-value" id="val-fear">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">혐오</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-disgust" style="width:0%;background:#2ed573;"></div></div>
+            <span class="emotion-value" id="val-disgust">0%</span>
+          </div>
+        </div>
+      </div>
+      <div class="info-box">
+        <h3>📋 시스템 로그</h3>
+        <div id="logs"></div>
+      </div>
     </div>
   </div>
-  <div style="margin-top:12px;">
-    <button id="startBtn">면접 시작</button>
-    <button id="stopBtn">종료</button>
-    <a id="dashboardLink" class="dashboard-link" href="/static/dashboard.html" target="_blank">📊 감정 분석 대시보드</a>
-  </div>
-  <div id="logs"></div>
-  <div id="emotionBox" style="margin-top:12px;font-size:16px;"></div>
 
   <script>
+    // ========== 3D 아바타 설정 ==========
+    let scene, camera, renderer, avatar, mixer;
+    let clock = new THREE.Clock();
+    
+    function initAvatar() {
+      const container = document.getElementById('avatarContainer');
+      const canvas = document.getElementById('avatarCanvas');
+      
+      // Scene 설정
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0d1b2a);
+      
+      // Camera 설정
+      camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 1000);
+      camera.position.set(0, 1.5, 2.5);
+      camera.lookAt(0, 1, 0);
+      
+      // Renderer 설정
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.shadowMap.enabled = true;
+      
+      // 조명
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+      scene.add(ambientLight);
+      
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      directionalLight.position.set(2, 3, 2);
+      directionalLight.castShadow = true;
+      scene.add(directionalLight);
+      
+      const pointLight = new THREE.PointLight(0x00d9ff, 0.5, 10);
+      pointLight.position.set(-2, 2, 2);
+      scene.add(pointLight);
+      
+      // 간단한 3D 아바타 (기하학적 형태로 구성)
+      createSimpleAvatar();
+      
+      // 애니메이션 루프
+      animate();
+      
+      // 리사이즈 핸들러
+      window.addEventListener('resize', onWindowResize);
+    }
+    
+    function createSimpleAvatar() {
+      const avatarGroup = new THREE.Group();
+      
+      // 몸통 (정장)
+      const bodyGeometry = new THREE.CylinderGeometry(0.3, 0.4, 0.8, 32);
+      const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0x1a1a2e });
+      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+      body.position.y = 0.4;
+      avatarGroup.add(body);
+      
+      // 넥타이
+      const tieGeometry = new THREE.BoxGeometry(0.08, 0.4, 0.05);
+      const tieMaterial = new THREE.MeshPhongMaterial({ color: 0x00d9ff });
+      const tie = new THREE.Mesh(tieGeometry, tieMaterial);
+      tie.position.set(0, 0.5, 0.25);
+      avatarGroup.add(tie);
+      
+      // 머리
+      const headGeometry = new THREE.SphereGeometry(0.25, 32, 32);
+      const headMaterial = new THREE.MeshPhongMaterial({ color: 0xffdbac });
+      const head = new THREE.Mesh(headGeometry, headMaterial);
+      head.position.y = 1.1;
+      avatarGroup.add(head);
+      
+      // 머리카락
+      const hairGeometry = new THREE.SphereGeometry(0.26, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+      const hairMaterial = new THREE.MeshPhongMaterial({ color: 0x2d2d2d });
+      const hair = new THREE.Mesh(hairGeometry, hairMaterial);
+      hair.position.y = 1.15;
+      avatarGroup.add(hair);
+      
+      // 눈
+      const eyeGeometry = new THREE.SphereGeometry(0.04, 16, 16);
+      const eyeMaterial = new THREE.MeshPhongMaterial({ color: 0x2d2d2d });
+      const leftEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+      leftEye.position.set(-0.08, 1.12, 0.2);
+      avatarGroup.add(leftEye);
+      
+      const rightEye = new THREE.Mesh(eyeGeometry, eyeMaterial);
+      rightEye.position.set(0.08, 1.12, 0.2);
+      avatarGroup.add(rightEye);
+      
+      // 눈동자
+      const pupilGeometry = new THREE.SphereGeometry(0.02, 16, 16);
+      const pupilMaterial = new THREE.MeshPhongMaterial({ color: 0x000000 });
+      const leftPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+      leftPupil.position.set(-0.08, 1.12, 0.24);
+      avatarGroup.add(leftPupil);
+      
+      const rightPupil = new THREE.Mesh(pupilGeometry, pupilMaterial);
+      rightPupil.position.set(0.08, 1.12, 0.24);
+      avatarGroup.add(rightPupil);
+      
+      // 입
+      const mouthGeometry = new THREE.TorusGeometry(0.05, 0.015, 8, 16, Math.PI);
+      const mouthMaterial = new THREE.MeshPhongMaterial({ color: 0xcc6666 });
+      const mouth = new THREE.Mesh(mouthGeometry, mouthMaterial);
+      mouth.position.set(0, 1.0, 0.2);
+      mouth.rotation.x = Math.PI;
+      mouth.rotation.z = Math.PI;
+      avatarGroup.add(mouth);
+      
+      // 어깨
+      const shoulderGeometry = new THREE.BoxGeometry(0.8, 0.15, 0.3);
+      const shoulderMaterial = new THREE.MeshPhongMaterial({ color: 0x1a1a2e });
+      const shoulders = new THREE.Mesh(shoulderGeometry, shoulderMaterial);
+      shoulders.position.y = 0.75;
+      avatarGroup.add(shoulders);
+      
+      // 목
+      const neckGeometry = new THREE.CylinderGeometry(0.08, 0.1, 0.15, 32);
+      const neckMaterial = new THREE.MeshPhongMaterial({ color: 0xffdbac });
+      const neck = new THREE.Mesh(neckGeometry, neckMaterial);
+      neck.position.y = 0.88;
+      avatarGroup.add(neck);
+      
+      // 셔츠 칼라
+      const collarGeometry = new THREE.BoxGeometry(0.25, 0.08, 0.2);
+      const collarMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff });
+      const collar = new THREE.Mesh(collarGeometry, collarMaterial);
+      collar.position.set(0, 0.78, 0.12);
+      avatarGroup.add(collar);
+      
+      avatarGroup.position.y = -0.5;
+      scene.add(avatarGroup);
+      avatar = avatarGroup;
+    }
+    
+    function animate() {
+      requestAnimationFrame(animate);
+      
+      // 아바타 미세한 움직임 (숨쉬기 효과)
+      if (avatar) {
+        const time = clock.getElapsedTime();
+        avatar.position.y = -0.5 + Math.sin(time * 2) * 0.02;
+        avatar.rotation.y = Math.sin(time * 0.5) * 0.1;
+      }
+      
+      renderer.render(scene, camera);
+    }
+    
+    function onWindowResize() {
+      const container = document.getElementById('avatarContainer');
+      camera.aspect = container.clientWidth / container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+    
+    // 아바타가 말할 때 애니메이션
+    function setAvatarSpeaking(isSpeaking) {
+      const indicator = document.getElementById('speakingIndicator');
+      if (isSpeaking) {
+        indicator.classList.add('active');
+      } else {
+        indicator.classList.remove('active');
+      }
+    }
+    
+    // ========== WebRTC 및 면접 로직 ==========
     const log = (msg) => {
       const box = document.getElementById('logs');
       const time = new Date().toLocaleTimeString();
       box.textContent += `[${time}] ${msg}\n`;
+      box.scrollTop = box.scrollHeight;
     };
 
     let pc;
     let localStream;
     let emotionTimer;
+
+    function updateStatus(connected) {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (connected) {
+        dot.classList.add('connected');
+        text.textContent = '면접 진행 중';
+      } else {
+        dot.classList.remove('connected');
+        text.textContent = '대기 중';
+      }
+    }
+    
+    function updateEmotionBars(probabilities) {
+      const emotions = ['happy', 'neutral', 'sad', 'angry', 'surprise', 'fear', 'disgust'];
+      emotions.forEach(emotion => {
+        const value = Math.round((probabilities[emotion] || 0) * 100);
+        const bar = document.getElementById(`bar-${emotion}`);
+        const val = document.getElementById(`val-${emotion}`);
+        if (bar) bar.style.width = value + '%';
+        if (val) val.textContent = value + '%';
+      });
+    }
 
     async function start() {
       try {
@@ -60,12 +546,16 @@
           audio: { echoCancellation: true, noiseSuppression: true }
         });
         document.getElementById('localVideo').srcObject = localStream;
+        log('카메라 및 마이크 연결됨');
 
         pc = new RTCPeerConnection();
         pc.ontrack = (e) => {
-          document.getElementById('remoteVideo').srcObject = e.streams[0];
+          log('원격 트랙 수신');
         };
-        pc.onconnectionstatechange = () => log(`PC state: ${pc.connectionState}`);
+        pc.onconnectionstatechange = () => {
+          log(`연결 상태: ${pc.connectionState}`);
+          updateStatus(pc.connectionState === 'connected');
+        };
 
         localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
 
@@ -77,31 +567,37 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
         });
+        
+        if (!resp.ok) {
+          const errorText = await resp.text();
+          throw new Error(`서버 오류: ${errorText}`);
+        }
+        
         const answer = await resp.json();
         window.sessionId = answer.session_id;
         await pc.setRemoteDescription(answer);
-        log('WebRTC 연결이 설정되었습니다. 세션ID: ' + (window.sessionId || 'N/A'));
+        log('WebRTC 연결 완료. 세션ID: ' + (window.sessionId || 'N/A'));
         
-        // 대시보드 링크에 세션 ID 추가
+        updateStatus(true);
+        document.getElementById('questionBox').classList.add('active');
+        document.getElementById('questionText').textContent = '자기소개를 해주세요.';
+        setAvatarSpeaking(true);
+        setTimeout(() => setAvatarSpeaking(false), 3000);
+        
         const dashboardLink = document.getElementById('dashboardLink');
         dashboardLink.href = '/static/dashboard.html?session_id=' + window.sessionId;
       } catch (err) {
         log('오류: ' + err);
       }
+      
       // 감정 폴링 시작
       if (!emotionTimer) {
         emotionTimer = setInterval(async () => {
           try {
             const r = await fetch('/emotion');
             const j = await r.json();
-            if (j.status !== 'no_data') {
-              const p = j.probabilities || {};
-              const lines = [
-                `현재 감정: ${j.dominant_emotion ?? 'N/A'}`,
-                `행복: ${(p.happy ?? 0)*100|0}%  슬픔: ${(p.sad ?? 0)*100|0}%  분노: ${(p.angry ?? 0)*100|0}%`,
-                `놀람: ${(p.surprise ?? 0)*100|0}%  공포: ${(p.fear ?? 0)*100|0}%  혐오: ${(p.disgust ?? 0)*100|0}%  중립: ${(p.neutral ?? 0)*100|0}%`
-              ];
-              document.getElementById('emotionBox').textContent = lines.join('\n');
+            if (j.status !== 'no_data' && j.probabilities) {
+              updateEmotionBars(j.probabilities);
             }
           } catch (e) {}
         }, 1000);
@@ -113,12 +609,17 @@
         if (pc) pc.close();
         if (localStream) localStream.getTracks().forEach(t => t.stop());
         if (emotionTimer) { clearInterval(emotionTimer); emotionTimer = null; }
-        log('연결 종료.');
+        updateStatus(false);
+        document.getElementById('questionBox').classList.remove('active');
+        log('면접 종료');
       } catch (e) { log('종료 오류: ' + e); }
     }
 
     document.getElementById('startBtn').onclick = start;
     document.getElementById('stopBtn').onclick = stop;
+    
+    // 페이지 로드 시 3D 아바타 초기화
+    window.addEventListener('load', initAvatar);
   </script>
 </body>
 </html>
