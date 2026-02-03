@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles # 이미지나 CSS 같은 변하지 
 from pydantic import BaseModel # 데이터의 형식을 미리 정해두고 검사하는 도구
 
 # WebRTC(실시간 통신) 관련 도구
-from aiortc import RTCPeerConnection # WebRTC의 핵심으로, 내 컴퓨터와 상대방 컴퓨터를 직접 연결하는 '통로'
+from aiortc import RTCPeerConnection, RTCSessionDescription # WebRTC의 핵심으로, 내 컴퓨터와 상대방 컴퓨터를 직접 연결하는 '통로'
 from aiortc.contrib.media import MediaBlackhole # 들어오는 미디어(영상/음성) 데이터를 기록하지 않고 그냥 '블랙홀'처럼 흡수해버리는 도구
 # 이미지 데이터가 NumPy 배열(ndarray)이기 때문에, 이를 다루기 위해 필요한 라이브러리
 import numpy as np
@@ -99,34 +99,41 @@ async def index() -> str:
 # 브라우저로부터 SDP offer를 받아 answer 생성
 @app.post("/offer")
 async def offer(offer: Offer):
-    pc = RTCPeerConnection()
-    pcs.add(pc)
-    session_id = uuid.uuid4().hex
-    pc_sessions[pc] = session_id
+    import traceback
+    try:
+        pc = RTCPeerConnection()
+        pcs.add(pc)
+        session_id = uuid.uuid4().hex
+        pc_sessions[pc] = session_id
 
-    @pc.on("iceconnectionstatechange")
-    async def on_ice_state_change():
-        if pc.iceConnectionState in ("failed", "closed", "disconnected"):
-            await pc.close()
-            pcs.discard(pc)
+        @pc.on("iceconnectionstatechange")
+        async def on_ice_state_change():
+            if pc.iceConnectionState in ("failed", "closed", "disconnected"):
+                await pc.close()
+                pcs.discard(pc)
 
-# 서버가 사용자의 영상/음성 신호를 받아서 어떻게 처리할지 결정하고, 최종적으로 연결을 확정 짓는 가장 중요한 로직
-    @pc.on("track")
-    async def on_track(track):
-        # Echo back only video to avoid audio feedback
-        if track.kind == "video":
-            pc.addTrack(track)
-            # 병렬로 감정 분석 태스크 실행
-            asyncio.create_task(_analyze_emotions(track, session_id))
-        else:
-            # Consume audio to keep the pipeline alive without echoing
-            bh = MediaBlackhole()
-            asyncio.create_task(_consume_audio(track, bh))
+    # 서버가 사용자의 영상/음성 신호를 받아서 어떻게 처리할지 결정하고, 최종적으로 연결을 확정 짓는 가장 중요한 로직
+        @pc.on("track")
+        async def on_track(track):
+            # Echo back only video to avoid audio feedback
+            if track.kind == "video":
+                pc.addTrack(track)
+                # 병렬로 감정 분석 태스크 실행
+                asyncio.create_task(_analyze_emotions(track, session_id))
+            else:
+                # Consume audio to keep the pipeline alive without echoing
+                bh = MediaBlackhole()
+                asyncio.create_task(_consume_audio(track, bh))
 
-    await pc.setRemoteDescription({"sdp": offer.sdp, "type": offer.type})
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-    return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "session_id": session_id}
+        await pc.setRemoteDescription(RTCSessionDescription(sdp=offer.sdp, type=offer.type))
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        return {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type, "session_id": session_id}
+    except Exception as e:
+        error_detail = traceback.format_exc()
+        print(f"[/offer ERROR] {error_detail}")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=500, content={"error": str(e), "detail": error_detail})
 
 
 async def _consume_audio(track, sink: MediaBlackhole):
