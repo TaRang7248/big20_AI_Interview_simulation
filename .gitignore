@@ -219,3 +219,6 @@ storage/
 # gitkeep
 !data/.gitkeep
 !modules/.gitkeep
+
+# 모든 mp3 파일 무시
+*.mp3
