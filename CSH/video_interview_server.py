@@ -25,6 +25,15 @@ import redis
 # app이라는 이름으로 FastAPI 서버 객체를 생성
 app = FastAPI(title="AI Interview - Video Server")
 
+# Hume TTS 라우터 추가
+try:
+    from hume_tts_service import create_tts_router
+    tts_router = create_tts_router()
+    app.include_router(tts_router)
+    print("✅ Hume TTS 서비스 활성화됨")
+except ImportError as e:
+    print(f"⚠️ Hume TTS 서비스 비활성화: {e}")
+
 # 내 컴퓨터 안에서 '정적 파일(이미지, CSS, 자바스크립트 등)이 담긴 폴더'의 위치를 찾는 줄
 static_dir = os.path.join(os.path.dirname(__file__), "static")
 # 방금 찾은 폴더를 외부에서 접속할 수 있게 연결해주는 설정
