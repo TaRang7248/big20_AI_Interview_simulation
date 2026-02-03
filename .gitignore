@@ -219,3 +219,6 @@ storage/
 # gitkeep
 !data/.gitkeep
 !modules/.gitkeep
+
+# mp3
+.mp3
