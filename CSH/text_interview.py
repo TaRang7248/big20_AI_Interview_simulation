@@ -20,6 +20,8 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 # SystemMessage: AI의 인격(페르소나)과 규칙을 부여하는 메시지
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
+import psycopg2
+
 # 프로젝트 루트에서 .env 파일을 찾기 위해 경로 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
@@ -32,11 +34,13 @@ def main(): # 프로그램의 메인 로직을 담는 함수
     print("AI 면접 시스템을 시작합니다")
 
     # 환경 변수를 사용해 데이터베이스 연결 정보를 안전하게 가져오고, 이를 바탕으로 RAG(검색 증강 생성) 시스템을 초기화
-    db_url = os.getenv("DATABASE_URL")
-    print(f"Connecting to Vector DB: {db_url} (Check .env if fails)")
+    CONNECTION_STRING = os.getenv("POSTGRES_CONNECTION_STRING")
+    
+    conn = psycopg2.connect(CONNECTION_STRING)
+    cur = conn.cursor()
     
     # 객체 초기화: 위에서 가져온 DB 주소를 ResumeRAG라는 클래스에 전달. 클래스 내부에서 DB 주소를 받아 PostgreSQL(PGVector)에 접속하고, 지원자의 이력서 데이터를 조회할 준비를 마친다.
-    rag = ResumeRAG(connection_string=db_url)
+    rag = ResumeRAG(connection_string=CONNECTION_STRING)
     
     # 이력서 파일 확인
     resume_path = os.path.join(current_dir, "resume.pdf")
