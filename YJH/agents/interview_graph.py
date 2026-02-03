@@ -1,34 +1,34 @@
 # (핵심) LangGraph 워크플로우 정의
 
+
 import os
+# [추가] 환경 변수 로드 라이브러리 임포트
+from dotenv import load_dotenv
+# [추가] .env 파일 즉시 로드 (이 코드가 llm 초기화보다 먼저 실행되어야 함)
+load_dotenv()
+
 from typing import Annotated, Literal, TypedDict, List
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, BaseMessage
-from langchain_core.pydantic_v1 import BaseModel, Field
+# [수정 1] pydantic에서 직접 import 합니다.
+from pydantic import BaseModel, Field 
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
+# [추가] 메모리 저장을 위한 체크포인터
+from langgraph.checkpoint.memory import MemorySaver 
+
+# RAG 체인 함수 임포트 (경로 주의)
 from YJH.chains.rag_chain import retrieve_interview_context
 
-# --- 1. 상태(State) 정의 ---
-# 면접의 전체 맥락을 저장하는 메모리 구조입니다.
-# state.py로 분리하는 것이 정석이지만, 이해를 위해 이곳에 포함합니다.
 
+# --- 1. 상태(State) 정의 ---
 class InterviewState(TypedDict):
-    # 대화 이력 (add_messages 리듀서를 통해 자동 append 됨)
     messages: Annotated[List[BaseMessage], add_messages]
-    
-    # 면접 진행 단계 (intro -> technical -> behavioral -> wrapup)
     phase: str
-    
-    # 현재 질문 횟수 (면접 길이 제어용)
     question_count: int
-    
-    # 현재 지원자의 답변에 대한 AI의 내부 평가 (꼬리질문 판단용)
     last_assessment: dict 
 
 # --- 2. 구조화된 출력(Structured Output) 정의 ---
-# LLM이 단순 텍스트가 아닌, 명확한 판단 데이터를 뱉도록 강제합니다. (REQ-F-006, 007 관련)
-
 class AnswerAssessment(BaseModel):
     """지원자 답변 평가 모델"""
     relevance: int = Field(description="답변이 질문 의도에 얼마나 부합하는지 (1-5점)")
@@ -39,109 +39,118 @@ class AnswerAssessment(BaseModel):
 
 # --- 3. 모델 초기화 ---
 llm = ChatOpenAI(
-    model="gpt-4o",  # 또는 gpt-3.5-turbo (비용 절감 시) / gpt-4o(적용)
+    model="gpt-4o",
     temperature=0.7
 )
 
 # --- 4. 노드(Node) 함수 정의 ---
 
 def node_analyze_answer(state: InterviewState):
-    """
-    지원자의 마지막 답변을 분석하는 노드입니다.
-    REQ-F-001(적응형 질문)을 위해 답변의 품질을 먼저 평가합니다.
-    """
+    """지원자의 답변을 분석하고 평가합니다."""
     messages = state["messages"]
-    last_message = messages[-1]
     
-    # 시스템 프롬프트: 답변 평가자 페르소나
+    # 시스템 메시지가 아닌, 최근 대화 내용(답변)이 있는지 확인
+    if not messages or isinstance(messages[-1], SystemMessage):
+        return {"last_assessment": {}}
+
     evaluator_prompt = SystemMessage(content="""
     당신은 15년 차 시니어 테크니컬 면접관입니다. 
     지원자의 답변을 듣고 기술적 정확성과 논리성을 냉철하게 평가하십시오.
     답변이 너무 짧거나 모호하면 'follow_up_needed'를 true로 설정하세요.
     """)
     
-    # 구조화된 출력 모드로 LLM 호출
     structured_llm = llm.with_structured_output(AnswerAssessment)
-    response = structured_llm.invoke([evaluator_prompt] + messages[-5:]) # 최근 5개 턴만 분석 (토큰 절약)
+    # 최근 5개 턴만 분석
+    response = structured_llm.invoke([evaluator_prompt] + messages[-5:]) 
     
-    # 상태 업데이트: 평가 결과 저장 (사용자에게 보이지 않음)
-    return {"last_assessment": response.dict()}
+    # [수정 2] Pydantic V2에서는 .dict() 대신 .model_dump() 사용 권장
+    return {"last_assessment": response.model_dump()}
 
+
+# YJH/agents/interview_graph.py 내부 함수 수정(26.02.02)
 def node_generate_question(state: InterviewState):
     """
-    다음 질문을 생성하는 노드입니다.
-    RAG를 활용하여 적응형 질문을 생성합니다.
+    현재 면접 단계(phase)에 따라 적절한 질문을 생성합니다.
+    - intro: 환영 인사 및 자기소개 요청
+    - technical_interview: RAG 기반 기술 질문
     """
-    phase = state["phase"]
+    # 1. 상태 가져오기 (기본값 'intro'로 설정하여 안전장치 마련)
+    phase = state.get("phase", "intro") 
     assessment = state.get("last_assessment", {})
-    q_count = state["question_count"]
+    q_count = state.get("question_count", 0)
     
-    # 1. RAG 검색을 위한 쿼리 생성
-    # 지원자의 마지막 답변이나 현재 직무(예: 백엔드 개발자)를 쿼리로 사용
-    last_message = state["messages"][-1].content if state["messages"] else ""
-    query = f"면접 단계: {phase}, 지원자 답변: {last_message}"
+    # --- [수정된 부분] Phase 1: 도입부 (Intro) 로직 추가 ---
+    if phase == "intro":
+        # RAG 검색 없이, 정중한 환영 인사 생성
+        system_prompt = """
+        당신은 전문적인 AI 면접관입니다. 
+        지원자가 면접장에 처음 들어온 상황입니다. 
+        긴장을 풀어주며 정중하게 환영 인사를 건네고, 간단한 자기소개를 요청하세요.
+        (아직 기술 질문은 하지 마세요.)
+        """
+        
+        msg = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content="면접관님 안녕하세요, 면접 보러 왔습니다.") # 문맥 부여용 가짜 입력
+        ])
+        
+        # 중요: 인사가 끝났으니 다음 턴을 위해 단계를 'technical_interview'로 변경함
+        return {
+            "messages": [msg], 
+            "phase": "technical_interview", 
+            "question_count": q_count 
+        }
+
+    # --- Phase 2: 기술 면접 (Technical) - 기존 로직 ---
     
-    # 2. PostgreSQL에서 관련 질문/루브릭 검색 (TODO 해결!) [cite: 196, 202]
+    # 1. RAG 검색 쿼리 생성
+    last_msg_content = state["messages"][-1].content if state["messages"] else ""
+    query = f"면접 단계: {phase}, 지원자 답변: {last_msg_content}"
+    
+    # 2. RAG 검색
     rag_context = retrieve_interview_context(query)
     
-    # 기본 시스템 프롬프트
+    # 3. 프롬프트 구성
     system_prompt = f"""
-    당신은 면접관입니다. 현재 면접 단계는 '{phase}'입니다.
+    당신은 15년 차 시니어 기술 면접관입니다. 현재 단계: '{phase}'
     
     [참고 자료(RAG)]
-    데이터베이스에서 검색된 관련 질문 후보입니다:
     {rag_context}
     
-    위 참고 자료를 바탕으로, 지원자의 수준에 맞는 날카로운 질문을 하나만 생성하세요.
+    위 자료를 참고하여 지원자에게 기술 질문을 하나 던지세요.
     """
     
     instructions = ""
-    
-    # 로직 분기: 꼬리 질문 vs 새 질문
     if assessment.get("follow_up_needed"):
-        instructions = f"지원자의 답변이 부족하거나 흥미롭습니다({assessment.get('reasoning')}). 참고 자료를 활용해 심층적인 꼬리 질문을 하세요."
+        instructions = f"이전 답변({assessment.get('reasoning')})에 대해 더 깊이 파고드는 꼬리 질문을 하세요."
     else:
-        instructions = "이전 답변이 충분합니다. 참고 자료에 있는 다른 주제의 질문으로 넘어가세요."
+        instructions = "이전 답변은 됐습니다. 새로운 주제의 기술 질문을 하세요."
 
-    # 종료 조건 체크
     if q_count >= 5: 
-        instructions = "면접을 마무리하는 단계입니다. 수고했다는 말과 함께 마지막 발언 기회를 주세요."
+        instructions = "면접을 마무리하는 멘트를 하세요."
 
-    # LLM 호출
+    # 4. LLM 호출
     msg = llm.invoke([
         SystemMessage(content=system_prompt),
-        HumanMessage(content=instructions) # 문맥 강화를 위해 HumanMessage로 지시 전달
+        HumanMessage(content=instructions)
     ])
     
     return {"messages": [msg], "question_count": q_count + 1}
 
-# --- 5. 엣지(Edge) 조건부 로직 ---
-
-def route_next_step(state: InterviewState) -> Literal["generate_question", "finalize_interview"]:
-    """평가 후 다음 단계를 결정하는 라우터"""
-    if state["question_count"] > 6:
-        return "finalize_interview"
-    return "generate_question"
-
-# --- 6. 그래프 구성 (Workflow) ---
+# --- 5. 그래프 구성 (Workflow) ---
 
 workflow = StateGraph(InterviewState)
 
-# 노드 추가
 workflow.add_node("analyze_answer", node_analyze_answer)
 workflow.add_node("generate_question", node_generate_question)
-# (선택사항) 면접 종료 노드 추가 가능
 
-# 흐름 정의
-# 1. 사용자가 답변을 입력하면(Start) -> 분석 노드로 이동
+# 시작점 설정
 workflow.set_entry_point("analyze_answer")
 
-# 2. 분석 후 -> 무조건 질문 생성으로 이동 (단순화된 버전)
-# 실제로는 여기서 '면접 종료' 등의 분기가 일어납니다.
+# 엣지 연결
 workflow.add_edge("analyze_answer", "generate_question")
-
-# 3. 질문 생성 후 -> END (사용자 입력을 기다림)
 workflow.add_edge("generate_question", END)
 
-# 컴파일
-app = workflow.compile()
+# [추가] 체크포인터 설정 (대화 기억 유지용)
+memory = MemorySaver()
+app = workflow.compile(checkpointer=memory)
