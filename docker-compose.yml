@@ -1,15 +1,32 @@
-# docker-compose.yml
-version: '3.8'
+# # docker-compose.yml 1
+# version: '3.8'
 
+# services:
+#   db:
+#     # 일반 postgres 이미지가 아닌, pgvector가 포함된 공식 이미지를 사용합니다.
+#     image: pgvector/pgvector:pg16
+#     container_name: interview_db_container
+#     environment:
+#       POSTGRES_USER: postgres
+#       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # 보안상 .env 변수로 빼는 것이 좋으나 개발용으로 명시
+#       POSTGRES_DB: interview_db
+#     ports:
+#       - "5432:5432"
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+
+# volumes:
+#   postgres_data:
+
+# docker-compose.yml 2
 services:
   db:
-    # 일반 postgres 이미지가 아닌, pgvector가 포함된 공식 이미지를 사용합니다.
     image: pgvector/pgvector:pg16
     container_name: interview_db_container
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # 보안상 .env 변수로 빼는 것이 좋으나 개발용으로 명시
-      POSTGRES_DB: interview_db
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD} # .env 파일 변수 추가필요
+      POSTGRES_DB: interview_db # POSTGRES_PASSWORD=개인비밀번호
     ports:
       - "5432:5432"
     volumes:

@@ -6,6 +6,10 @@ big20_AI_Interview_simulation/
 # C extensions
 *.so
 
+# 개인 실험용 python 파일
+evaluate_and_fix_answers.py
+generate_answers.py
+
 # Distribution / packaging
 .Python
 build/
@@ -219,3 +223,6 @@ storage/
 # gitkeep
 !data/.gitkeep
 !modules/.gitkeep
+
+# 모든 mp3 파일 무시
+*.mp3
