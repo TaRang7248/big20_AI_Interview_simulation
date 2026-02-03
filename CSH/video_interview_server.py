@@ -34,7 +34,8 @@ app.mount("/static", StaticFiles(directory=static_dir), name="static")
 pcs: Set[RTCPeerConnection] = set()
 pc_sessions: Dict[RTCPeerConnection, str] = {}
 
-# 최신 감정 분석 결과 캐시 (간단 구현)
+# 최신 감정 분석 결과 캐시
+# last_emotion: 마지막으로 감지된 감정 데이터를 저장하는 변수
 last_emotion: Optional[Dict] = None
 _emotion_lock = asyncio.Lock()
 
@@ -46,9 +47,11 @@ _ts_available: Optional[bool] = None
 def _get_redis() -> redis.Redis:
     global _r
     if _r is None:
+        # Redis 라이브러리에게 REDIS_URL로 연결 지시
         _r = redis.from_url(REDIS_URL)
     return _r
 
+# 시간에 따라 변하는 데이터(예: 주가, 온도)를 Redis에 저장하는 함수
 def _push_timeseries(key: str, ts_ms: int, value: float, labels: Dict[str, str]):
     """RedisTimeSeries가 있으면 TS.ADD, 없으면 ZADD로 대체 저장."""
     global _ts_available
@@ -134,29 +137,33 @@ async def _consume_audio(track, sink: MediaBlackhole):
     except Exception:
         pass
 
+# 영상 통화나 스트리밍 중에 실시간으로 얼굴 표정을 읽어서 감정을 분석하는 '감정 분석기'의 핵심 로직
+# async: 이 함수는 비동기 방식으로 작동. 영상 데이터를 받는 동안 컴퓨터가 멍하니 기다리지 않고 다른 일도 같이 할 수 있게 해주는 방식
 async def _analyze_emotions(track, session_id: str):
     """영상 프레임을 주기적으로 받아 DeepFace로 감정 분석을 수행하고 캐시에 저장."""
     # 분석 샘플링 주기(초): 초당 1프레임(FPS)
     sample_period = 1.0
-    last_ts = 0.0
+    last_ts = 0.0 # 마지막으로 분석했던 시간을 기억해두기 위한 변수
     try:
-        while True:
+        while True: # 영상이 끝날 때까지 무한히 반복하며 화면을 확인
             frame = await track.recv()
             now = time.monotonic()
             # 샘플링 간격을 만족할 때만 분석 수행 (1 FPS)
             if now - last_ts < sample_period:
                 continue
             last_ts = now
-            # VideoFrame을 OpenCV BGR 이미지로 변환 (분석 시점에만 변환)
+            # 들어온 영상 데이터(frame)는 컴퓨터가 바로 이해하기 어려운 복잡한 형태이다. 이를 인공지능(DeepFace)이 읽을 수 있는 숫자 배열(OpenCV BGR 형식)로 변환
             try:
                 img = frame.to_ndarray(format="bgr24")
             except Exception:
                 continue
 
-            # 선택적으로 리사이즈로 속도 최적화
+            # 선택적으로 리사이즈로 속도 최적화: 인공지능이 사진을 분석하기 전에 사진이 너무 크면 적당한 크기로 줄여서 분석 속도를 높이는 과정
             h, w = img.shape[:2]
             if max(h, w) > 720:
+                # 줄일 비율 계산하기 (스케일링)
                 scale = 720 / max(h, w)
+                # 사진을 작게 리사이즈하고, 메모리 구조를 최적화해서 AI에게 넘겨줄 준비
                 img = np.ascontiguousarray(
                     cv2.resize(img, (int(w * scale), int(h * scale)))
                 ) if 'cv2' in globals() else img
@@ -178,9 +185,11 @@ async def _analyze_emotions(track, session_id: str):
                     "neutral": "neutral",
                 }
                 raw = {k: float(scores.get(src, 0.0)) for k, src in keys_map.items()}
+                # 전체 감정 점수의 합을 1(100%)로 보고, 각 감정이 몇 퍼센트인지 계산
                 total = sum(raw.values()) or 1.0
                 probabilities = {k: (v / total) for k, v in raw.items()}
 
+                # 실시간 데이터 업데이트 (메모리 저장)
                 data = {
                     "dominant_emotion": item.get("dominant_emotion"),
                     "probabilities": probabilities,  # 0.0~1.0 분포
@@ -189,7 +198,8 @@ async def _analyze_emotions(track, session_id: str):
                 async with _emotion_lock:
                     global last_emotion
                     last_emotion = data
-                # RedisTimeSeries에 저장
+                    
+                # Redis에 기록 남기기 (시계열 데이터 저장)
                 ts_ms = int(time.time() * 1000)
                 for emo, prob in probabilities.items():
                     key = f"emotion:{session_id}:{emo}"
@@ -236,3 +246,89 @@ async def emotion():
         if last_emotion is None:
             return {"status": "no_data"}
         return last_emotion
+
+# 모든 세션 목록 조회 엔드포인트
+@app.get("/emotion/sessions")
+async def emotion_sessions():
+    """Redis에 저장된 모든 세션 ID 목록을 반환합니다."""
+    r = _get_redis()
+    sessions = set()
+    try:
+        # 키 패턴: emotion:{session_id}:{emotion}
+        keys = r.keys("emotion:*")
+        for key in keys:
+            key_str = key.decode() if isinstance(key, bytes) else key
+            parts = key_str.split(":")
+            if len(parts) >= 2:
+                sessions.add(parts[1])
+    except Exception:
+        pass
+    return {"sessions": list(sessions)}
+
+# 특정 세션의 모든 감정 시계열 데이터 조회
+@app.get("/emotion/timeseries/all")
+async def emotion_timeseries_all(session_id: str, limit: int = 100):
+    """특정 세션의 모든 감정 시계열 데이터를 한 번에 반환합니다."""
+    r = _get_redis()
+    emotions = ["happy", "sad", "angry", "surprise", "fear", "disgust", "neutral"]
+    result = {}
+    
+    for emotion in emotions:
+        key = f"emotion:{session_id}:{emotion}"
+        data = []
+        try:
+            if _ts_available:
+                res = r.execute_command("TS.RANGE", key, 0, int(time.time() * 1000))
+                if isinstance(res, list):
+                    data = res[-limit:]
+            else:
+                res = r.zrevrange(key, 0, limit - 1, withscores=True)
+                data = [[int(m.decode()) if isinstance(m, bytes) else int(m), s] for m, s in res]
+                data.reverse()  # 시간순 정렬
+        except Exception:
+            data = []
+        result[emotion] = data
+    
+    return {"session_id": session_id, "emotions": result}
+
+# 세션 통계 요약 엔드포인트
+@app.get("/emotion/stats")
+async def emotion_stats(session_id: str):
+    """특정 세션의 감정 통계 요약을 반환합니다."""
+    r = _get_redis()
+    emotions = ["happy", "sad", "angry", "surprise", "fear", "disgust", "neutral"]
+    stats = {}
+    
+    for emotion in emotions:
+        key = f"emotion:{session_id}:{emotion}"
+        try:
+            if _ts_available:
+                res = r.execute_command("TS.RANGE", key, 0, int(time.time() * 1000))
+                if isinstance(res, list) and res:
+                    values = [float(point[1]) for point in res]
+                    stats[emotion] = {
+                        "count": len(values),
+                        "avg": sum(values) / len(values),
+                        "min": min(values),
+                        "max": max(values),
+                        "latest": values[-1]
+                    }
+                else:
+                    stats[emotion] = {"count": 0, "avg": 0, "min": 0, "max": 0, "latest": 0}
+            else:
+                res = r.zrange(key, 0, -1, withscores=True)
+                if res:
+                    values = [float(score) for _, score in res]
+                    stats[emotion] = {
+                        "count": len(values),
+                        "avg": sum(values) / len(values),
+                        "min": min(values),
+                        "max": max(values),
+                        "latest": values[-1]
+                    }
+                else:
+                    stats[emotion] = {"count": 0, "avg": 0, "min": 0, "max": 0, "latest": 0}
+        except Exception:
+            stats[emotion] = {"count": 0, "avg": 0, "min": 0, "max": 0, "latest": 0}
+    
+    return {"session_id": session_id, "stats": stats}
