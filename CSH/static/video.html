@@ -8,7 +8,18 @@
     video { width: 45%; max-width: 560px; background: #000; margin-right: 16px; }
     .row { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
     #logs { margin-top: 12px; font-size: 14px; white-space: pre-wrap; background: #f7f7f7; padding: 8px; border-radius: 6px; }
-    button { padding: 8px 12px; }
+    button { padding: 8px 12px; margin-right: 8px; }
+    .dashboard-link { 
+      display: inline-block; 
+      margin-top: 12px; 
+      padding: 10px 16px; 
+      background: linear-gradient(90deg, #00d9ff, #00ff88); 
+      color: #1a1a2e; 
+      text-decoration: none; 
+      border-radius: 8px; 
+      font-weight: 600;
+    }
+    .dashboard-link:hover { opacity: 0.9; }
   </style>
 </head>
 <body>
@@ -26,6 +37,7 @@
   <div style="margin-top:12px;">
     <button id="startBtn">면접 시작</button>
     <button id="stopBtn">종료</button>
+    <a id="dashboardLink" class="dashboard-link" href="/static/dashboard.html" target="_blank">📊 감정 분석 대시보드</a>
   </div>
   <div id="logs"></div>
   <div id="emotionBox" style="margin-top:12px;font-size:16px;"></div>
@@ -69,6 +81,10 @@
         window.sessionId = answer.session_id;
         await pc.setRemoteDescription(answer);
         log('WebRTC 연결이 설정되었습니다. 세션ID: ' + (window.sessionId || 'N/A'));
+        
+        // 대시보드 링크에 세션 ID 추가
+        const dashboardLink = document.getElementById('dashboardLink');
+        dashboardLink.href = '/static/dashboard.html?session_id=' + window.sessionId;
       } catch (err) {
         log('오류: ' + err);
       }
