@@ -52,6 +52,15 @@ DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
+# 소셜 로그인 설정
+KAKAO_CLIENT_ID = os.getenv("KAKAO_CLIENT_ID", "")
+KAKAO_CLIENT_SECRET = os.getenv("KAKAO_CLIENT_SECRET", "")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+NAVER_CLIENT_ID = os.getenv("NAVER_CLIENT_ID", "")
+NAVER_CLIENT_SECRET = os.getenv("NAVER_CLIENT_SECRET", "")
+OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "http://localhost:8000")
+
 # 업로드 디렉토리 설정
 UPLOAD_DIR = os.path.join(current_dir, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -129,6 +138,10 @@ except ImportError:
 
 
 # ========== 전역 상태 관리 ==========
+
+# 회원 정보 저장소 (실제 운영에서는 DB 사용)
+users_db: Dict[str, Dict] = {}
+
 class InterviewState:
     """면접 세션 상태 관리"""
     def __init__(self):
@@ -696,6 +709,30 @@ class Offer(BaseModel):
     type: str
 
 
+# ========== 회원가입 모델 ==========
+class UserRegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+    birth_date: str  # YYYY-MM-DD 형식
+    address: str
+    gender: str  # male, female, other
+
+class UserRegisterResponse(BaseModel):
+    success: bool
+    message: str
+    user_id: Optional[str] = None
+
+class UserLoginRequest(BaseModel):
+    email: str
+    password: str
+
+class UserLoginResponse(BaseModel):
+    success: bool
+    message: str
+    user: Optional[Dict] = None
+
+
 # ========== API 엔드포인트 ==========
 
 @app.get("/", response_class=HTMLResponse)
@@ -781,6 +818,182 @@ async def index():
             .sub-link:hover { border-color: #00d9ff; color: #00d9ff; }
             .status { margin-top: 30px; font-size: 14px; color: #666; }
             .status span { color: #00ff88; }
+            
+            /* 회원가입/로그인 버튼 */
+            .auth-buttons {
+                display: flex;
+                gap: 12px;
+                justify-content: center;
+                margin-bottom: 30px;
+            }
+            .auth-btn {
+                background: rgba(255,255,255,0.1);
+                border: 1px solid rgba(255,255,255,0.2);
+                color: #fff;
+                padding: 12px 24px;
+                border-radius: 8px;
+                cursor: pointer;
+                font-size: 16px;
+                transition: all 0.3s;
+            }
+            .auth-btn:hover {
+                background: rgba(255,255,255,0.2);
+                border-color: #00d9ff;
+            }
+            .auth-btn.primary {
+                background: linear-gradient(135deg, #00d9ff, #00ff88);
+                color: #1a1a2e;
+                border: none;
+                font-weight: 600;
+            }
+            
+            /* 모달 스타일 */
+            .modal-overlay {
+                display: none;
+                position: fixed;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: rgba(0,0,0,0.8);
+                z-index: 1000;
+                align-items: center;
+                justify-content: center;
+            }
+            .modal-overlay.active { display: flex; }
+            .modal {
+                background: #1a1a2e;
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 16px;
+                padding: 32px;
+                width: 100%;
+                max-width: 450px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            }
+            .modal h2 {
+                font-size: 24px;
+                margin-bottom: 24px;
+                text-align: center;
+                background: linear-gradient(90deg, #00d9ff, #00ff88);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            .form-group {
+                margin-bottom: 16px;
+            }
+            .form-group label {
+                display: block;
+                margin-bottom: 6px;
+                color: #8892b0;
+                font-size: 14px;
+            }
+            .form-group input, .form-group select {
+                width: 100%;
+                padding: 12px 16px;
+                background: rgba(255,255,255,0.05);
+                border: 1px solid rgba(255,255,255,0.1);
+                border-radius: 8px;
+                color: #fff;
+                font-size: 16px;
+                transition: border-color 0.3s;
+            }
+            .form-group input:focus, .form-group select:focus {
+                outline: none;
+                border-color: #00d9ff;
+            }
+            .form-group select option {
+                background: #1a1a2e;
+                color: #fff;
+            }
+            .modal-buttons {
+                display: flex;
+                gap: 12px;
+                margin-top: 24px;
+            }
+            .modal-btn {
+                flex: 1;
+                padding: 14px;
+                border-radius: 8px;
+                font-size: 16px;
+                cursor: pointer;
+                transition: all 0.3s;
+                border: none;
+            }
+            .modal-btn.cancel {
+                background: rgba(255,255,255,0.1);
+                color: #8892b0;
+            }
+            .modal-btn.submit {
+                background: linear-gradient(135deg, #00d9ff, #00ff88);
+                color: #1a1a2e;
+                font-weight: 600;
+            }
+            .modal-btn:hover { transform: translateY(-2px); }
+            
+            /* 소셜 로그인 버튼 */
+            .social-login {
+                margin-top: 20px;
+                padding-top: 20px;
+                border-top: 1px solid rgba(255,255,255,0.1);
+            }
+            .social-login p {
+                text-align: center;
+                color: #8892b0;
+                font-size: 14px;
+                margin-bottom: 12px;
+            }
+            .social-buttons {
+                display: flex;
+                gap: 10px;
+                justify-content: center;
+            }
+            .social-btn {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                gap: 8px;
+                padding: 12px 20px;
+                border-radius: 8px;
+                border: none;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: all 0.3s;
+                flex: 1;
+                max-width: 120px;
+            }
+            .social-btn:hover { transform: translateY(-2px); opacity: 0.9; }
+            .social-btn.kakao {
+                background: #FEE500;
+                color: #000;
+            }
+            .social-btn.google {
+                background: #fff;
+                color: #333;
+            }
+            .social-btn.naver {
+                background: #03C75A;
+                color: #fff;
+            }
+            .social-btn svg {
+                width: 18px;
+                height: 18px;
+            }
+            
+            .user-info {
+                background: rgba(0,255,136,0.1);
+                border: 1px solid rgba(0,255,136,0.3);
+                border-radius: 8px;
+                padding: 12px 16px;
+                margin-bottom: 20px;
+                display: none;
+            }
+            .user-info.active { display: block; }
+            .user-info span { color: #00ff88; font-weight: 600; }
+            .error-msg {
+                color: #ff6b6b;
+                font-size: 14px;
+                margin-top: 8px;
+                display: none;
+            }
+            .error-msg.active { display: block; }
         </style>
     </head>
     <body>
@@ -788,7 +1001,18 @@ async def index():
             <h1>🎯 AI 모의면접 시스템</h1>
             <p>LLM 기반 면접 평가 + 실시간 감정 분석을 통한 스마트 면접 트레이닝</p>
             
-            <a href="/static/integrated_interview.html" class="main-cta">
+            <!-- 사용자 정보 표시 -->
+            <div class="user-info" id="userInfo">
+                👋 환영합니다, <span id="userName"></span>님!
+            </div>
+            
+            <!-- 회원가입/로그인 버튼 -->
+            <div class="auth-buttons" id="authButtons">
+                <button class="auth-btn" onclick="showLoginModal()">로그인</button>
+                <button class="auth-btn primary" onclick="showRegisterModal()">회원가입</button>
+            </div>
+            
+            <a href="/static/integrated_interview.html" class="main-cta" id="startBtn">
                 🎥 AI 화상 면접 시작하기
             </a>
             
@@ -828,6 +1052,270 @@ async def index():
                 <span>감정분석 """ + ("✅" if EMOTION_AVAILABLE else "❌") + """</span>
             </div>
         </div>
+        
+        <!-- 회원가입 모달 -->
+        <div class="modal-overlay" id="registerModal">
+            <div class="modal">
+                <h2>📝 회원가입</h2>
+                <form id="registerForm" onsubmit="handleRegister(event)">
+                    <div class="form-group">
+                        <label>이메일 *</label>
+                        <input type="email" id="regEmail" placeholder="example@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>비밀번호 *</label>
+                        <input type="password" id="regPassword" placeholder="8자 이상 입력" minlength="8" required>
+                    </div>
+                    <div class="form-group">
+                        <label>비밀번호 확인 *</label>
+                        <input type="password" id="regPasswordConfirm" placeholder="비밀번호 재입력" required>
+                    </div>
+                    <div class="form-group">
+                        <label>이름 *</label>
+                        <input type="text" id="regName" placeholder="홍길동" required>
+                    </div>
+                    <div class="form-group">
+                        <label>생년월일 *</label>
+                        <input type="date" id="regBirthDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label>주소 *</label>
+                        <input type="text" id="regAddress" placeholder="서울시 강남구..." required>
+                    </div>
+                    <div class="form-group">
+                        <label>성별 *</label>
+                        <select id="regGender" required>
+                            <option value="">선택해주세요</option>
+                            <option value="male">남성</option>
+                            <option value="female">여성</option>
+                            <option value="other">기타</option>
+                        </select>
+                    </div>
+                    <div class="error-msg" id="registerError"></div>
+                    <div class="modal-buttons">
+                        <button type="button" class="modal-btn cancel" onclick="closeModals()">취소</button>
+                        <button type="submit" class="modal-btn submit">가입하기</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 로그인 모달 -->
+        <div class="modal-overlay" id="loginModal">
+            <div class="modal">
+                <h2>🔐 로그인</h2>
+                <form id="loginForm" onsubmit="handleLogin(event)">
+                    <div class="form-group">
+                        <label>이메일</label>
+                        <input type="email" id="loginEmail" placeholder="example@email.com" required>
+                    </div>
+                    <div class="form-group">
+                        <label>비밀번호</label>
+                        <input type="password" id="loginPassword" placeholder="비밀번호 입력" required>
+                    </div>
+                    <div class="error-msg" id="loginError"></div>
+                    <div class="modal-buttons">
+                        <button type="button" class="modal-btn cancel" onclick="closeModals()">취소</button>
+                        <button type="submit" class="modal-btn submit">로그인</button>
+                    </div>
+                </form>
+                
+                <!-- 소셜 로그인 -->
+                <div class="social-login">
+                    <p>간편 로그인</p>
+                    <div class="social-buttons">
+                        <button class="social-btn kakao" onclick="socialLogin('kakao')">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C6.48 3 2 6.58 2 11c0 2.83 1.89 5.31 4.7 6.71l-.96 3.57c-.09.35.27.65.58.48l4.24-2.54c.47.05.95.08 1.44.08 5.52 0 10-3.58 10-8S17.52 3 12 3z"/></svg>
+                            카카오
+                        </button>
+                        <button class="social-btn google" onclick="socialLogin('google')">
+                            <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+                            구글
+                        </button>
+                        <button class="social-btn naver" onclick="socialLogin('naver')">
+                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.273 12.845L7.376 0H0v24h7.727V11.155L16.624 24H24V0h-7.727z"/></svg>
+                            네이버
+                        </button>
+                    </div>
+                </div>
+                
+                <p style="text-align: center; margin-top: 16px; color: #8892b0; font-size: 14px;">
+                    계정이 없으신가요? <a href="#" onclick="showRegisterModal()" style="color: #00d9ff;">회원가입</a>
+                </p>
+            </div>
+        </div>
+        
+        <script>
+            // 현재 로그인된 사용자
+            let currentUser = null;
+            
+            // 페이지 로드 시 세션 확인
+            window.onload = function() {
+                const savedUser = localStorage.getItem('interview_user');
+                if (savedUser) {
+                    currentUser = JSON.parse(savedUser);
+                    updateUIForLoggedInUser();
+                }
+            };
+            
+            function showRegisterModal() {
+                closeModals();
+                document.getElementById('registerModal').classList.add('active');
+            }
+            
+            function showLoginModal() {
+                closeModals();
+                document.getElementById('loginModal').classList.add('active');
+            }
+            
+            function closeModals() {
+                document.getElementById('registerModal').classList.remove('active');
+                document.getElementById('loginModal').classList.remove('active');
+                document.getElementById('registerError').classList.remove('active');
+                document.getElementById('loginError').classList.remove('active');
+            }
+            
+            async function handleRegister(e) {
+                e.preventDefault();
+                const errorEl = document.getElementById('registerError');
+                
+                const password = document.getElementById('regPassword').value;
+                const passwordConfirm = document.getElementById('regPasswordConfirm').value;
+                
+                // 비밀번호 확인
+                if (password !== passwordConfirm) {
+                    errorEl.textContent = '비밀번호가 일치하지 않습니다.';
+                    errorEl.classList.add('active');
+                    return;
+                }
+                
+                if (password.length < 8) {
+                    errorEl.textContent = '비밀번호는 8자 이상이어야 합니다.';
+                    errorEl.classList.add('active');
+                    return;
+                }
+                
+                const data = {
+                    email: document.getElementById('regEmail').value,
+                    password: password,
+                    name: document.getElementById('regName').value,
+                    birth_date: document.getElementById('regBirthDate').value,
+                    address: document.getElementById('regAddress').value,
+                    gender: document.getElementById('regGender').value
+                };
+                
+                try {
+                    const response = await fetch('/api/auth/register', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('회원가입이 완료되었습니다! 로그인해주세요.');
+                        closeModals();
+                        showLoginModal();
+                        document.getElementById('loginEmail').value = data.email;
+                    } else {
+                        errorEl.textContent = result.message;
+                        errorEl.classList.add('active');
+                    }
+                } catch (err) {
+                    errorEl.textContent = '서버 오류가 발생했습니다.';
+                    errorEl.classList.add('active');
+                }
+            }
+            
+            async function handleLogin(e) {
+                e.preventDefault();
+                const errorEl = document.getElementById('loginError');
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+                
+                try {
+                    const response = await fetch('/api/auth/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, password })
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        currentUser = result.user;
+                        localStorage.setItem('interview_user', JSON.stringify(currentUser));
+                        closeModals();
+                        updateUIForLoggedInUser();
+                    } else {
+                        errorEl.textContent = result.message;
+                        errorEl.classList.add('active');
+                    }
+                } catch (err) {
+                    errorEl.textContent = '서버 오류가 발생했습니다.';
+                    errorEl.classList.add('active');
+                }
+            }
+            
+            function updateUIForLoggedInUser() {
+                document.getElementById('authButtons').style.display = 'none';
+                document.getElementById('userInfo').classList.add('active');
+                document.getElementById('userName').textContent = currentUser.name;
+            }
+            
+            function logout() {
+                currentUser = null;
+                localStorage.removeItem('interview_user');
+                document.getElementById('authButtons').style.display = 'flex';
+                document.getElementById('userInfo').classList.remove('active');
+            }
+            
+            // 소셜 로그인
+            function socialLogin(provider) {
+                // 소셜 로그인 URL로 리다이렉트
+                window.location.href = `/api/auth/social/${provider}`;
+            }
+            
+            // OAuth 콜백 처리 (URL에 토큰이 있으면)
+            function handleOAuthCallback() {
+                const urlParams = new URLSearchParams(window.location.search);
+                const token = urlParams.get('token');
+                const error = urlParams.get('error');
+                
+                if (error) {
+                    alert('소셜 로그인 실패: ' + error);
+                    window.history.replaceState({}, '', '/');
+                    return;
+                }
+                
+                if (token) {
+                    // 토큰으로 사용자 정보 가져오기
+                    fetch('/api/auth/social/verify?token=' + token)
+                        .then(res => res.json())
+                        .then(result => {
+                            if (result.success) {
+                                currentUser = result.user;
+                                localStorage.setItem('interview_user', JSON.stringify(currentUser));
+                                updateUIForLoggedInUser();
+                            }
+                            window.history.replaceState({}, '', '/');
+                        })
+                        .catch(err => {
+                            console.error('소셜 로그인 검증 실패:', err);
+                            window.history.replaceState({}, '', '/');
+                        });
+                }
+            }
+            
+            // 페이지 로드 시 OAuth 콜백 확인
+            handleOAuthCallback();
+            
+            // 모달 외부 클릭 시 닫기
+            document.querySelectorAll('.modal-overlay').forEach(modal => {
+                modal.addEventListener('click', (e) => {
+                    if (e.target === modal) closeModals();
+                });
+            });
+        </script>
     </body>
     </html>
     """
@@ -838,6 +1326,366 @@ async def interview_redirect():
     """채팅 면접 → 화상 면접으로 리다이렉트"""
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/static/integrated_interview.html")
+
+
+# ========== 소셜 로그인 API ==========
+
+# 소셜 로그인 토큰 저장소 (임시)
+social_tokens: Dict[str, Dict] = {}
+
+@app.get("/api/auth/social/{provider}")
+async def social_login_redirect(provider: str):
+    """소셜 로그인 리다이렉트"""
+    from fastapi.responses import RedirectResponse
+    
+    redirect_uri = f"{OAUTH_REDIRECT_BASE}/api/auth/social/{provider}/callback"
+    
+    if provider == "kakao":
+        if not KAKAO_CLIENT_ID:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "카카오 로그인이 설정되지 않았습니다."}
+            )
+        auth_url = (
+            f"https://kauth.kakao.com/oauth/authorize"
+            f"?client_id={KAKAO_CLIENT_ID}"
+            f"&redirect_uri={redirect_uri}"
+            f"&response_type=code"
+        )
+        
+    elif provider == "google":
+        if not GOOGLE_CLIENT_ID:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "구글 로그인이 설정되지 않았습니다."}
+            )
+        auth_url = (
+            f"https://accounts.google.com/o/oauth2/v2/auth"
+            f"?client_id={GOOGLE_CLIENT_ID}"
+            f"&redirect_uri={redirect_uri}"
+            f"&response_type=code"
+            f"&scope=email%20profile"
+        )
+        
+    elif provider == "naver":
+        if not NAVER_CLIENT_ID:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "네이버 로그인이 설정되지 않았습니다."}
+            )
+        state = uuid.uuid4().hex
+        auth_url = (
+            f"https://nid.naver.com/oauth2.0/authorize"
+            f"?client_id={NAVER_CLIENT_ID}"
+            f"&redirect_uri={redirect_uri}"
+            f"&response_type=code"
+            f"&state={state}"
+        )
+    else:
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"지원하지 않는 소셜 로그인: {provider}"}
+        )
+    
+    return RedirectResponse(url=auth_url)
+
+
+@app.get("/api/auth/social/{provider}/callback")
+async def social_login_callback(provider: str, code: str = None, state: str = None, error: str = None):
+    """소셜 로그인 콜백"""
+    from fastapi.responses import RedirectResponse
+    import httpx
+    
+    if error:
+        return RedirectResponse(url=f"/?error={error}")
+    
+    if not code:
+        return RedirectResponse(url="/?error=authorization_failed")
+    
+    redirect_uri = f"{OAUTH_REDIRECT_BASE}/api/auth/social/{provider}/callback"
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            # 액세스 토큰 교환
+            if provider == "kakao":
+                token_response = await client.post(
+                    "https://kauth.kakao.com/oauth/token",
+                    data={
+                        "grant_type": "authorization_code",
+                        "client_id": KAKAO_CLIENT_ID,
+                        "client_secret": KAKAO_CLIENT_SECRET,
+                        "redirect_uri": redirect_uri,
+                        "code": code
+                    }
+                )
+                token_data = token_response.json()
+                access_token = token_data.get("access_token")
+                
+                # 사용자 정보 조회
+                user_response = await client.get(
+                    "https://kapi.kakao.com/v2/user/me",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                user_data = user_response.json()
+                
+                email = user_data.get("kakao_account", {}).get("email", f"kakao_{user_data['id']}@kakao.local")
+                name = user_data.get("properties", {}).get("nickname", "카카오사용자")
+                
+            elif provider == "google":
+                token_response = await client.post(
+                    "https://oauth2.googleapis.com/token",
+                    data={
+                        "grant_type": "authorization_code",
+                        "client_id": GOOGLE_CLIENT_ID,
+                        "client_secret": GOOGLE_CLIENT_SECRET,
+                        "redirect_uri": redirect_uri,
+                        "code": code
+                    }
+                )
+                token_data = token_response.json()
+                access_token = token_data.get("access_token")
+                
+                # 사용자 정보 조회
+                user_response = await client.get(
+                    "https://www.googleapis.com/oauth2/v2/userinfo",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                user_data = user_response.json()
+                
+                email = user_data.get("email", f"google_{user_data['id']}@google.local")
+                name = user_data.get("name", "구글사용자")
+                
+            elif provider == "naver":
+                token_response = await client.post(
+                    "https://nid.naver.com/oauth2.0/token",
+                    data={
+                        "grant_type": "authorization_code",
+                        "client_id": NAVER_CLIENT_ID,
+                        "client_secret": NAVER_CLIENT_SECRET,
+                        "redirect_uri": redirect_uri,
+                        "code": code,
+                        "state": state
+                    }
+                )
+                token_data = token_response.json()
+                access_token = token_data.get("access_token")
+                
+                # 사용자 정보 조회
+                user_response = await client.get(
+                    "https://openapi.naver.com/v1/nid/me",
+                    headers={"Authorization": f"Bearer {access_token}"}
+                )
+                user_data = user_response.json()
+                response_data = user_data.get("response", {})
+                
+                email = response_data.get("email", f"naver_{response_data.get('id')}@naver.local")
+                name = response_data.get("name") or response_data.get("nickname", "네이버사용자")
+            
+            else:
+                return RedirectResponse(url="/?error=invalid_provider")
+            
+            # 사용자 등록 또는 조회
+            if email not in users_db:
+                user_id = uuid.uuid4().hex
+                users_db[email] = {
+                    "user_id": user_id,
+                    "email": email,
+                    "password_hash": None,  # 소셜 로그인은 비밀번호 없음
+                    "name": name,
+                    "birth_date": None,
+                    "address": None,
+                    "gender": None,
+                    "provider": provider,
+                    "created_at": datetime.now().isoformat(),
+                    "interview_history": []
+                }
+                print(f"✅ 소셜 회원 가입: {name} ({email}) via {provider}")
+            else:
+                user_id = users_db[email]["user_id"]
+                print(f"✅ 소셜 로그인: {name} ({email}) via {provider}")
+            
+            # 임시 토큰 생성
+            temp_token = uuid.uuid4().hex
+            social_tokens[temp_token] = {
+                "user_id": user_id,
+                "email": email,
+                "name": name,
+                "provider": provider,
+                "created_at": datetime.now().isoformat()
+            }
+            
+            return RedirectResponse(url=f"/?token={temp_token}")
+            
+    except Exception as e:
+        print(f"❌ 소셜 로그인 오류: {e}")
+        return RedirectResponse(url=f"/?error=login_failed")
+
+
+@app.get("/api/auth/social/verify")
+async def verify_social_token(token: str):
+    """소셜 로그인 토큰 검증"""
+    token_data = social_tokens.pop(token, None)
+    
+    if not token_data:
+        return {"success": False, "message": "유효하지 않은 토큰입니다."}
+    
+    user = users_db.get(token_data["email"])
+    if not user:
+        return {"success": False, "message": "사용자를 찾을 수 없습니다."}
+    
+    return {
+        "success": True,
+        "user": {
+            "user_id": user["user_id"],
+            "email": user["email"],
+            "name": user["name"],
+            "provider": user.get("provider"),
+            "gender": user.get("gender")
+        }
+    }
+
+
+@app.get("/api/auth/social/status")
+async def social_login_status():
+    """소셜 로그인 설정 상태 확인"""
+    return {
+        "kakao": bool(KAKAO_CLIENT_ID),
+        "google": bool(GOOGLE_CLIENT_ID),
+        "naver": bool(NAVER_CLIENT_ID)
+    }
+
+
+# ========== 회원가입/로그인 API ==========
+
+@app.post("/api/auth/register", response_model=UserRegisterResponse)
+async def register_user(request: UserRegisterRequest):
+    """회원가입 API"""
+    # 이메일 중복 확인
+    if request.email in users_db:
+        return UserRegisterResponse(
+            success=False,
+            message="이미 등록된 이메일입니다."
+        )
+    
+    # 이메일 형식 검증
+    import re
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, request.email):
+        return UserRegisterResponse(
+            success=False,
+            message="올바른 이메일 형식이 아닙니다."
+        )
+    
+    # 생년월일 검증
+    try:
+        birth = datetime.strptime(request.birth_date, "%Y-%m-%d")
+        if birth > datetime.now():
+            return UserRegisterResponse(
+                success=False,
+                message="생년월일이 올바르지 않습니다."
+            )
+    except ValueError:
+        return UserRegisterResponse(
+            success=False,
+            message="생년월일 형식이 올바르지 않습니다. (YYYY-MM-DD)"
+        )
+    
+    # 성별 검증
+    if request.gender not in ["male", "female", "other"]:
+        return UserRegisterResponse(
+            success=False,
+            message="성별을 선택해주세요."
+        )
+    
+    # 비밀번호 검증
+    if len(request.password) < 8:
+        return UserRegisterResponse(
+            success=False,
+            message="비밀번호는 8자 이상이어야 합니다."
+        )
+    
+    # 비밀번호 해싱 (간단한 해시 사용, 실제 운영에서는 bcrypt 권장)
+    import hashlib
+    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
+    
+    # 회원 정보 저장
+    user_id = uuid.uuid4().hex
+    users_db[request.email] = {
+        "user_id": user_id,
+        "email": request.email,
+        "password_hash": password_hash,
+        "name": request.name,
+        "birth_date": request.birth_date,
+        "address": request.address,
+        "gender": request.gender,
+        "created_at": datetime.now().isoformat(),
+        "interview_history": []
+    }
+    
+    print(f"✅ 새 회원 가입: {request.name} ({request.email})")
+    
+    return UserRegisterResponse(
+        success=True,
+        message="회원가입이 완료되었습니다.",
+        user_id=user_id
+    )
+
+
+@app.post("/api/auth/login", response_model=UserLoginResponse)
+async def login_user(request: UserLoginRequest):
+    """로그인 API (이메일 + 비밀번호)"""
+    user = users_db.get(request.email)
+    
+    if not user:
+        return UserLoginResponse(
+            success=False,
+            message="등록되지 않은 이메일입니다. 회원가입을 먼저 해주세요."
+        )
+    
+    # 비밀번호 검증
+    import hashlib
+    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
+    if user.get("password_hash") != password_hash:
+        return UserLoginResponse(
+            success=False,
+            message="비밀번호가 올바르지 않습니다."
+        )
+    
+    # 민감 정보 제외하고 반환
+    user_info = {
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "name": user["name"],
+        "gender": user["gender"]
+    }
+    
+    print(f"✅ 로그인: {user['name']} ({user['email']})")
+    
+    return UserLoginResponse(
+        success=True,
+        message="로그인 성공",
+        user=user_info
+    )
+
+
+@app.get("/api/auth/user/{email}")
+async def get_user_info(email: str):
+    """회원 정보 조회"""
+    user = users_db.get(email)
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    
+    # 민감 정보 제외
+    return {
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "name": user["name"],
+        "birth_date": user["birth_date"],
+        "address": user["address"],
+        "gender": user["gender"],
+        "created_at": user["created_at"]
+    }
 
 
 # ========== Resume Upload API ==========
