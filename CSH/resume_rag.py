@@ -23,9 +23,9 @@ class ResumeRAG:
         DEFAULT_CONNECTION = "POSTGRES_CONNECTION_STRING"
         conn_str = connection_string or os.getenv("POSTGRES_CONNECTION_STRING") or DEFAULT_CONNECTION
         
-        # SQLAlchemy/PGVector는 'postgresql+psycopg2://' 형식이 필요하므로 변환
+        # langchain-postgres는 psycopg3를 사용하므로 'postgresql+psycopg://' 형식 필요
         if conn_str and conn_str.startswith("postgresql://"):
-            conn_str = conn_str.replace("postgresql://", "postgresql+psycopg2://", 1)
+            conn_str = conn_str.replace("postgresql://", "postgresql+psycopg://", 1)
         
         self.connection = conn_str
         self.collection_name = collection_name
