@@ -20,6 +20,12 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 # SystemMessage: AI의 인격(페르소나)과 규칙을 부여하는 메시지
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
+import psycopg2
+import json
+import re
+from datetime import datetime
+from collections import Counter
+
 # 프로젝트 루트에서 .env 파일을 찾기 위해 경로 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
@@ -28,15 +34,322 @@ sys.path.append(root_dir)
 # 프로젝트 폴더에 있는 .env 파일에 적힌 설정값들을 읽어서 파이썬 프로그램이 사용할 수 있도록 환경 변수로 등록해주는 함수
 load_dotenv() 
 
+
+class InterviewReportGenerator:
+    """
+    면접 종료 후 STAR 기법 기반 종합 리포트를 생성하는 클래스
+    - STAR 기법(Situation, Task, Action, Result) 분석
+    - 핵심 키워드 추출
+    - 답변 구조 평가
+    - 발화 속도/발음 명확성/시선 처리 (비디오 면접 연동 시 사용)
+    """
+    
+    def __init__(self, llm):
+        self.llm = llm
+        # STAR 기법 관련 키워드 정의
+        self.star_keywords = {
+            'situation': ['상황', '배경', '당시', '그때', '환경', '상태', '문제', '이슈', '과제'],
+            'task': ['목표', '과제', '임무', '역할', '담당', '책임', '해야 할', '목적', '미션'],
+            'action': ['행동', '수행', '실행', '처리', '해결', '개발', '구현', '적용', '진행', '시도', '노력'],
+            'result': ['결과', '성과', '달성', '완료', '개선', '향상', '증가', '감소', '효과', '성공', '실패에서 배운']
+        }
+        # IT 관련 핵심 키워드 (기술 스택)
+        self.tech_keywords = [
+            'python', 'java', 'javascript', 'typescript', 'react', 'vue', 'angular', 'node',
+            'django', 'flask', 'spring', 'aws', 'azure', 'gcp', 'docker', 'kubernetes',
+            'sql', 'nosql', 'mongodb', 'postgresql', 'mysql', 'redis', 'kafka',
+            'git', 'ci/cd', 'devops', 'agile', 'scrum', 'api', 'rest', 'graphql',
+            'machine learning', 'deep learning', 'ai', '머신러닝', '딥러닝', '인공지능',
+            'tensorflow', 'pytorch', 'pandas', 'numpy', 'scikit-learn',
+            '데이터', '분석', '모델', '알고리즘', '최적화', '테스트', '배포'
+        ]
+    
+    def extract_user_answers(self, chat_history: list) -> list:
+        """대화 기록에서 지원자의 답변만 추출"""
+        answers = []
+        for msg in chat_history:
+            if isinstance(msg, HumanMessage):
+                answers.append(msg.content)
+        return answers
+    
+    def analyze_star_structure(self, answers: list) -> dict:
+        """
+        STAR 기법에 기반하여 답변 구조를 분석
+        각 답변에서 S, T, A, R 요소가 얼마나 포함되어 있는지 평가
+        """
+        star_analysis = {
+            'situation': {'count': 0, 'examples': []},
+            'task': {'count': 0, 'examples': []},
+            'action': {'count': 0, 'examples': []},
+            'result': {'count': 0, 'examples': []}
+        }
+        
+        for answer in answers:
+            answer_lower = answer.lower()
+            for star_element, keywords in self.star_keywords.items():
+                for keyword in keywords:
+                    if keyword in answer_lower:
+                        star_analysis[star_element]['count'] += 1
+                        # 키워드 주변 컨텍스트 추출 (최대 50자)
+                        idx = answer_lower.find(keyword)
+                        start = max(0, idx - 20)
+                        end = min(len(answer), idx + len(keyword) + 30)
+                        context = answer[start:end]
+                        if context not in star_analysis[star_element]['examples']:
+                            star_analysis[star_element]['examples'].append(f"...{context}...")
+                        break  # 하나의 키워드만 카운트
+        
+        return star_analysis
+    
+    def extract_keywords(self, answers: list) -> dict:
+        """답변에서 핵심 키워드 추출"""
+        all_text = ' '.join(answers).lower()
+        
+        # 기술 키워드 추출
+        found_tech_keywords = []
+        for keyword in self.tech_keywords:
+            if keyword.lower() in all_text:
+                count = all_text.count(keyword.lower())
+                found_tech_keywords.append((keyword, count))
+        
+        # 빈도순 정렬
+        found_tech_keywords.sort(key=lambda x: x[1], reverse=True)
+        
+        # 일반 명사 추출 (간단한 패턴 매칭)
+        # 한글 명사 패턴 (2글자 이상)
+        korean_words = re.findall(r'[가-힣]{2,}', all_text)
+        word_freq = Counter(korean_words)
+        
+        # 불용어 제거
+        stopwords = ['그래서', '그리고', '하지만', '그런데', '이것', '저것', '그것', '있습니다', 
+                     '했습니다', '합니다', '입니다', '습니다', '것입니다', '였습니다', '됩니다']
+        for sw in stopwords:
+            if sw in word_freq:
+                del word_freq[sw]
+        
+        return {
+            'tech_keywords': found_tech_keywords[:10],  # 상위 10개
+            'general_keywords': word_freq.most_common(15)  # 상위 15개
+        }
+    
+    def calculate_answer_metrics(self, answers: list) -> dict:
+        """답변 관련 기본 메트릭 계산"""
+        if not answers:
+            return {'total_answers': 0, 'avg_length': 0, 'total_chars': 0}
+        
+        total_chars = sum(len(a) for a in answers)
+        avg_length = total_chars / len(answers)
+        
+        # 답변 길이 분포
+        short_answers = sum(1 for a in answers if len(a) < 50)
+        medium_answers = sum(1 for a in answers if 50 <= len(a) < 200)
+        long_answers = sum(1 for a in answers if len(a) >= 200)
+        
+        return {
+            'total_answers': len(answers),
+            'avg_length': round(avg_length, 1),
+            'total_chars': total_chars,
+            'short_answers': short_answers,
+            'medium_answers': medium_answers,
+            'long_answers': long_answers
+        }
+    
+    def generate_star_feedback(self, star_analysis: dict) -> str:
+        """STAR 분석 결과에 기반한 피드백 생성"""
+        feedback = []
+        
+        total_elements = sum(star_analysis[k]['count'] for k in star_analysis)
+        
+        if total_elements == 0:
+            return "⚠️ STAR 기법 요소가 거의 발견되지 않았습니다. 구체적인 상황, 과제, 행동, 결과를 포함하여 답변하면 더 효과적입니다."
+        
+        # 각 요소별 피드백
+        element_names = {
+            'situation': ('상황(Situation)', '당시 상황이나 배경'),
+            'task': ('과제(Task)', '맡은 역할이나 해결해야 할 목표'),
+            'action': ('행동(Action)', '구체적으로 수행한 행동'),
+            'result': ('결과(Result)', '달성한 성과나 배운 점')
+        }
+        
+        weak_elements = []
+        strong_elements = []
+        
+        for element, (name, desc) in element_names.items():
+            count = star_analysis[element]['count']
+            if count == 0:
+                weak_elements.append(f"{name}")
+            elif count >= 3:
+                strong_elements.append(f"{name}")
+        
+        if strong_elements:
+            feedback.append(f"✅ 강점: {', '.join(strong_elements)} 요소가 잘 포함되어 있습니다.")
+        
+        if weak_elements:
+            feedback.append(f"📝 개선 필요: {', '.join(weak_elements)} 요소를 더 보완하면 좋겠습니다.")
+        
+        return '\n'.join(feedback)
+    
+    def generate_ai_evaluation(self, chat_history: list, answers: list) -> str:
+        """LLM을 사용하여 종합 평가 생성"""
+        if not answers:
+            return "답변이 없어 평가를 생성할 수 없습니다."
+        
+        # 대화 내용을 텍스트로 변환
+        conversation_text = ""
+        for msg in chat_history[1:]:  # 시스템 프롬프트 제외
+            if isinstance(msg, AIMessage):
+                conversation_text += f"면접관: {msg.content}\n"
+            elif isinstance(msg, HumanMessage):
+                conversation_text += f"지원자: {msg.content}\n"
+        
+        evaluation_prompt = f"""다음은 면접 대화 내용입니다. 지원자의 답변을 종합적으로 평가해주세요.
+
+[면접 대화]
+{conversation_text}
+
+[평가 기준]
+1. STAR 기법 활용도 (상황-과제-행동-결과 구조)
+2. 답변의 구체성과 논리성
+3. 기술적 역량 표현
+4. 커뮤니케이션 능력
+5. 개선이 필요한 부분
+
+위 기준에 따라 간결하게 평가해주세요. 각 항목당 1-2문장으로 작성하고, 마지막에 종합 점수(100점 만점)와 한줄 총평을 제시해주세요."""
+
+        try:
+            response = self.llm.invoke([HumanMessage(content=evaluation_prompt)])
+            return response.content
+        except Exception as e:
+            return f"AI 평가 생성 중 오류 발생: {e}"
+    
+    def generate_report(self, chat_history: list, video_metrics: dict = None) -> str:
+        """
+        종합 리포트 생성
+        
+        Args:
+            chat_history: 면접 대화 기록
+            video_metrics: 비디오 면접 시 발화 속도, 발음 명확성, 시선 처리 데이터 (옵션)
+        """
+        print("\n" + "="*60)
+        print("📊 면접 종합 리포트 생성 중...")
+        print("="*60)
+        
+        # 지원자 답변 추출
+        answers = self.extract_user_answers(chat_history)
+        
+        if not answers:
+            return "분석할 답변이 없습니다."
+        
+        # 분석 수행
+        star_analysis = self.analyze_star_structure(answers)
+        keywords = self.extract_keywords(answers)
+        metrics = self.calculate_answer_metrics(answers)
+        star_feedback = self.generate_star_feedback(star_analysis)
+        
+        # 리포트 생성
+        report = []
+        report.append("\n" + "="*60)
+        report.append("📋 AI 모의면접 종합 리포트")
+        report.append(f"📅 생성일시: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        report.append("="*60)
+        
+        # 1. 기본 통계
+        report.append("\n[1] 📈 답변 기본 통계")
+        report.append("-" * 40)
+        report.append(f"  • 총 답변 수: {metrics['total_answers']}회")
+        report.append(f"  • 평균 답변 길이: {metrics['avg_length']}자")
+        report.append(f"  • 총 답변 분량: {metrics['total_chars']}자")
+        report.append(f"  • 답변 길이 분포:")
+        report.append(f"    - 짧은 답변(~50자): {metrics['short_answers']}회")
+        report.append(f"    - 중간 답변(50~200자): {metrics['medium_answers']}회")
+        report.append(f"    - 긴 답변(200자~): {metrics['long_answers']}회")
+        
+        # 2. STAR 기법 분석
+        report.append("\n[2] ⭐ STAR 기법 분석")
+        report.append("-" * 40)
+        for element in ['situation', 'task', 'action', 'result']:
+            element_kr = {'situation': '상황(S)', 'task': '과제(T)', 
+                         'action': '행동(A)', 'result': '결과(R)'}[element]
+            count = star_analysis[element]['count']
+            bar = '█' * min(count, 10) + '░' * (10 - min(count, 10))
+            report.append(f"  • {element_kr}: [{bar}] {count}회")
+        
+        report.append(f"\n  💡 STAR 피드백:")
+        for line in star_feedback.split('\n'):
+            report.append(f"     {line}")
+        
+        # 3. 핵심 키워드 분석
+        report.append("\n[3] 🔑 핵심 키워드 분석")
+        report.append("-" * 40)
+        
+        if keywords['tech_keywords']:
+            report.append("  • 기술 키워드:")
+            tech_str = ", ".join([f"{kw}({cnt}회)" for kw, cnt in keywords['tech_keywords'][:5]])
+            report.append(f"    {tech_str}")
+        
+        if keywords['general_keywords']:
+            report.append("  • 주요 표현:")
+            general_str = ", ".join([f"{kw}({cnt}회)" for kw, cnt in keywords['general_keywords'][:8]])
+            report.append(f"    {general_str}")
+        
+        # 4. 비디오 면접 메트릭 (제공된 경우)
+        report.append("\n[4] 🎥 비언어적 커뮤니케이션 분석")
+        report.append("-" * 40)
+        if video_metrics:
+            report.append(f"  • 발화 속도: {video_metrics.get('speech_rate', 'N/A')}")
+            report.append(f"  • 발음 명확성: {video_metrics.get('pronunciation_clarity', 'N/A')}")
+            report.append(f"  • 시선 처리: {video_metrics.get('eye_contact', 'N/A')}")
+            report.append(f"  • 표정 분석: {video_metrics.get('facial_expression', 'N/A')}")
+        else:
+            report.append("  ℹ️ 텍스트 기반 면접으로 비언어적 분석이 제공되지 않습니다.")
+            report.append("  💡 비디오 면접 모드에서 발화 속도, 발음 명확성, 시선 처리 분석이 가능합니다.")
+        
+        # 5. AI 종합 평가
+        report.append("\n[5] 🤖 AI 종합 평가")
+        report.append("-" * 40)
+        print("  (AI가 면접 내용을 분석 중입니다...)")
+        ai_evaluation = self.generate_ai_evaluation(chat_history, answers)
+        for line in ai_evaluation.split('\n'):
+            report.append(f"  {line}")
+        
+        # 6. 개선 제안
+        report.append("\n[6] 📝 개선 제안")
+        report.append("-" * 40)
+        
+        suggestions = []
+        if metrics['short_answers'] > metrics['long_answers']:
+            suggestions.append("• 답변을 더 구체적이고 상세하게 작성해보세요.")
+        if star_analysis['result']['count'] < 2:
+            suggestions.append("• 경험의 '결과'와 '성과'를 더 강조해보세요.")
+        if star_analysis['action']['count'] < 2:
+            suggestions.append("• 본인이 직접 수행한 '행동'을 더 구체적으로 설명해보세요.")
+        if not keywords['tech_keywords']:
+            suggestions.append("• 기술적인 용어와 도구를 더 활용해보세요.")
+        
+        if suggestions:
+            for suggestion in suggestions:
+                report.append(f"  {suggestion}")
+        else:
+            report.append("  ✅ 전반적으로 좋은 답변 구조를 보여주셨습니다!")
+        
+        report.append("\n" + "="*60)
+        report.append("📋 리포트 생성 완료")
+        report.append("="*60)
+        
+        return '\n'.join(report)
+
+
 def main(): # 프로그램의 메인 로직을 담는 함수
     print("AI 면접 시스템을 시작합니다")
 
     # 환경 변수를 사용해 데이터베이스 연결 정보를 안전하게 가져오고, 이를 바탕으로 RAG(검색 증강 생성) 시스템을 초기화
-    db_url = os.getenv("DATABASE_URL")
-    print(f"Connecting to Vector DB: {db_url} (Check .env if fails)")
+    CONNECTION_STRING = os.getenv("POSTGRES_CONNECTION_STRING")
+    
+    conn = psycopg2.connect(CONNECTION_STRING)
+    cur = conn.cursor()
     
     # 객체 초기화: 위에서 가져온 DB 주소를 ResumeRAG라는 클래스에 전달. 클래스 내부에서 DB 주소를 받아 PostgreSQL(PGVector)에 접속하고, 지원자의 이력서 데이터를 조회할 준비를 마친다.
-    rag = ResumeRAG(connection_string=db_url)
+    rag = ResumeRAG(connection_string=CONNECTION_STRING)
     
     # 이력서 파일 확인
     resume_path = os.path.join(current_dir, "resume.pdf")
@@ -86,6 +399,23 @@ def main(): # 프로그램의 메인 로직을 담는 함수
             user_input = input("\n지원자 (종료하려면 'exit' 입력): ")
             if user_input.lower().strip() in ["exit", "종료", "quit"]:
                 print("\nAI 면접관: 면접을 종료합니다. 수고하셨습니다.")
+                
+                # 면접 종료 후 종합 리포트 생성
+                generate_report = input("\n📊 면접 결과 리포트를 생성하시겠습니까? (y/n, default: y): ").strip().lower()
+                if generate_report != 'n':
+                    report_generator = InterviewReportGenerator(llm)
+                    report = report_generator.generate_report(chat_history)
+                    print(report)
+                    
+                    # 리포트 파일로 저장 여부 확인
+                    save_report = input("\n💾 리포트를 파일로 저장하시겠습니까? (y/n, default: n): ").strip().lower()
+                    if save_report == 'y':
+                        report_filename = f"interview_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                        report_path = os.path.join(current_dir, report_filename)
+                        with open(report_path, 'w', encoding='utf-8') as f:
+                            f.write(report)
+                        print(f"✅ 리포트가 저장되었습니다: {report_path}")
+                
                 break
             
             if not user_input.strip():
@@ -127,10 +457,27 @@ def main(): # 프로그램의 메인 로직을 담는 함수
 
         except KeyboardInterrupt:
             print("\n\n면접이 강제로 종료되었습니다.")
+            # 강제 종료 시에도 리포트 생성 옵션 제공
+            try:
+                generate_report = input("\n📊 면접 결과 리포트를 생성하시겠습니까? (y/n, default: n): ").strip().lower()
+                if generate_report == 'y':
+                    report_generator = InterviewReportGenerator(llm)
+                    report = report_generator.generate_report(chat_history)
+                    print(report)
+            except:
+                pass
             break
         except Exception as e:
             print(f"\n오류가 발생했습니다: {e}")
             break
+    
+    # 데이터베이스 연결 종료
+    try:
+        cur.close()
+        conn.close()
+        print("\n데이터베이스 연결이 종료되었습니다.")
+    except:
+        pass
 
 if __name__ == "__main__":
     main()
