@@ -2,44 +2,633 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>AI Interview - Video</title>
+  <title>AI Interview - 화상 면접</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
-    video { width: 45%; max-width: 560px; background: #000; margin-right: 16px; }
-    .row { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
-    #logs { margin-top: 12px; font-size: 14px; white-space: pre-wrap; background: #f7f7f7; padding: 8px; border-radius: 6px; }
-    button { padding: 8px 12px; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #fff;
+    }
+    
+    .header {
+      background: rgba(0,0,0,0.3);
+      padding: 16px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      backdrop-filter: blur(10px);
+    }
+    .header h1 {
+      font-size: 24px;
+      background: linear-gradient(90deg, #00d9ff, #00ff88);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .header .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #666;
+      animation: pulse 2s infinite;
+    }
+    .status-dot.connected { background: #00ff88; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .main-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+      padding: 24px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+    
+    .video-panel {
+      background: rgba(255,255,255,0.05);
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .panel-header {
+      padding: 12px 16px;
+      background: rgba(0,0,0,0.3);
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .panel-header .icon { font-size: 20px; }
+    
+    /* 실사 면접관 패널 */
+    #interviewerContainer {
+      width: 100%;
+      height: 400px;
+      background: linear-gradient(180deg, #2c3e50 0%, #1a252f 100%);
+      position: relative;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .interviewer-wrapper {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .interviewer-image {
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 4px solid rgba(0, 217, 255, 0.5);
+      box-shadow: 0 0 40px rgba(0, 217, 255, 0.3), 0 0 80px rgba(0, 217, 255, 0.1);
+      animation: float 4s ease-in-out infinite, glow 2s ease-in-out infinite alternate;
+    }
+    
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-8px); }
+    }
+    
+    @keyframes glow {
+      from { box-shadow: 0 0 40px rgba(0, 217, 255, 0.3), 0 0 80px rgba(0, 217, 255, 0.1); }
+      to { box-shadow: 0 0 50px rgba(0, 217, 255, 0.5), 0 0 100px rgba(0, 217, 255, 0.2); }
+    }
+    
+    .interviewer-image.speaking {
+      animation: float 4s ease-in-out infinite, speaking-glow 0.5s ease-in-out infinite alternate;
+    }
+    
+    @keyframes speaking-glow {
+      from { 
+        box-shadow: 0 0 40px rgba(0, 255, 136, 0.4), 0 0 80px rgba(0, 255, 136, 0.2);
+        transform: translateY(0px) scale(1);
+      }
+      to { 
+        box-shadow: 0 0 60px rgba(0, 255, 136, 0.6), 0 0 120px rgba(0, 255, 136, 0.3);
+        transform: translateY(-4px) scale(1.02);
+      }
+    }
+    
+    .voice-waves {
+      position: absolute;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 4px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    
+    .voice-waves.active { opacity: 1; }
+    
+    .wave-bar {
+      width: 4px;
+      background: linear-gradient(to top, #00d9ff, #00ff88);
+      border-radius: 2px;
+      animation: wave 0.5s ease-in-out infinite;
+    }
+    
+    .wave-bar:nth-child(1) { height: 20px; animation-delay: 0s; }
+    .wave-bar:nth-child(2) { height: 30px; animation-delay: 0.1s; }
+    .wave-bar:nth-child(3) { height: 25px; animation-delay: 0.2s; }
+    .wave-bar:nth-child(4) { height: 35px; animation-delay: 0.3s; }
+    .wave-bar:nth-child(5) { height: 20px; animation-delay: 0.4s; }
+    .wave-bar:nth-child(6) { height: 30px; animation-delay: 0.5s; }
+    .wave-bar:nth-child(7) { height: 25px; animation-delay: 0.6s; }
+    
+    @keyframes wave {
+      0%, 100% { transform: scaleY(1); }
+      50% { transform: scaleY(0.5); }
+    }
+    
+    .interviewer-name {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      background: rgba(0,0,0,0.6);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      backdrop-filter: blur(5px);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .interviewer-name .online-dot {
+      width: 8px;
+      height: 8px;
+      background: #00ff88;
+      border-radius: 50%;
+      animation: pulse 1.5s infinite;
+    }
+    
+    .speaking-indicator {
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      background: rgba(0, 217, 255, 0.2);
+      border: 1px solid rgba(0, 217, 255, 0.5);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      display: none;
+      backdrop-filter: blur(5px);
+    }
+    .speaking-indicator.active { 
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .speaking-indicator .mic-icon {
+      animation: mic-pulse 0.5s infinite alternate;
+    }
+    
+    @keyframes mic-pulse {
+      from { transform: scale(1); }
+      to { transform: scale(1.2); }
+    }
+    
+    #localVideo {
+      width: 100%;
+      height: 400px;
+      object-fit: cover;
+      background: #000;
+    }
+    
+    .control-panel {
+      grid-column: 1 / -1;
+      display: flex;
+      justify-content: center;
+      gap: 16px;
+      padding: 20px;
+    }
+    .btn {
+      padding: 14px 32px;
+      border: none;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-start {
+      background: linear-gradient(135deg, #00d9ff, #00ff88);
+      color: #1a1a2e;
+    }
+    .btn-start:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,217,255,0.4); }
+    .btn-stop {
+      background: linear-gradient(135deg, #ff4757, #ff6b81);
+      color: #fff;
+    }
+    .btn-stop:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(255,71,87,0.4); }
+    .btn-dashboard {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.2);
+      text-decoration: none;
+    }
+    .btn-dashboard:hover { background: rgba(255,255,255,0.2); }
+    
+    .info-panel {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    .info-box {
+      background: rgba(255,255,255,0.05);
+      border-radius: 12px;
+      padding: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .info-box h3 {
+      margin-bottom: 12px;
+      font-size: 14px;
+      color: #00d9ff;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    
+    .emotion-bar {
+      display: flex;
+      align-items: center;
+      margin: 8px 0;
+    }
+    .emotion-label {
+      width: 60px;
+      font-size: 13px;
+    }
+    .emotion-progress {
+      flex: 1;
+      height: 8px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 0 12px;
+    }
+    .emotion-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+    .emotion-value {
+      width: 40px;
+      text-align: right;
+      font-size: 12px;
+      color: #aaa;
+    }
+    
+    #logs {
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: #aaa;
+      max-height: 150px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+    #logs::-webkit-scrollbar { width: 6px; }
+    #logs::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+    
+    .question-box {
+      grid-column: 1 / -1;
+      background: rgba(0, 217, 255, 0.1);
+      border: 1px solid rgba(0, 217, 255, 0.3);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      display: none;
+    }
+    .question-box.active { display: block; }
+    .question-box h3 { color: #00d9ff; margin-bottom: 12px; }
+    .question-text { font-size: 18px; line-height: 1.6; }
+    
+    .interviewer-selector {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 10;
+    }
+    
+    .interviewer-selector select {
+      background: rgba(0,0,0,0.6);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      backdrop-filter: blur(5px);
+    }
+    
+    .interviewer-selector select:focus {
+      outline: none;
+      border-color: #00d9ff;
+    }
   </style>
 </head>
 <body>
-  <h2>화상 면접 (프리뷰)</h2>
-  <div class="row">
-    <div>
-      <div>내 카메라</div>
+  <header class="header">
+    <h1>🎯 AI 모의면접 시스템</h1>
+    <div class="status">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">대기 중</span>
+    </div>
+  </header>
+
+  <div class="main-container">
+    <!-- 실사 면접관 -->
+    <div class="video-panel">
+      <div class="panel-header">
+        <span class="icon">👔</span>
+        <span>AI 면접관</span>
+      </div>
+      <div id="interviewerContainer">
+        <div class="interviewer-selector">
+          <select id="interviewerSelect" onchange="changeInterviewer(this.value)">
+            <option value="male1">남성 면접관 1</option>
+            <option value="female1">여성 면접관 1</option>
+            <option value="male2">남성 면접관 2</option>
+            <option value="female2">여성 면접관 2</option>
+          </select>
+        </div>
+        <div class="interviewer-wrapper">
+          <img id="interviewerImage" class="interviewer-image" 
+               src="https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400&h=400&fit=crop&crop=face" 
+               alt="AI 면접관">
+          <div class="voice-waves" id="voiceWaves">
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+            <div class="wave-bar"></div>
+          </div>
+        </div>
+        <div class="interviewer-name">
+          <span class="online-dot"></span>
+          <span id="interviewerName">김민수 면접관</span>
+        </div>
+        <div class="speaking-indicator" id="speakingIndicator">
+          <span class="mic-icon">🎤</span>
+          <span>말하는 중...</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 내 카메라 -->
+    <div class="video-panel">
+      <div class="panel-header">
+        <span class="icon">👤</span>
+        <span>나의 화면</span>
+      </div>
       <video id="localVideo" autoplay playsinline muted></video>
     </div>
-    <div>
-      <div>서버 반환(에코) 비디오</div>
-      <video id="remoteVideo" autoplay playsinline></video>
+
+    <!-- 현재 질문 표시 -->
+    <div class="question-box" id="questionBox">
+      <h3>📝 현재 질문</h3>
+      <p class="question-text" id="questionText">면접을 시작하면 질문이 표시됩니다.</p>
+    </div>
+
+    <!-- 컨트롤 버튼 -->
+    <div class="control-panel">
+      <button class="btn btn-start" id="startBtn">
+        <span>▶</span> 면접 시작
+      </button>
+      <button class="btn btn-stop" id="stopBtn">
+        <span>⏹</span> 종료
+      </button>
+      <a class="btn btn-dashboard" id="dashboardLink" href="/static/dashboard.html" target="_blank">
+        <span>📊</span> 감정 분석 대시보드
+      </a>
+    </div>
+
+    <!-- 정보 패널 -->
+    <div class="info-panel">
+      <div class="info-box">
+        <h3>📈 실시간 감정 분석</h3>
+        <div id="emotionBox">
+          <div class="emotion-bar">
+            <span class="emotion-label">행복</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-happy" style="width:0%;background:#00ff88;"></div></div>
+            <span class="emotion-value" id="val-happy">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">중립</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-neutral" style="width:0%;background:#888;"></div></div>
+            <span class="emotion-value" id="val-neutral">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">슬픔</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-sad" style="width:0%;background:#5a9fd4;"></div></div>
+            <span class="emotion-value" id="val-sad">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">분노</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-angry" style="width:0%;background:#ff4757;"></div></div>
+            <span class="emotion-value" id="val-angry">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">놀람</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-surprise" style="width:0%;background:#ffa502;"></div></div>
+            <span class="emotion-value" id="val-surprise">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">공포</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-fear" style="width:0%;background:#a55eea;"></div></div>
+            <span class="emotion-value" id="val-fear">0%</span>
+          </div>
+          <div class="emotion-bar">
+            <span class="emotion-label">혐오</span>
+            <div class="emotion-progress"><div class="emotion-fill" id="bar-disgust" style="width:0%;background:#2ed573;"></div></div>
+            <span class="emotion-value" id="val-disgust">0%</span>
+          </div>
+        </div>
+      </div>
+      <div class="info-box">
+        <h3>📋 시스템 로그</h3>
+        <div id="logs"></div>
+      </div>
     </div>
   </div>
-  <div style="margin-top:12px;">
-    <button id="startBtn">면접 시작</button>
-    <button id="stopBtn">종료</button>
-  </div>
-  <div id="logs"></div>
-  <div id="emotionBox" style="margin-top:12px;font-size:16px;"></div>
 
   <script>
+    // ========== 면접관 데이터 ==========
+    const interviewers = {
+      male1: {
+        name: '김민수 면접관',
+        image: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400&h=400&fit=crop&crop=face'
+      },
+      female1: {
+        name: '이서연 면접관',
+        image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=400&h=400&fit=crop&crop=face'
+      },
+      male2: {
+        name: '박준혁 면접관',
+        image: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=400&h=400&fit=crop&crop=face'
+      },
+      female2: {
+        name: '최지현 면접관',
+        image: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?w=400&h=400&fit=crop&crop=face'
+      }
+    };
+    
+    function changeInterviewer(key) {
+      const interviewer = interviewers[key];
+      if (interviewer) {
+        document.getElementById('interviewerImage').src = interviewer.image;
+        document.getElementById('interviewerName').textContent = interviewer.name;
+        log('면접관 변경: ' + interviewer.name);
+      }
+    }
+    
+    function setInterviewerSpeaking(isSpeaking) {
+      const img = document.getElementById('interviewerImage');
+      const indicator = document.getElementById('speakingIndicator');
+      const waves = document.getElementById('voiceWaves');
+      
+      if (isSpeaking) {
+        img.classList.add('speaking');
+        indicator.classList.add('active');
+        waves.classList.add('active');
+      } else {
+        img.classList.remove('speaking');
+        indicator.classList.remove('active');
+        waves.classList.remove('active');
+      }
+    }
+    
+    // ========== Hume AI TTS 기능 ==========
+    let audioContext = null;
+    let currentAudio = null;
+    
+    // TTS 상태 확인
+    async function checkTTSStatus() {
+      try {
+        const resp = await fetch('/tts/status');
+        const status = await resp.json();
+        if (status.api_key_configured) {
+          log('✅ Hume AI TTS 서비스 활성화됨');
+        } else {
+          log('⚠️ Hume AI TTS: API 키 미설정 (음성 기능 제한)');
+        }
+        return status;
+      } catch (e) {
+        log('⚠️ TTS 서비스 연결 불가');
+        return null;
+      }
+    }
+    
+    // TTS로 면접관 음성 재생
+    async function speakText(text, emotion = 'neutral') {
+      try {
+        setInterviewerSpeaking(true);
+        log(`🎤 면접관: "${text.substring(0, 30)}..."`);
+        
+        const resp = await fetch('/tts/speak', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, emotion })
+        });
+        
+        if (resp.ok) {
+          const audioBlob = await resp.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          
+          // 이전 오디오 정지
+          if (currentAudio) {
+            currentAudio.pause();
+            currentAudio = null;
+          }
+          
+          // 새 오디오 재생
+          currentAudio = new Audio(audioUrl);
+          currentAudio.onended = () => {
+            setInterviewerSpeaking(false);
+            URL.revokeObjectURL(audioUrl);
+          };
+          currentAudio.onerror = () => {
+            setInterviewerSpeaking(false);
+            log('❌ 오디오 재생 오류');
+          };
+          
+          await currentAudio.play();
+        } else {
+          // TTS 실패 시 애니메이션만 표시
+          setTimeout(() => setInterviewerSpeaking(false), 2000);
+        }
+      } catch (e) {
+        console.error('TTS Error:', e);
+        // 폴백: TTS 없이 애니메이션만
+        setTimeout(() => setInterviewerSpeaking(false), 2000);
+      }
+    }
+    
+    // 면접 질문 음성으로 읽기
+    async function askQuestion(questionText) {
+      document.getElementById('questionText').textContent = questionText;
+      document.getElementById('questionBox').classList.add('active');
+      await speakText(questionText, 'professional');
+    }
+    
+    // ========== WebRTC 및 면접 로직 ==========
     const log = (msg) => {
       const box = document.getElementById('logs');
       const time = new Date().toLocaleTimeString();
       box.textContent += `[${time}] ${msg}\n`;
+      box.scrollTop = box.scrollHeight;
     };
 
     let pc;
     let localStream;
     let emotionTimer;
+
+    function updateStatus(connected) {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (connected) {
+        dot.classList.add('connected');
+        text.textContent = '면접 진행 중';
+      } else {
+        dot.classList.remove('connected');
+        text.textContent = '대기 중';
+      }
+    }
+    
+    function updateEmotionBars(probabilities) {
+      const emotions = ['happy', 'neutral', 'sad', 'angry', 'surprise', 'fear', 'disgust'];
+      emotions.forEach(emotion => {
+        const value = Math.round((probabilities[emotion] || 0) * 100);
+        const bar = document.getElementById(`bar-${emotion}`);
+        const val = document.getElementById(`val-${emotion}`);
+        if (bar) bar.style.width = value + '%';
+        if (val) val.textContent = value + '%';
+      });
+    }
 
     async function start() {
       try {
@@ -48,12 +637,16 @@
           audio: { echoCancellation: true, noiseSuppression: true }
         });
         document.getElementById('localVideo').srcObject = localStream;
+        log('카메라 및 마이크 연결됨');
 
         pc = new RTCPeerConnection();
         pc.ontrack = (e) => {
-          document.getElementById('remoteVideo').srcObject = e.streams[0];
+          log('원격 트랙 수신');
         };
-        pc.onconnectionstatechange = () => log(`PC state: ${pc.connectionState}`);
+        pc.onconnectionstatechange = () => {
+          log(`연결 상태: ${pc.connectionState}`);
+          updateStatus(pc.connectionState === 'connected');
+        };
 
         localStream.getTracks().forEach((t) => pc.addTrack(t, localStream));
 
@@ -65,27 +658,37 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sdp: offer.sdp, type: offer.type })
         });
+        
+        if (!resp.ok) {
+          const errorText = await resp.text();
+          throw new Error(`서버 오류: ${errorText}`);
+        }
+        
         const answer = await resp.json();
         window.sessionId = answer.session_id;
         await pc.setRemoteDescription(answer);
-        log('WebRTC 연결이 설정되었습니다. 세션ID: ' + (window.sessionId || 'N/A'));
+        log('WebRTC 연결 완료. 세션ID: ' + (window.sessionId || 'N/A'));
+        
+        updateStatus(true);
+        document.getElementById('questionBox').classList.add('active');
+        
+        // 면접관 인사 (TTS 사용)
+        await askQuestion('안녕하세요. 오늘 면접을 진행하게 된 AI 면접관입니다. 먼저 간단한 자기소개를 부탁드립니다.');
+        
+        const dashboardLink = document.getElementById('dashboardLink');
+        dashboardLink.href = '/static/dashboard.html?session_id=' + window.sessionId;
       } catch (err) {
         log('오류: ' + err);
       }
+      
       // 감정 폴링 시작
       if (!emotionTimer) {
         emotionTimer = setInterval(async () => {
           try {
             const r = await fetch('/emotion');
             const j = await r.json();
-            if (j.status !== 'no_data') {
-              const p = j.probabilities || {};
-              const lines = [
-                `현재 감정: ${j.dominant_emotion ?? 'N/A'}`,
-                `행복: ${(p.happy ?? 0)*100|0}%  슬픔: ${(p.sad ?? 0)*100|0}%  분노: ${(p.angry ?? 0)*100|0}%`,
-                `놀람: ${(p.surprise ?? 0)*100|0}%  공포: ${(p.fear ?? 0)*100|0}%  혐오: ${(p.disgust ?? 0)*100|0}%  중립: ${(p.neutral ?? 0)*100|0}%`
-              ];
-              document.getElementById('emotionBox').textContent = lines.join('\n');
+            if (j.status !== 'no_data' && j.probabilities) {
+              updateEmotionBars(j.probabilities);
             }
           } catch (e) {}
         }, 1000);
@@ -97,12 +700,21 @@
         if (pc) pc.close();
         if (localStream) localStream.getTracks().forEach(t => t.stop());
         if (emotionTimer) { clearInterval(emotionTimer); emotionTimer = null; }
-        log('연결 종료.');
+        updateStatus(false);
+        document.getElementById('questionBox').classList.remove('active');
+        setInterviewerSpeaking(false);
+        log('면접 종료');
       } catch (e) { log('종료 오류: ' + e); }
     }
 
     document.getElementById('startBtn').onclick = start;
     document.getElementById('stopBtn').onclick = stop;
+    
+    // 초기화: TTS 상태 확인 및 로그
+    (async function init() {
+      log('시스템 준비 완료. 면접 시작 버튼을 클릭하세요.');
+      await checkTTSStatus();
+    })();
   </script>
 </body>
 </html>

@@ -28,6 +28,10 @@ celery
 aiortc
 websockets
 
+# --- Hume AI TTS ---
+hume[microphone]
+aiohttp
+
 # --- LLM Orchestration / RAG ---
 openai
 langchain

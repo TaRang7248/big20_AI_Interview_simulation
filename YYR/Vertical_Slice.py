@@ -135,6 +135,26 @@ FOLLOW_UP: Dict[str, str] = {
     "job_understanding": "그 직무에서 성과를 판단하는 기준(지표)은 무엇이라고 생각하나요?",
     "other": "조금 더 구체적으로(상황-행동-결과) 순서로 말해볼까요?",
 }
+def next_question(prev_q: str, prev_type: str, user_answer: str) -> str:
+    ua = user_answer
+
+    # 직무 이해 → 역량 연결
+    if prev_type == "job_understanding":
+        if any(k in ua for k in ["수집", "정리", "구조화", "대안", "의사결정"]):
+            return "좋아요. 그 역할을 잘 수행하기 위해 가장 중요한 역량은 무엇이라고 생각하나요?"
+        return FOLLOW_UP["job_understanding"]
+
+    # 지원동기 → 경험
+    if prev_type == "motivation":
+        return FOLLOW_UP["motivation"]
+
+    # 경험 → 역할/성과
+    if prev_type == "experience":
+        if any(k in ua for k in ["결과", "성과", "개선", "%", "단축"]):
+            return "그 결과를 만들기 위해 본인이 직접 한 핵심 행동은 무엇이었나요?"
+        return FOLLOW_UP["experience"]
+
+    return FOLLOW_UP.get(prev_type, FOLLOW_UP["other"])
 
 def next_question(prev_type: str) -> str:
     return FOLLOW_UP.get(prev_type, FOLLOW_UP["other"])
@@ -175,6 +195,13 @@ def run_interview(session_id: str, first_question: str, max_turns: int = 5) -> L
 
         # 다음 질문
         current_question = next_question(q_type)
+        print(f"(debug) q_type={q_type}") # 분류 확인용 ( 나중에 제거 가능 )
+        
+        current_question = next_question(
+            prev_q=q_clean,
+            prev_type=q_type,
+            user_answer=user_clean
+        )
 
     return items
 

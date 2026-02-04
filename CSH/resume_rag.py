@@ -18,15 +18,18 @@ class ResumeRAG:
     이력서(PDF)를 읽어 PostgreSQL(pgvector)에 저장하고,
     관련 내용을 검색(Retriever)할 수 있게 해주는 클래스.
     """
-    # connection_string: DB에 접속하기 위한 '주소'
-    # collection_name: DB 안에서 데이터를 담아둘 테이블 이름
     def __init__(self, connection_string: str = None, collection_name: str = "resume_vectors"):
-        # 기본값: 로컬 PostgreSQL 설정 (환경변수 또는 하드코딩)
-        # 실제 운영 환경에서는 .env에서 DB 접속 정보를 가져오는 것이 좋습니다.
-        self.connection = connection_string or os.getenv("DATABASE_URL")
-        # 입력받은 테이블 이름('resume_vectors' 등)을 클래스 내부 변수에 저장하여, 나중에 다른 함수들이 이 이름을 보고 데이터를 찾을 수 있게 한다.
-        self.collection_name = collection_name
+        # 기본 연결 문자열 (환경변수가 없을 경우 사용)
+        DEFAULT_CONNECTION = "POSTGRES_CONNECTION_STRING"
+        conn_str = connection_string or os.getenv("POSTGRES_CONNECTION_STRING") or DEFAULT_CONNECTION
         
+        # SQLAlchemy/PGVector는 'postgresql+psycopg2://' 형식이 필요하므로 변환
+        if conn_str and conn_str.startswith("postgresql://"):
+            conn_str = conn_str.replace("postgresql://", "postgresql+psycopg2://", 1)
+        
+        self.connection = conn_str
+        self.collection_name = collection_name
+
         # 임베딩 모델: Llama 3 (Ollama)
         # 주의: 'ollama pull llama3' 및 'ollama pull nomic-embed-text' (혹은 llama3 자체) 필요
         # 검색 품질을 위해 전용 임베딩 모델(nomic-embed-text)을 권장하지만, 
