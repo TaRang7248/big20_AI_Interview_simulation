@@ -49,7 +49,8 @@ class InterviewService:
         combined_context = list(set(source_questions + rag_questions))
         
         # 3. Generate initial question (Self-intro)
-        first_question = await self.llm.generate_question(job_title, "intro", combined_context)
+        # 1번째 질문은 항상 자기소개를 하도록 하며, 기술적 질문들이 섞인 컨텍스트를 제외하여 주제를 고정합니다.
+        first_question = await self.llm.generate_question(job_title, "intro", None)
         
         self.sessions[session_id] = {
             "name": name,

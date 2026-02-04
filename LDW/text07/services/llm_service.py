@@ -26,7 +26,7 @@ class LLMService:
             context_str = "\n참고할 질문들:\n" + "\n".join([f"- {q}" for q in context_questions])
 
         stage_prompts = {
-            "intro": "지원자의 자기소개를 요청하는 질문을 생성해 주세요.",
+            "intro": "면접의 시작으로 지원자에게 정중하게 자기소개를 부탁하는 질문을 생성해 주세요.",
             "personality": "지원자의 인성과 가치관을 파악할 수 있는 질문을 생성해 주세요.",
             "technical": f"지원자가 지원한 '{job_title}' 직무 지식을 심도 있게 묻는 질문을 생성해 주세요."
         }
