@@ -4,8 +4,8 @@ import json
 from datetime import datetime
 
 # Database paths as specified by the user
-INTERVIEW_DB_PATH = r'C:\big20\big20_AI_Interview_simulation\LDW\text06\db\interview.db'
-INTERVIEW_SAVE_DB_PATH = r'C:\big20\big20_AI_Interview_simulation\LDW\text06\db\interview_save.db'
+INTERVIEW_DB_PATH = r'C:\big20\big20_AI_Interview_simulation\LDW\text07\db\interview.db'
+INTERVIEW_SAVE_DB_PATH = r'C:\big20\big20_AI_Interview_simulation\LDW\text07\db\interview_save.db'
 
 def init_sqlite():
     """Initializes the save database and handles migrations."""

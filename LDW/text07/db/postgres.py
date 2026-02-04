@@ -53,6 +53,15 @@ def init_db():
     
     with engine.connect() as conn:
         conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        
+        # Check if candidate_name column exists, if not try to add it
+        try:
+            conn.execute(text("ALTER TABLE interview_results ADD COLUMN candidate_name VARCHAR"))
+            print("✅ Added candidate_name column to interview_results.")
+        except Exception:
+            # Column likely already exists or table doesn't exist yet
+            pass
+            
         conn.commit()
     Base.metadata.create_all(bind=engine)
 

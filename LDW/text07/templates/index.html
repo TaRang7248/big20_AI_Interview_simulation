@@ -51,6 +51,25 @@
             padding: 3rem;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+            
+            /* 고정 사이즈 및 스크롤 추가 */
+            height: 85vh;
+            max-height: 800px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--primary) transparent;
+        }
+
+        /* 크롬, 사파리, 엣지용 스크롤바 커스텀 */
+        .card::-webkit-scrollbar {
+            width: 6px;
+        }
+        .card::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .card::-webkit-scrollbar-thumb {
+            background-color: var(--primary);
+            border-radius: 10px;
         }
 
         h1 {
