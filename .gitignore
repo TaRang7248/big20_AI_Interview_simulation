@@ -9,6 +9,8 @@ big20_AI_Interview_simulation/
 # 개인 실험용 python 파일
 evaluate_and_fix_answers.py
 generate_answers.py
+# local data
+YYR/data/
 
 # Distribution / packaging
 .Python
@@ -152,6 +154,7 @@ ENV/
 env.bak/
 venv.bak/
 interview_env.bak/
+.env.example
 
 # Spyder project settings
 .spyderproject

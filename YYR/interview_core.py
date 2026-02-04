@@ -17,7 +17,6 @@ def clean_text(s: str) -> str:
     s = re.sub(r"\s+", " ", s)
     return s
 
-
 def classify_question(q: str) -> str:
     # 룰 기반(초기 버전)
     if any(k in q for k in ["경험", "사례", "활동", "수행", "프로젝트", "갈등", "해결"]):

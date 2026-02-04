@@ -1,5 +1,5 @@
-# OpenAI LLM을 활용한 간단한 텍스트 기반 AI 면접 프로그램
-# LangChain 라이브러리를 사용하여 OpenAI의 Chat 모델과 대화하며, 면접관 페르소나를 가진 AI가 질문을 하고 사용자가 답하는 방식으로 구현
+# Llama 3을 활용한 간단한 텍스트 기반 AI 면접 프로그램
+# LangChain 라이브러리를 사용하여 Llama 3 모델과 대화하며, 면접관 페르소나를 가진 AI가 질문을 하고 사용자가 답하는 방식으로 구현
 
 # 운영체제(OS)의 기능을 파이썬에서 사용할 수 있게 해주는 모듈. 주로 API 키와 같은 환경 변수를 .env 파일에서 가져올 때 사용
 import os
@@ -11,19 +11,17 @@ from dotenv import load_dotenv
 from langchain_ollama import ChatOllama
 # RAG 기능을 위한 모듈 임포트
 from resume_rag import ResumeRAG
-# ChatPromptTemplate: AI에게 줄 명령문(프롬프트)의 틀을 만든다
-# MessagesPlaceholder: 대화 내용이 들어갈 '빈자리'를 만든다. 이전 대화 기록을 통째로 갈아 끼울 때 사용.
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 # AI 대화에 쓰이는 메시지 타입을 정의
 # HumanMessage: 사용자가 입력한 메시지
 # AIMessage: AI가 생성한 메시지
 # SystemMessage: AI의 인격(페르소나)과 규칙을 부여하는 메시지
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-import psycopg2
-import json
+# 정규 표현식(Regular Expression)을 사용하는 도구
 import re
+# 날짜와 시간을 다루는 도구
 from datetime import datetime
+# 리스트 안의 단어 빈도 수를 세는 도구
 from collections import Counter
 
 # 프로젝트 루트에서 .env 파일을 찾기 위해 경로 설정
@@ -32,7 +30,11 @@ root_dir = os.path.dirname(current_dir)
 sys.path.append(root_dir)
 
 # 프로젝트 폴더에 있는 .env 파일에 적힌 설정값들을 읽어서 파이썬 프로그램이 사용할 수 있도록 환경 변수로 등록해주는 함수
-load_dotenv() 
+load_dotenv()
+
+# LLM 모델 설정 (환경변수로 오버라이드 가능)
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
+DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7")) 
 
 
 class InterviewReportGenerator:
@@ -41,7 +43,7 @@ class InterviewReportGenerator:
     - STAR 기법(Situation, Task, Action, Result) 분석
     - 핵심 키워드 추출
     - 답변 구조 평가
-    - 발화 속도/발음 명확성/시선 처리 (비디오 면접 연동 시 사용)
+    - 발화 속도/발음 명확성/시선 처리 등 비언어적 요소 분석 (화상 면접 내용 바탕)
     """
     
     def __init__(self, llm):
@@ -61,7 +63,9 @@ class InterviewReportGenerator:
             'git', 'ci/cd', 'devops', 'agile', 'scrum', 'api', 'rest', 'graphql',
             'machine learning', 'deep learning', 'ai', '머신러닝', '딥러닝', '인공지능',
             'tensorflow', 'pytorch', 'pandas', 'numpy', 'scikit-learn',
-            '데이터', '분석', '모델', '알고리즘', '최적화', '테스트', '배포'
+            '데이터', '분석', '모델', '알고리즘', '최적화', '테스트', '배포', 'LLM', 'RAG', 'LangChain', 'Spark', 'Hadoop',
+            'Terraform', 'Linux', 'Prometheus', 'Grafana', 'Flutter', 'Swift', 'Kotlin', 'React Native', 
+            'Next.js', 'Tailwind', 'Svelte', 'Redux', 'Go', 'C++', 'PHP', 'Ruby', 'FastAPI'
         ]
     
     def extract_user_answers(self, chat_history: list) -> list:
@@ -115,9 +119,9 @@ class InterviewReportGenerator:
         # 빈도순 정렬
         found_tech_keywords.sort(key=lambda x: x[1], reverse=True)
         
-        # 일반 명사 추출 (간단한 패턴 매칭)
-        # 한글 명사 패턴 (2글자 이상)
+        # 답변 전체에서 2글자 이상의 한글 단어만 모두 골라낸다
         korean_words = re.findall(r'[가-힣]{2,}', all_text)
+        # 골라낸 한글 단어들이 각각 몇 번씩 나왔는지 자동으로 계산
         word_freq = Counter(korean_words)
         
         # 불용어 제거
@@ -132,6 +136,8 @@ class InterviewReportGenerator:
             'general_keywords': word_freq.most_common(15)  # 상위 15개
         }
     
+    # 지원자가 답변을 얼마나 성실하고 길게 작성했는지 '양적인 측면'에서 분석하는 기능
+    # 이 수치들은 단순한 숫자가 아니라 지원자의 '태도'를 보여주는 데이터가 된다
     def calculate_answer_metrics(self, answers: list) -> dict:
         """답변 관련 기본 메트릭 계산"""
         if not answers:
@@ -146,12 +152,12 @@ class InterviewReportGenerator:
         long_answers = sum(1 for a in answers if len(a) >= 200)
         
         return {
-            'total_answers': len(answers),
-            'avg_length': round(avg_length, 1),
-            'total_chars': total_chars,
-            'short_answers': short_answers,
-            'medium_answers': medium_answers,
-            'long_answers': long_answers
+            'total_answers': len(answers), # 총 답변 개수
+            'avg_length': round(avg_length, 1), # 평균 길이를 소수점 첫째 자리까지 반올림
+            'total_chars': total_chars, # 전체 글자 수
+            'short_answers': short_answers, # 짧은 답변 개수
+            'medium_answers': medium_answers, # 중간 답변 개수
+            'long_answers': long_answers # 긴 답변 개수
         }
     
     def generate_star_feedback(self, star_analysis: dict) -> str:
@@ -190,7 +196,9 @@ class InterviewReportGenerator:
         return '\n'.join(feedback)
     
     def generate_ai_evaluation(self, chat_history: list, answers: list) -> str:
-        """LLM을 사용하여 종합 평가 생성"""
+        """LLM을 사용하여 종합 평가 생성
+        대화 기록(chat_history)과 지원자의 답변 리스트(answers)를 받아서 최종 평가 글(문자열)을 내놓는 함수
+        """
         if not answers:
             return "답변이 없어 평가를 생성할 수 없습니다."
         
@@ -214,7 +222,7 @@ class InterviewReportGenerator:
 4. 커뮤니케이션 능력
 5. 개선이 필요한 부분
 
-위 기준에 따라 간결하게 평가해주세요. 각 항목당 1-2문장으로 작성하고, 마지막에 종합 점수(100점 만점)와 한줄 총평을 제시해주세요."""
+위 기준에 따라 지원자의 면접 답변을 평가하고, 각 항목별로 1~5점 척도로 점수를 매겨주세요. 평가한 결과를 바탕으로 합격 혹은 불합격 여부도 판단해주세요."""
 
         try:
             response = self.llm.invoke([HumanMessage(content=evaluation_prompt)])
@@ -228,7 +236,7 @@ class InterviewReportGenerator:
         
         Args:
             chat_history: 면접 대화 기록
-            video_metrics: 비디오 면접 시 발화 속도, 발음 명확성, 시선 처리 데이터 (옵션)
+            video_metrics: 비디오 면접 시 발화 속도, 발음 명확성, 시선 처리 데이터
         """
         print("\n" + "="*60)
         print("📊 면접 종합 리포트 생성 중...")
@@ -259,7 +267,7 @@ class InterviewReportGenerator:
         report.append(f"  • 총 답변 수: {metrics['total_answers']}회")
         report.append(f"  • 평균 답변 길이: {metrics['avg_length']}자")
         report.append(f"  • 총 답변 분량: {metrics['total_chars']}자")
-        report.append(f"  • 답변 길이 분포:")
+        report.append("  • 답변 길이 분포:")
         report.append(f"    - 짧은 답변(~50자): {metrics['short_answers']}회")
         report.append(f"    - 중간 답변(50~200자): {metrics['medium_answers']}회")
         report.append(f"    - 긴 답변(200자~): {metrics['long_answers']}회")
@@ -274,7 +282,7 @@ class InterviewReportGenerator:
             bar = '█' * min(count, 10) + '░' * (10 - min(count, 10))
             report.append(f"  • {element_kr}: [{bar}] {count}회")
         
-        report.append(f"\n  💡 STAR 피드백:")
+        report.append("\n  💡 STAR 피드백:")
         for line in star_feedback.split('\n'):
             report.append(f"     {line}")
         
@@ -345,11 +353,18 @@ def main(): # 프로그램의 메인 로직을 담는 함수
     # 환경 변수를 사용해 데이터베이스 연결 정보를 안전하게 가져오고, 이를 바탕으로 RAG(검색 증강 생성) 시스템을 초기화
     CONNECTION_STRING = os.getenv("POSTGRES_CONNECTION_STRING")
     
-    conn = psycopg2.connect(CONNECTION_STRING)
-    cur = conn.cursor()
+    if not CONNECTION_STRING:
+        print("⚠️ 경고: POSTGRES_CONNECTION_STRING 환경변수가 설정되지 않았습니다.")
+        print("   .env 파일에 데이터베이스 연결 정보를 설정해주세요.")
     
-    # 객체 초기화: 위에서 가져온 DB 주소를 ResumeRAG라는 클래스에 전달. 클래스 내부에서 DB 주소를 받아 PostgreSQL(PGVector)에 접속하고, 지원자의 이력서 데이터를 조회할 준비를 마친다.
-    rag = ResumeRAG(connection_string=CONNECTION_STRING)
+    # 객체 초기화: ResumeRAG 클래스 내부에서 SQLAlchemy를 통해 PostgreSQL(PGVector)에 접속
+    # 지원자의 이력서 데이터를 조회할 준비를 마친다.
+    try:
+        rag = ResumeRAG(connection_string=CONNECTION_STRING)
+    except Exception as e:
+        print(f"❌ 데이터베이스 연결 실패: {e}")
+        print("   Docker 컨테이너가 실행 중인지, 연결 정보가 올바른지 확인해주세요.")
+        return
     
     # 이력서 파일 확인
     resume_path = os.path.join(current_dir, "resume.pdf")
@@ -368,7 +383,13 @@ def main(): # 프로그램의 메인 로직을 담는 함수
     retriever = rag.get_retriever()
     
     # LLM 초기화 (Ollama 로컬 모델 사용)
-    llm = ChatOllama(model="llama3", temperature=0.7)
+    try:
+        llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=DEFAULT_LLM_TEMPERATURE)
+        print(f"✅ LLM 모델 로드 완료: {DEFAULT_LLM_MODEL}")
+    except Exception as e:
+        print(f"❌ LLM 초기화 실패: {e}")
+        print("   Ollama가 실행 중인지 확인해주세요: 'ollama serve'")
+        return
 
     # 시스템 프롬프트: 면접관의 페르소나 설정
     system_prompt = """당신은 IT 기업의 30년차 수석 개발자 면접관입니다.
@@ -410,11 +431,14 @@ def main(): # 프로그램의 메인 로직을 담는 함수
                     # 리포트 파일로 저장 여부 확인
                     save_report = input("\n💾 리포트를 파일로 저장하시겠습니까? (y/n, default: n): ").strip().lower()
                     if save_report == 'y':
-                        report_filename = f"interview_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-                        report_path = os.path.join(current_dir, report_filename)
-                        with open(report_path, 'w', encoding='utf-8') as f:
-                            f.write(report)
-                        print(f"✅ 리포트가 저장되었습니다: {report_path}")
+                        try:
+                            report_filename = f"interview_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                            report_path = os.path.join(current_dir, report_filename)
+                            with open(report_path, 'w', encoding='utf-8') as f:
+                                f.write(report)
+                            print(f"✅ 리포트가 저장되었습니다: {report_path}")
+                        except IOError as e:
+                            print(f"❌ 리포트 저장 실패: {e}")
                 
                 break
             
@@ -464,20 +488,16 @@ def main(): # 프로그램의 메인 로직을 담는 함수
                     report_generator = InterviewReportGenerator(llm)
                     report = report_generator.generate_report(chat_history)
                     print(report)
-            except:
-                pass
+            except (EOFError, KeyboardInterrupt):
+                print("\n리포트 생성을 건너뜁니다.")
             break
         except Exception as e:
             print(f"\n오류가 발생했습니다: {e}")
+            import traceback
+            traceback.print_exc()  # 디버깅을 위한 상세 에러 출력
             break
     
-    # 데이터베이스 연결 종료
-    try:
-        cur.close()
-        conn.close()
-        print("\n데이터베이스 연결이 종료되었습니다.")
-    except:
-        pass
+    print("\n면접 시스템을 종료합니다. 수고하셨습니다! 👋")
 
 if __name__ == "__main__":
     main()
