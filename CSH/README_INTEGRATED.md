@@ -2,7 +2,15 @@
 
 ## 📋 개요
 
-TTS, STT, LLM, 화상 면접, 감정 분석을 통합한 AI 모의면접 시스템입니다.
+TTS, STT, LLM 기반 답변 평가, 화상 면접, 감정 분석을 통합한 AI 모의면접 시스템입니다.
+
+### ✨ 주요 특징
+
+- **화상 면접 중심**: 채팅 면접과 화상 면접을 하나로 통합
+- **LLM 답변 평가**: 질문 생성이 아닌 **답변 분석/평가**에 LLM 활용
+- **질문 은행 시스템**: 체계적인 카테고리별 질문 순서
+- **이력서 RAG**: PDF 이력서 업로드 → 맞춤형 면접
+- **실시간 평가 시각화**: 5가지 평가 항목 실시간 점수 표시
 
 ## 🚀 빠른 시작
 
@@ -17,9 +25,9 @@ pip install -r requirements_integrated.txt
 프로젝트 루트에 `.env` 파일을 생성하고 다음 값들을 설정하세요:
 
 ```env
-# LLM 설정 (Ollama)
+# LLM 설정 (Ollama) - 답변 평가용
 LLM_MODEL=llama3
-LLM_TEMPERATURE=0.7
+LLM_TEMPERATURE=0.3
 
 # Hume AI TTS (선택사항)
 HUME_API_KEY=your_hume_api_key
@@ -39,7 +47,7 @@ REDIS_URL=redis://localhost:6379/0
 ### 3. 외부 서비스 실행
 
 ```bash
-# Ollama 실행 (LLM)
+# Ollama 실행 (LLM - 답변 평가용)
 ollama serve
 ollama pull llama3
 
@@ -63,11 +71,41 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 ### 5. 접속
 
 브라우저에서 다음 URL로 접속:
-- 메인 페이지: http://localhost:8000
-- 통합 화상 면접: http://localhost:8000/static/integrated_interview.html
-- 웹 채팅 면접: http://localhost:8000/interview
+- **메인 페이지**: http://localhost:8000
+- **화상 면접**: http://localhost:8000/static/integrated_interview.html
 - 감정 대시보드: http://localhost:8000/static/dashboard.html
 - API 문서: http://localhost:8000/docs
+
+---
+
+## 🎯 면접 흐름
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. 홈페이지 (/)                                             │
+│     └─ "AI 화상 면접 시작하기" 클릭                           │
+├─────────────────────────────────────────────────────────────┤
+│  2. 이력서 업로드 모달                                        │
+│     ├─ PDF 이력서 업로드 (선택)                               │
+│     │   └─ RAG 인덱싱 → 세션별 retriever 생성                │
+│     └─ 또는 "건너뛰기"                                       │
+├─────────────────────────────────────────────────────────────┤
+│  3. 화상 면접 시작                                           │
+│     ├─ WebRTC 카메라/마이크 연결                              │
+│     ├─ 질문 은행 기반 순차 질문                               │
+│     │   (intro → motivation → strength → project → ...)     │
+│     ├─ 답변 입력 → 백그라운드 LLM 평가                        │
+│     ├─ 실시간 평가 점수 표시 (5가지 항목)                     │
+│     ├─ 실시간 감정 분석 (7가지 감정)                          │
+│     └─ TTS 음성 출력                                         │
+├─────────────────────────────────────────────────────────────┤
+│  4. 면접 종료 → 리포트 생성                                   │
+│     ├─ LLM 평가 종합 결과                                    │
+│     ├─ STAR 기법 분석                                        │
+│     ├─ 키워드 분석                                           │
+│     └─ 개선 피드백                                           │
+└─────────────────────────────────────────────────────────────┘
+```
 
 ---
 
@@ -82,46 +120,66 @@ CSH/
 ├── resume_rag.py                  # 이력서 RAG
 ├── video_interview_server.py      # 화상 면접 서버
 ├── requirements_integrated.txt    # 의존성 패키지
+├── uploads/                       # 이력서 업로드 디렉토리
 └── static/
-    ├── integrated_interview.html  # 통합 면접 UI
-    ├── video.html                 # 화상 면접 UI
+    ├── integrated_interview.html  # 통합 화상 면접 UI
+    ├── video.html                 # 기존 화상 면접 UI
     └── dashboard.html             # 감정 대시보드
 ```
 
 ---
 
-## 🔧 통합된 기능
+## 🔧 핵심 기능
 
-### 1. LLM 기반 면접관 (Ollama/Llama3)
-- STAR 기법 기반 질문 생성
-- 맥락 인식 꼬리 질문
-- RAG를 통한 이력서 기반 질문
+### 1. LLM 기반 답변 평가 시스템
 
-### 2. TTS 서비스 (Hume AI)
-- 자연스러운 감정적 음성 생성
+LLM은 **질문 생성이 아닌 답변 평가**에 사용됩니다.
+
+| 평가 항목 | 설명 | 점수 |
+|-----------|------|------|
+| 구체성 (Specificity) | 구체적인 사례와 수치 포함 여부 | 1-5점 |
+| 논리성 (Logic) | 논리적 흐름의 일관성 | 1-5점 |
+| 기술 이해도 (Technical) | 기술적 개념 이해 정확성 | 1-5점 |
+| STAR 기법 (STAR) | 상황-과제-행동-결과 구조 | 1-5점 |
+| 전달력 (Communication) | 명확하고 이해하기 쉬운 답변 | 1-5점 |
+
+**총점: 25점 만점**
+
+### 2. 질문 은행 시스템
+
+체계적인 카테고리별 질문 순서:
+
+```python
+INTERVIEW_FLOW = [
+    "intro",           # 자기소개
+    "motivation",      # 지원 동기
+    "strength",        # 강점
+    "project",         # 프로젝트 경험
+    "teamwork",        # 팀워크
+    "technical",       # 기술 스택
+    "problem_solving", # 문제 해결
+    "growth",          # 성장 목표
+    "closing"          # 마무리
+]
+```
+
+### 3. 이력서 RAG 시스템
+
+- **PDF 업로드**: 면접 시작 전 이력서 업로드
+- **세션별 인덱싱**: `resume_{session_id}` 컬렉션으로 독립 관리
+- **맞춤 평가**: 이력서 내용을 참조하여 답변 평가
+
+### 4. 실시간 감정 분석
+
+- **7가지 감정**: 행복, 중립, 슬픔, 분노, 놀람, 공포, 혐오
+- **DeepFace 기반**: 1초 간격 얼굴 분석
+- **Redis 시계열 저장**: 면접 전체 감정 추이 기록
+
+### 5. TTS 음성 면접관 (Hume AI)
+
+- 자연스러운 AI 면접관 음성
 - 한국어 지원
-- REST API 및 스트리밍 지원
-
-### 3. STT 서비스 (Deepgram)
-- 실시간 음성 인식
-- 한국어 지원 (Nova-3 모델)
-- WebSocket 기반 스트리밍
-
-### 4. 화상 면접 + 감정 분석
-- WebRTC 기반 실시간 영상 통화
-- DeepFace 기반 7가지 감정 분석
-- Redis 시계열 데이터 저장
-
-### 5. 이력서 RAG (PostgreSQL + PGVector)
-- PDF 이력서 자동 인덱싱
-- 벡터 유사도 검색
-- 맥락 기반 질문 생성
-
-### 6. 면접 리포트
-- STAR 기법 분석
-- 키워드 추출
-- 감정 통계 포함
-- AI 기반 종합 평가
+- 말하는 동안 시각적 피드백 (파형 애니메이션)
 
 ---
 
@@ -132,10 +190,19 @@ CSH/
 - `GET /api/session/{session_id}` - 세션 정보 조회
 
 ### 채팅
-- `POST /api/chat` - 메시지 전송 및 AI 응답 받기
+- `POST /api/chat` - 메시지 전송 및 다음 질문 받기
+
+### 이력서 업로드
+- `POST /api/resume/upload` - PDF 이력서 업로드 및 RAG 인덱싱
+- `GET /api/resume/status/{session_id}` - 업로드 상태 확인
+- `DELETE /api/resume/{session_id}` - 이력서 삭제
+
+### LLM 평가
+- `POST /api/evaluate` - 개별 답변 평가 (5가지 항목)
+- `GET /api/evaluations/{session_id}` - 전체 평가 결과 조회
 
 ### 리포트
-- `GET /api/report/{session_id}` - 면접 리포트 생성
+- `GET /api/report/{session_id}` - 종합 면접 리포트 (LLM 평가 포함)
 
 ### WebRTC
 - `POST /offer` - WebRTC offer 처리
@@ -147,7 +214,6 @@ CSH/
 - `GET /emotion/stats` - 통계
 
 ### TTS
-- `POST /tts/speak` - 텍스트를 음성으로 변환
 - `GET /tts/status` - TTS 서비스 상태
 
 ### 시스템
