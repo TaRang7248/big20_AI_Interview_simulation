@@ -70,7 +70,7 @@ class LLMService:
     "feedback": "답변이 매우 구체적이고 기술적인 이해도가 높습니다.",
     "is_follow_up": true,
     "next_step_question": "꼬리 질문 내용 (is_follow_up이 true인 경우에만 생성)",
-    "pass_fail": "합격" // 마지막 질문인 경우에만 포함. 그 외에는 null
+    "pass_fail": "합격" // 마지막 질문인 경우 전체 평균 점수가 70점 이상이면 '합격', 아니면 '불합격'
 }}
 """
         response = self.client.chat.completions.create(

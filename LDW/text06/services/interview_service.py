@@ -89,16 +89,21 @@ class InterviewService:
         
         is_last_question = (current_step == 10)
         
-        # 1. Evaluate answer and get next action
+        # 1. Evaluate answer
         evaluation = await self.llm.evaluate_and_next_action(job_title, question, answer, is_last_question)
+        
+        # Track scores for average calculation
+        if "scores" not in session:
+            session["scores"] = []
+        session["scores"].append(evaluation.get("score", 0))
         
         # 2. Log to SQLite (interview_save.db)
         log_interview_step(name, job_title, question, answer, evaluation)
         
         # 3. Save to PostgreSQL for vector search
-        embedding = await self.llm.get_embedding(answer)
-        db = SessionLocal()
         try:
+            embedding = await self.llm.get_embedding(answer)
+            db = SessionLocal()
             result = InterviewResult(
                 candidate_name=name,
                 job_title=job_title,
@@ -109,25 +114,28 @@ class InterviewService:
             )
             db.add(result)
             db.commit()
+            db.close()
         except Exception as e:
             print(f"Error saving to Postgres: {e}")
-            db.rollback()
-        finally:
-            db.close()
 
         # Decide on next step
-        if evaluation.get("is_follow_up") and not session["is_follow_up"]:
-            # Provide ONLY one follow-up to prevent infinite loop
-            session["is_follow_up"] = True
+        # Rule: One tail question max per main question
+        if evaluation.get("is_follow_up") and not session.get("is_follow_up_active"):
+            session["is_follow_up_active"] = True
             next_question = evaluation["next_step_question"]
             is_completed = False
         else:
             # Advance to next main question
-            session["is_follow_up"] = False
+            session["is_follow_up_active"] = False
             session["current_step"] += 1
+            
             if session["current_step"] > 10:
-                next_question = "면접이 종료되었습니다. 수고하셨습니다."
+                avg_score = sum(session["scores"]) / len(session["scores"]) if session["scores"] else 0
+                pass_fail = "합격" if avg_score >= 70 else "불합격"
+                next_question = f"면접이 종료되었습니다. 평균 점수는 {avg_score:.1f}점이며, 결과는 '{pass_fail}'입니다. 수고하셨습니다."
                 is_completed = True
+                evaluation["avg_score"] = avg_score
+                evaluation["result_status"] = pass_fail
             else:
                 stage = self._get_stage(session["current_step"])
                 next_question = await self.llm.generate_question(job_title, stage, session["combined_context"])
@@ -137,5 +145,6 @@ class InterviewService:
             "evaluation": evaluation,
             "next_question": next_question,
             "step": session["current_step"],
-            "is_completed": is_completed
+            "is_completed": is_completed,
+            "is_follow_up": session.get("is_follow_up_active", False)
         }

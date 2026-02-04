@@ -12,11 +12,10 @@ from api.interview import router as interview_router
 from db.postgres import init_db
 from db.sqlite import init_sqlite
 
-app = FastAPI(title="AI Interview Simulation")
+from contextlib import asynccontextmanager
 
-# Initialize Databases
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     print("🚀 Initializing databases...")
     try:
         init_db()
@@ -29,6 +28,9 @@ def startup_event():
         print("✅ SQLite (interview_save.db) initialized.")
     except Exception as e:
         print(f"❌ SQLite init error: {e}")
+    yield
+
+app = FastAPI(title="AI Interview Simulation", lifespan=lifespan)
 
 # Routes
 app.include_router(interview_router, prefix="/api")

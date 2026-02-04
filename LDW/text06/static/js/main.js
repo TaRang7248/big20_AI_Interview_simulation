@@ -41,7 +41,7 @@ async function startInterview() {
             setTimeout(() => interviewArea.style.opacity = '1', 50);
             updateUIForQuestion();
         }, 300);
-        
+
     } catch (error) {
         console.error("Start Error:", error);
         alert("면접을 시작할 수 없습니다. 서버 상태를 확인하세요.");
@@ -79,13 +79,13 @@ function startTimer() {
 function updateTimerUI() {
     const timerText = document.getElementById('timer-text');
     const timerProgress = document.querySelector('.timer-progress');
-    
+
     timerText.innerText = timeLeft;
-    
+
     // Circular progress - 283 is approx 2 * PI * 45
     const offset = 283 - (timeLeft / 90) * 283;
     timerProgress.style.strokeDashoffset = offset;
-    
+
     if (timeLeft <= 10) {
         timerProgress.style.stroke = '#fb7185';
     } else {
@@ -101,31 +101,57 @@ async function toggleRecording() {
     }
 }
 
+let sttSocket = null;
+let silenceTimer = null;
+
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream);
         audioChunks = [];
 
+        // Setup WebSocket for real-time STT
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        sttSocket = new WebSocket(`${protocol}//${window.location.host}/api/ws/stt`);
+
+        sttSocket.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            if (data.text) {
+                const resultDiv = document.getElementById('stt-result');
+                resultDiv.innerText = data.text;
+                // Scroll to bottom
+                resultDiv.scrollTop = resultDiv.scrollHeight;
+            }
+        };
+
         mediaRecorder.ondataavailable = (event) => {
-            audioChunks.push(event.data);
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+                // Send cumulative blob for reliable decoding
+                if (sttSocket && sttSocket.readyState === WebSocket.OPEN) {
+                    const cumulativeBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+                    sttSocket.send(cumulativeBlob);
+                }
+            }
         };
 
         mediaRecorder.onstop = async () => {
-            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-            await transcribeAndProcess(audioBlob);
+            if (sttSocket) sttSocket.close();
+            const finalAnswer = document.getElementById('stt-result').innerText;
+            await processFinalAnswer(finalAnswer);
         };
 
-        mediaRecorder.start();
+        // Collect data every 3 seconds for "real-time" feel
+        mediaRecorder.start(3000);
         isRecording = true;
-        
+
         const btnRecord = document.getElementById('btn-record');
         btnRecord.innerText = "답변 완료 (클릭)";
         btnRecord.classList.add('recording');
         document.getElementById('recording-status').style.display = 'flex';
         document.getElementById('stt-result').innerText = "듣고 있습니다... 90초 이내로 말씀해 주세요.";
         document.getElementById('status-msg').innerText = "";
-        
+
         startTimer();
     } catch (err) {
         console.error("Microphone Access Error:", err);
@@ -138,37 +164,24 @@ async function stopRecording() {
         mediaRecorder.stop();
         isRecording = false;
         clearInterval(timerInterval);
-        
+
         const btnRecord = document.getElementById('btn-record');
         btnRecord.innerText = "분석 중...";
         btnRecord.disabled = true;
         btnRecord.classList.remove('recording');
         document.getElementById('recording-status').style.display = 'none';
-        document.getElementById('status-msg').innerText = "음성을 텍스트로 변환 중입니다...";
+        document.getElementById('status-msg').innerText = "답변을 평가 중입니다...";
     }
 }
 
-async function transcribeAndProcess(audioBlob) {
+async function processFinalAnswer(answerText) {
+    if (!answerText || answerText.trim() === "" || answerText.includes("듣고 있습니다")) {
+        document.getElementById('status-msg').innerText = "인식된 내용이 없습니다. 다시 말씀해 주세요.";
+        enableRecordButton();
+        return;
+    }
+
     try {
-        // 1. Transcribe
-        const formData = new FormData();
-        formData.append('file', audioBlob, 'recording.wav');
-
-        const transcribeResponse = await fetch('/api/transcribe', {
-            method: 'POST',
-            body: formData
-        });
-        const transcribeData = await transcribeResponse.json();
-        const answerText = transcribeData.text;
-
-        document.getElementById('stt-result').innerText = `"${answerText}"`;
-
-        if (!answerText || answerText.trim() === "") {
-            document.getElementById('status-msg').innerText = "인식된 내용이 없습니다. 다시 말씀해 주세요.";
-            enableRecordButton();
-            return;
-        }
-
         // 2. Process Answer
         const response = await fetch('/api/answer', {
             method: 'POST',
@@ -181,7 +194,7 @@ async function transcribeAndProcess(audioBlob) {
         });
 
         const result = await response.json();
-        
+
         // Save to history
         interviewHistory.push({
             question: currentQuestion,
@@ -194,10 +207,10 @@ async function transcribeAndProcess(audioBlob) {
         } else {
             currentQuestion = result.next_question;
             currentStep = result.step;
-            
+
             const qText = document.getElementById('question-text');
             qText.style.opacity = '0';
-            
+
             setTimeout(() => {
                 updateUIForQuestion();
                 qText.style.opacity = '1';
@@ -223,7 +236,7 @@ function showResults(passFail) {
     document.getElementById('interview-area').style.display = 'none';
     const resultArea = document.getElementById('result-area');
     resultArea.style.display = 'block';
-    
+
     document.getElementById('pass-fail-value').innerText = passFail || "평가 완료";
     if (passFail === "불합격") {
         document.getElementById('pass-fail-value').style.color = '#fb7185';
@@ -231,7 +244,7 @@ function showResults(passFail) {
 
     const feedbackList = document.getElementById('feedback-list');
     feedbackList.innerHTML = "";
-    
+
     interviewHistory.forEach((item, index) => {
         const div = document.createElement('div');
         div.className = 'feedback-item';

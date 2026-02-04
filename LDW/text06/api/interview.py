@@ -48,14 +48,12 @@ async def websocket_stt(websocket: WebSocket):
     await websocket.accept()
     try:
         while True:
-            # Send current transcript every second while recording
-            if interview_service.stt.is_recording:
-                # This is a bit of a hack for "real-time" with Whisper
-                # We can't easily do partial transcripts without stopping
-                # So we'll just send an "In Progress" status for now
-                # Or we could implement a more sophisticated chunking logic here
-                await websocket.send_json({"status": "recording", "text": "말씀하시는 중..."})
-            await asyncio.sleep(1)
+            data = await websocket.receive_bytes()
+            if data:
+                # Transcribe chunk
+                text = await interview_service.stt.transcribe_blob(data)
+                if text:
+                    await websocket.send_json({"status": "transcribed", "text": text})
     except WebSocketDisconnect:
         print("WebSocket disconnected")
     except Exception as e:
