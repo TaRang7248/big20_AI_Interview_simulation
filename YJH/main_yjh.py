@@ -2,12 +2,14 @@ import sys
 import os
 import uuid
 import traceback
+import shutil # 파일 저장용
 
 # 프로젝트 루트 경로 설정
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware # <--- 이거 추가!
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
@@ -22,12 +24,23 @@ from YJH.models import InterviewSession, Transcript, EvaluationReport
 from YJH.services.report_service import generate_interview_report
 # [추가] 비디오 면접(Video Interview)
 from YJH.services.vision_service import analyze_face_emotion
+# [추가] 업로드 API 추가 및 RAG 연동 임포트
+from YJH.services.rag_service import process_resume_pdf, get_relevant_context
 
 # 1. FastAPI 앱 초기화
 app = FastAPI(
     title="AI Interview Agent (YJH)",
     description="LangGraph + RAG + DB + Voice + Report (Full Version)",
     version="1.0.0"
+)
+
+# CORS 미들웨어 설정 (app 생성 바로 아래에 추가)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 주소 허용 (보안상 로컬 개발용)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # 2. 데이터 모델 정의
@@ -101,7 +114,7 @@ async def chat_endpoint(request: ChatRequest):
 @app.post("/chat/voice/audio")
 async def chat_voice_audio_endpoint(
     file: UploadFile = File(...), 
-    thread_id: str = "voice_session_1"
+    thread_id: str = "voice_session_final_test" # # 기본값 통일
 ):
     """
     [Full Duplex] 음성 파일 업로드 -> STT -> LangGraph -> TTS -> 음성 파일 반환
@@ -119,10 +132,30 @@ async def chat_voice_audio_endpoint(
         # [저장] 사용자 입력
         save_transcript(db, thread_id, "human", user_text)
 
-        # 2. LangGraph 실행
+        # ---------------------------------------------------------
+        # [RAG 핵심 로직] 이력서에서 관련 내용 검색
+        # 사용자의 발언(user_text)과 관련된 이력서 내용을 찾아옵니다.
+        # 예: 사용자가 "프로젝트 경험 말해볼게" -> 프로젝트 관련 이력서 내용 검색
+        retrieved_context = get_relevant_context(thread_id, user_text)
+        
+        final_input_text = user_text
+        if retrieved_context:
+            print(f"📚 [RAG 검색 성공] 이력서 내용 참고함 (길이: {len(retrieved_context)})")
+            # 프롬프트 엔지니어링: 사용자 몰래 컨텍스트를 주입
+            final_input_text = f"""
+            [System Note: The following is relevant information retrieved from the candidate's resume. Use it to formulate your response or next question.]
+            --- Resume Context ---
+            {retrieved_context}
+            ----------------------
+            
+            User's Input: {user_text}
+            """
+        # ---------------------------------------------------------
+
+        # 2. LangGraph 실행 (주입된 텍스트 전달)
         config = {"configurable": {"thread_id": thread_id}}
         inputs = {
-            "messages": [HumanMessage(content=user_text)]
+            "messages": [HumanMessage(content=final_input_text)] # 수정된 입력 사용
         }
         
         result = interview_graph.invoke(inputs, config=config)
@@ -235,3 +268,36 @@ async def analyze_face_endpoint(file: UploadFile = File(...)):
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+
+# [신규] 이력서 PDF 업로드 API
+@app.post("/upload/resume")
+async def upload_resume(
+    file: UploadFile = File(...), 
+    thread_id: str = "voice_session_final_test"
+):
+    """
+    PDF 이력서를 업로드하고 RAG용 벡터 DB를 생성합니다.
+    """
+    try:
+        # 1. 파일 임시 저장
+        upload_dir = "uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"{thread_id}_{file.filename}")
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        # 2. RAG 처리 (텍스트 추출 및 임베딩)
+        success = process_resume_pdf(thread_id, file_path)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="이력서 처리 중 오류 발생")
+            
+        return {"status": "success", "message": "이력서 분석 완료! 이제 맞춤형 질문이 가능합니다."}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))

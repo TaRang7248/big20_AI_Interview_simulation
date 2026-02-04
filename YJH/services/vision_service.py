@@ -21,7 +21,7 @@ def analyze_face_emotion(image_bytes: bytes) -> dict:
             img_path=img, 
             actions=['emotion'], 
             enforce_detection=False,
-            detector_backend='retinaface', # 여기가 핵심!(수정)
+            detector_backend='ssd', # STT/LLM 속도 확보 위해, retinaface -> ssd 로 변경(26.02.04)
             align=True # 얼굴 정렬 수행
         )
         
