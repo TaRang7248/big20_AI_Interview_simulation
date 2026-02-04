@@ -136,6 +136,27 @@ except ImportError:
     REDIS_AVAILABLE = False
     print("⚠️ Redis 서비스 비활성화")
 
+# Celery 비동기 작업
+try:
+    from celery_app import celery_app, check_celery_status
+    from celery_tasks import (
+        evaluate_answer_task,
+        batch_evaluate_task,
+        analyze_emotion_task,
+        batch_emotion_analysis_task,
+        generate_report_task,
+        generate_tts_task,
+        process_resume_task,
+        retrieve_resume_context_task,
+        complete_interview_workflow_task
+    )
+    from celery.result import AsyncResult
+    CELERY_AVAILABLE = True
+    print("✅ Celery 비동기 작업 서비스 활성화됨")
+except ImportError as e:
+    CELERY_AVAILABLE = False
+    print(f"⚠️ Celery 서비스 비활성화: {e}")
+
 
 # ========== 전역 상태 관리 ==========
 
@@ -2179,11 +2200,354 @@ async def get_status():
             "tts": TTS_AVAILABLE,
             "rag": RAG_AVAILABLE,
             "emotion": EMOTION_AVAILABLE,
-            "redis": REDIS_AVAILABLE
+            "redis": REDIS_AVAILABLE,
+            "celery": CELERY_AVAILABLE
         },
         "active_sessions": len(state.sessions),
-        "active_connections": len(state.pcs)
+        "active_connections": len(state.pcs),
+        "celery_status": check_celery_status() if CELERY_AVAILABLE else {"status": "disabled"}
     }
+
+
+# ========== Celery 비동기 작업 API ==========
+
+class AsyncTaskRequest(BaseModel):
+    """비동기 태스크 요청"""
+    session_id: str
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    use_rag: bool = True
+
+class AsyncTaskResponse(BaseModel):
+    """비동기 태스크 응답"""
+    task_id: str
+    status: str
+    message: str
+
+
+@app.post("/api/async/evaluate", response_model=AsyncTaskResponse)
+async def async_evaluate_answer(request: AsyncTaskRequest):
+    """
+    비동기 답변 평가 (Celery)
+    
+    - 답변 평가 작업을 Celery Worker에 전달
+    - task_id를 반환하여 나중에 결과 조회 가능
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    session = state.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    # RAG 컨텍스트 가져오기 (옵션)
+    resume_context = ""
+    if request.use_rag and RAG_AVAILABLE:
+        try:
+            result = retrieve_resume_context_task.delay(request.answer)
+            context_result = result.get(timeout=30)
+            resume_context = context_result.get("context", "")
+        except Exception:
+            pass
+    
+    # 비동기 태스크 실행
+    task = evaluate_answer_task.delay(
+        request.session_id,
+        request.question,
+        request.answer,
+        resume_context
+    )
+    
+    return AsyncTaskResponse(
+        task_id=task.id,
+        status="PENDING",
+        message="평가 작업이 대기열에 추가되었습니다."
+    )
+
+
+@app.post("/api/async/batch-evaluate", response_model=AsyncTaskResponse)
+async def async_batch_evaluate(request: Request):
+    """
+    비동기 배치 평가 (Celery)
+    
+    여러 답변을 한 번에 평가합니다.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    data = await request.json()
+    session_id = data.get("session_id")
+    qa_pairs = data.get("qa_pairs", [])
+    
+    if not qa_pairs:
+        raise HTTPException(status_code=400, detail="평가할 QA 쌍이 없습니다.")
+    
+    task = batch_evaluate_task.delay(session_id, qa_pairs)
+    
+    return AsyncTaskResponse(
+        task_id=task.id,
+        status="PENDING",
+        message=f"{len(qa_pairs)}개 답변의 배치 평가가 시작되었습니다."
+    )
+
+
+@app.post("/api/async/emotion-analysis", response_model=AsyncTaskResponse)
+async def async_emotion_analysis(request: Request):
+    """
+    비동기 감정 분석 (Celery)
+    
+    이미지 데이터(Base64)를 받아 감정 분석 수행
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    data = await request.json()
+    session_id = data.get("session_id")
+    image_data = data.get("image_data")  # Base64 인코딩된 이미지
+    
+    if not image_data:
+        raise HTTPException(status_code=400, detail="이미지 데이터가 없습니다.")
+    
+    task = analyze_emotion_task.delay(session_id, image_data)
+    
+    return AsyncTaskResponse(
+        task_id=task.id,
+        status="PENDING",
+        message="감정 분석 작업이 시작되었습니다."
+    )
+
+
+@app.post("/api/async/batch-emotion", response_model=AsyncTaskResponse)
+async def async_batch_emotion_analysis(request: Request):
+    """
+    비동기 배치 감정 분석 (Celery)
+    
+    여러 이미지를 한 번에 분석합니다.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    data = await request.json()
+    session_id = data.get("session_id")
+    image_data_list = data.get("images", [])
+    
+    if not image_data_list:
+        raise HTTPException(status_code=400, detail="분석할 이미지가 없습니다.")
+    
+    task = batch_emotion_analysis_task.delay(session_id, image_data_list)
+    
+    return AsyncTaskResponse(
+        task_id=task.id,
+        status="PENDING",
+        message=f"{len(image_data_list)}개 이미지의 감정 분석이 시작되었습니다."
+    )
+
+
+@app.post("/api/async/generate-report", response_model=AsyncTaskResponse)
+async def async_generate_report(session_id: str):
+    """
+    비동기 리포트 생성 (Celery)
+    
+    면접 종료 후 종합 리포트를 생성합니다.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    chat_history = session.get("chat_history", [])
+    evaluations = session.get("evaluations", [])
+    emotion_stats = session.get("emotion_stats", None)
+    
+    task = generate_report_task.delay(
+        session_id,
+        chat_history,
+        evaluations,
+        emotion_stats
+    )
+    
+    return AsyncTaskResponse(
+        task_id=task.id,
+        status="PENDING",
+        message="리포트 생성 작업이 시작되었습니다."
+    )
+
+
+@app.post("/api/async/complete-interview", response_model=AsyncTaskResponse)
+async def async_complete_interview(request: Request):
+    """
+    비동기 면접 완료 워크플로우 (Celery)
+    
+    평가 + 감정 분석 + 리포트 생성을 한 번에 처리합니다.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    data = await request.json()
+    session_id = data.get("session_id")
+    
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    chat_history = session.get("chat_history", [])
+    emotion_images = data.get("emotion_images", [])
+    
+    task = complete_interview_workflow_task.delay(
+        session_id,
+        chat_history,
+        emotion_images
+    )
+    
+    return AsyncTaskResponse(
+        task_id=task.id,
+        status="PENDING",
+        message="면접 완료 워크플로우가 시작되었습니다."
+    )
+
+
+@app.get("/api/async/task/{task_id}")
+async def get_task_status(task_id: str):
+    """
+    태스크 상태 조회
+    
+    - PENDING: 대기 중
+    - STARTED: 실행 중
+    - SUCCESS: 완료
+    - FAILURE: 실패
+    - RETRY: 재시도 중
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    result = AsyncResult(task_id, app=celery_app)
+    
+    response = {
+        "task_id": task_id,
+        "status": result.status,
+        "ready": result.ready()
+    }
+    
+    if result.ready():
+        if result.successful():
+            response["result"] = result.get()
+        else:
+            response["error"] = str(result.result)
+    
+    return response
+
+
+@app.get("/api/async/task/{task_id}/result")
+async def get_task_result(task_id: str, timeout: int = 60):
+    """
+    태스크 결과 조회 (대기)
+    
+    태스크가 완료될 때까지 대기 후 결과 반환
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    result = AsyncResult(task_id, app=celery_app)
+    
+    try:
+        task_result = result.get(timeout=timeout)
+        return {
+            "task_id": task_id,
+            "status": "SUCCESS",
+            "result": task_result
+        }
+    except Exception as e:
+        return {
+            "task_id": task_id,
+            "status": "FAILURE",
+            "error": str(e)
+        }
+
+
+@app.delete("/api/async/task/{task_id}")
+async def cancel_task(task_id: str):
+    """
+    태스크 취소
+    
+    실행 대기 중인 태스크를 취소합니다.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Celery 서비스가 비활성화되어 있습니다.")
+    
+    celery_app.control.revoke(task_id, terminate=True)
+    
+    return {
+        "task_id": task_id,
+        "status": "REVOKED",
+        "message": "태스크가 취소되었습니다."
+    }
+
+
+@app.get("/api/celery/status")
+async def get_celery_status():
+    """
+    Celery 상태 조회
+    
+    Worker 연결 상태, 큐 정보 등을 반환합니다.
+    """
+    if not CELERY_AVAILABLE:
+        return {"status": "disabled", "message": "Celery 서비스가 비활성화되어 있습니다."}
+    
+    try:
+        # Worker 상태 확인
+        inspect = celery_app.control.inspect()
+        
+        active_workers = inspect.active() or {}
+        reserved_tasks = inspect.reserved() or {}
+        stats = inspect.stats() or {}
+        
+        return {
+            "status": "connected" if active_workers else "no_workers",
+            "workers": list(active_workers.keys()),
+            "active_tasks": sum(len(tasks) for tasks in active_workers.values()),
+            "reserved_tasks": sum(len(tasks) for tasks in reserved_tasks.values()),
+            "worker_stats": stats
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
+
+@app.get("/api/celery/queues")
+async def get_celery_queues():
+    """
+    Celery 큐 정보 조회
+    """
+    if not CELERY_AVAILABLE:
+        return {"status": "disabled"}
+    
+    try:
+        import redis as redis_lib
+        r = redis_lib.from_url(REDIS_URL)
+        
+        queues = [
+            "default",
+            "llm_evaluation",
+            "emotion_analysis",
+            "report_generation",
+            "tts_generation",
+            "rag_processing"
+        ]
+        
+        queue_info = {}
+        for queue in queues:
+            queue_info[queue] = r.llen(queue)
+        
+        return {
+            "queues": queue_info,
+            "total_pending": sum(queue_info.values())
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ========== 서버 종료 처리 ==========
@@ -2211,6 +2575,10 @@ if __name__ == "__main__":
     print(f"    - RAG: {'✅ 활성화' if RAG_AVAILABLE else '❌ 비활성화'}")
     print(f"    - 감정분석: {'✅ 활성화' if EMOTION_AVAILABLE else '❌ 비활성화'}")
     print(f"    - Redis: {'✅ 활성화' if REDIS_AVAILABLE else '❌ 비활성화'}")
+    print(f"    - Celery: {'✅ 활성화' if CELERY_AVAILABLE else '❌ 비활성화'}")
+    print("=" * 60)
+    print("  📋 Celery Worker 시작 명령어:")
+    print("     celery -A celery_app worker --pool=solo --loglevel=info")
     print("=" * 60)
     print("  🌐 http://localhost:8000 에서 접속하세요")
     print("=" * 60 + "\n")
