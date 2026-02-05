@@ -14,6 +14,10 @@ TTS, STT, LLM 기반 답변 평가, 화상 면접, 감정 분석, Celery 비동�
 - **Celery 비동기 처리**: 무거운 작업(LLM 평가, 감정 분석, 리포트 생성)을 백그라운드에서 처리
 - **회원가입/로그인**: 이메일 기반 회원가입 및 소셜 로그인 (카카오, 구글, 네이버) 지원
 - **종합 리포트**: STAR 기법 분석, 키워드 추출, 등급 산정 포함
+- **코딩 테스트**: Python, JavaScript, Java, C/C++ 지원 샌드박스 코드 실행
+- **화이트보드 면접**: Claude Vision을 활용한 시스템 아키텍처 다이어그램 분석
+- **AI 아바타**: D-ID WebRTC 스트리밍으로 실시간 AI 면접관 영상 생성
+- **원클릭 시작**: 배치/PowerShell 스크립트로 전체 시스템 한 번에 실행
 
 ---
 
@@ -58,6 +62,12 @@ GOOGLE_CLIENT_SECRET=your_google_client_secret
 NAVER_CLIENT_ID=your_naver_client_id
 NAVER_CLIENT_SECRET=your_naver_client_secret
 OAUTH_REDIRECT_BASE=http://localhost:8000
+
+# Claude API (화이트보드 분석용)
+ANTHROPIC_API_KEY=your_anthropic_api_key
+
+# D-ID API (AI 아바타용)
+DID_API_KEY=your_did_api_key
 ```
 
 ### 3. 외부 서비스 실행
@@ -104,6 +114,7 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 브라우저에서 다음 URL로 접속:
 - **메인 페이지**: http://localhost:8000
 - **화상 면접**: http://localhost:8000/static/integrated_interview.html
+- **코딩 테스트**: http://localhost:8000/coding-test
 - **감정 대시보드**: http://localhost:8000/static/dashboard.html
 - **API 문서**: http://localhost:8000/docs
 - **Celery 모니터링** (Flower 실행 시): http://localhost:5555
@@ -125,6 +136,7 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 ├─────────────────────────────────────────────────────────────┤
 │  3. 화상 면접 시작                                           │
 │     ├─ WebRTC 카메라/마이크 연결                              │
+│     ├─ D-ID AI 아바타 면접관 영상 (선택)                      │
 │     ├─ 질문 은행 기반 순차 질문                               │
 │     │   (intro → motivation → strength → project → ...)     │
 │     ├─ 답변 입력 → Celery 백그라운드 LLM 평가                 │
@@ -132,11 +144,23 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 │     ├─ 실시간 감정 분석 (7가지 감정 - DeepFace)               │
 │     └─ TTS 음성 출력 (Hume AI)                               │
 ├─────────────────────────────────────────────────────────────┤
-│  4. 면접 종료 → 리포트 생성                                   │
+│  4. 코딩 테스트 (선택)                                       │
+│     ├─ 문제 은행에서 알고리즘 문제 선택                       │
+│     ├─ 샌드박스 코드 실행 (Python/JS/Java/C/C++)             │
+│     └─ AI 코드 분석 (복잡도, 스타일, 베스트 프랙티스)         │
+├─────────────────────────────────────────────────────────────┤
+│  5. 시스템 설계 면접 (선택)                                   │
+│     ├─ 화이트보드에 아키텍처 다이어그램 그리기                 │
+│     ├─ Claude Vision으로 다이어그램 인식 및 분석              │
+│     └─ 구조, 확장성, 보안 평가 및 피드백                      │
+├─────────────────────────────────────────────────────────────┤
+│  6. 면접 종료 → 리포트 생성                                   │
 │     ├─ LLM 평가 종합 결과 (5가지 항목 평균)                   │
 │     ├─ STAR 기법 분석 (상황-과제-행동-결과)                   │
 │     ├─ 키워드 분석 (기술 키워드 + 일반 키워드)                │
 │     ├─ 등급 산정 (S/A/B/C/D)                                 │
+│     ├─ 코딩 테스트 결과 (코드 품질 점수)                      │
+│     ├─ 시스템 설계 결과 (아키텍처 평가)                       │
 │     └─ 개선 피드백 및 권장사항                               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -147,14 +171,20 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 
 ```
 CSH/
-├── integrated_interview_server.py  # 통합 FastAPI 서버 (메인)
-├── celery_app.py                   # Celery 애플리케이션 설정
-├── celery_tasks.py                 # Celery 비동기 태스크 정의
+├── integrated_interview_server.py  # 통합 FastAPI 서버 (메인, 4700+ lines)
+├── celery_app.py                   # Celery 애플리케이션 설정 (큐, 라우팅)
+├── celery_tasks.py                 # Celery 비동기 태스크 정의 (1000+ lines)
 ├── text_interview.py               # 텍스트 면접 모듈 (STAR 분석, 리포트)
-├── hume_tts_service.py             # Hume AI TTS 서비스
-├── stt_engine.py                   # Deepgram STT 서비스
+├── hume_tts_service.py             # Hume AI TTS 서비스 (OAuth2 토큰 인증)
+├── stt_engine.py                   # Deepgram STT 서비스 (Nova-3 모델)
 ├── resume_rag.py                   # 이력서 RAG (PostgreSQL + PGVector)
+├── code_execution_service.py       # 코딩 테스트 서비스 (샌드박스 실행, AI 분석)
+├── whiteboard_service.py           # 화이트보드 다이어그램 분석 (Claude Vision)
+├── did_avatar_service.py           # D-ID AI 아바타 영상 생성 (WebRTC 스트리밍)
 ├── video_interview_server.py       # 화상 면접 서버 (레거시)
+├── start_interview.bat             # 원클릭 시작 스크립트 (Windows Batch)
+├── start_all.ps1                   # 원클릭 시작 스크립트 (PowerShell)
+├── start_prerequisites.bat         # 사전 서비스 실행 스크립트
 ├── requirements_integrated.txt     # 의존성 패키지
 ├── uploads/                        # 이력서 업로드 디렉토리
 └── static/
@@ -268,6 +298,41 @@ INTERVIEW_FLOW = [
 - **등급 산정**: S/A/B/C/D (종합 점수 기반)
 - **권장사항**: 맞춤형 개선 제안
 
+### 10. 코딩 테스트 시스템 (code_execution_service.py)
+
+실시간 코딩 면접을 위한 샌드박스 코드 실행 및 AI 분석 서비스입니다.
+
+| 기능 | 설명 |
+|------|------|
+| **다국어 지원** | Python, JavaScript, Java, C, C++ 지원 |
+| **샌드박스 실행** | subprocess + 타임아웃으로 안전한 코드 실행 |
+| **AI 코드 분석** | 시간/공간 복잡도, 코드 스타일, 베스트 프랙티스 평가 |
+| **코딩 문제 은행** | 난이도별 알고리즘 문제 제공 (easy/medium/hard) |
+| **실행 측정** | 실행 시간, 메모리 사용량 측정 |
+
+### 11. 화이트보드 다이어그램 분석 (whiteboard_service.py)
+
+시스템 설계 면접을 위한 다이어그램 인식 및 평가 서비스입니다.
+
+| 기능 | 설명 |
+|------|------|
+| **Claude Vision API** | Claude 3.5 Sonnet을 사용한 다이어그램 인식 |
+| **아키텍처 평가** | 구조, 확장성, 보안, 데이터 흐름 분석 |
+| **AI 동적 문제 생성** | 카테고리별 맞춤 아키텍처 문제 생성 |
+| **컴포넌트 분석** | 각 구성요소의 역할 및 연결 관계 평가 |
+| **피드백 제공** | 강점, 약점, 개선 제안 자동 생성 |
+
+### 12. D-ID AI 아바타 (did_avatar_service.py)
+
+D-ID API를 활용한 실시간 AI 면접관 영상 생성 서비스입니다.
+
+| 기능 | 설명 |
+|------|------|
+| **Talks API** | 텍스트 → 말하는 아바타 영상 생성 (10-30초) |
+| **Streams API** | WebRTC 실시간 스트리밍 (1-3초 지연) |
+| **한국어 TTS** | Microsoft TTS (ko-KR-SunHiNeural, ko-KR-InJoonNeural) |
+| **커스텀 아바타** | 사용자 정의 프레젠터 이미지 지원 |
+
 ---
 
 ## 📡 API 엔드포인트
@@ -318,6 +383,22 @@ INTERVIEW_FLOW = [
 
 ### 시스템
 - `GET /api/status` - 전체 서비스 상태 확인
+
+### 코딩 테스트
+- `POST /api/coding/execute` - 코드 실행 (샌드박스)
+- `POST /api/coding/analyze` - AI 코드 분석
+- `GET /api/coding/problems` - 코딩 문제 목록
+- `GET /api/coding/problems/{problem_id}` - 문제 상세 조회
+
+### 화이트보드 (시스템 설계)
+- `POST /api/whiteboard/analyze` - 다이어그램 분석
+- `GET /api/whiteboard/problems` - 아키텍처 문제 목록
+- `POST /api/whiteboard/generate-problem` - AI 문제 동적 생성
+
+### D-ID 아바타
+- `POST /api/avatar/stream/create` - 스트림 세션 생성
+- `POST /api/avatar/stream/{stream_id}/speak` - 텍스트로 아바타 말하기
+- `DELETE /api/avatar/stream/{stream_id}` - 스트림 종료
 
 ---
 
@@ -381,6 +462,9 @@ INTERVIEW_FLOW = [
 | Redis | Redis 서버 실행 + REDIS_URL 설정 | 감정 시계열 저장 + Celery 브로커 |
 | Celery | Redis + celery_app.py 실행 | 비동기 작업 처리 |
 | 소셜 로그인 | KAKAO/GOOGLE/NAVER Client ID/Secret | OAuth 인증 |
+| 코딩 테스트 | Python 3.8+ (기본), Node.js, JDK (선택) | 코드 실행 |
+| 화이트보드 | ANTHROPIC_API_KEY 설정 (Claude) | 다이어그램 분석 |
+| AI 아바타 | DID_API_KEY 설정 | 실시간 아바타 영상 |
 
 모든 서비스는 선택사항입니다. 설정되지 않은 서비스는 비활성화되며, 기본 기능으로 대체됩니다.
 
@@ -392,7 +476,39 @@ INTERVIEW_FLOW = [
 ✅ 감정 분석 서비스 활성화됨
 ✅ Redis 서비스 활성화됨
 ✅ Celery 비동기 작업 서비스 활성화됨
+✅ 코딩 테스트 서비스 활성화됨
+✅ 화이트보드 분석 서비스 활성화됨
+✅ D-ID 아바타 서비스 활성화됨
 ```
+
+---
+
+## 🚀 원클릭 시작 (One-Click Start)
+
+### Windows Batch 스크립트
+
+```bash
+# 전체 시스템 시작 (Redis, Ollama 사전 실행 필요)
+start_interview.bat
+
+# 사전 서비스만 시작 (Redis, Ollama)
+start_prerequisites.bat
+```
+
+### PowerShell 스크립트
+
+```powershell
+# PowerShell에서 전체 시스템 시작
+.\start_all.ps1
+```
+
+### 시작 스크립트 기능
+
+| 스크립트 | 기능 |
+|----------|------|
+| `start_interview.bat` | Redis/Ollama 상태 확인 → Celery Worker → FastAPI 서버 |
+| `start_all.ps1` | PowerShell 버전 (컬러 출력, 상세 로그) |
+| `start_prerequisites.bat` | Redis, Ollama만 실행 (Docker 사용) |
 
 ---
 
@@ -472,19 +588,25 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 
 ---
 
-## � 파일 설명
+## 📁 파일 설명
 
 | 파일 | 설명 |
 |------|------|
-| `integrated_interview_server.py` | **통합 FastAPI 서버** - 질문 은행, LLM 평가, 회원 인증, 소셜 로그인, WebRTC, 감정 분석 통합 |
-| `celery_app.py` | **Celery 애플리케이션 설정** - Redis 브로커, 큐 라우팅, Beat 스케줄 정의 |
-| `celery_tasks.py` | **Celery 비동기 태스크** - LLM 평가, 감정 분석, 리포트 생성, TTS, RAG 처리 태스크 |
+| `integrated_interview_server.py` | **통합 FastAPI 서버** (4700+ lines) - 질문 은행, LLM 평가, 회원 인증, 소셜 로그인, WebRTC, 감정 분석, ThreadPoolExecutor 비동기 처리 |
+| `celery_app.py` | **Celery 애플리케이션 설정** - Redis 브로커, 7개 큐 라우팅, Beat 스케줄 정의 |
+| `celery_tasks.py` | **Celery 비동기 태스크** (1000+ lines) - LLM 평가, 감정 분석, 리포트 생성, TTS, RAG, 워크플로우 처리 |
 | `text_interview.py` | **텍스트 면접 모듈** - STAR 기법 분석, 키워드 추출, 리포트 생성 클래스 |
-| `hume_tts_service.py` | **Hume AI TTS 클라이언트** - OAuth2 토큰 인증, EVI 음성 생성, 스트리밍 지원 |
+| `hume_tts_service.py` | **Hume AI TTS 클라이언트** (440+ lines) - OAuth2 토큰 인증, EVI 음성 생성, 스트리밍 지원 |
 | `stt_engine.py` | **Deepgram STT 클라이언트** - Nova-3 모델, 실시간 마이크 입력, VAD 지원 |
 | `resume_rag.py` | **이력서 RAG 모듈** - PDF 로딩, 청킹, PGVector 벡터 저장, 유사도 검색 |
-| `video_interview_server.py` | WebRTC + 감정 분석 서버 (레거시, integrated_interview_server.py에 통합됨) |
-| `requirements_integrated.txt` | 통합 의존성 목록 (FastAPI, LangChain, Celery, DeepFace 등) |
+| `code_execution_service.py` | **코딩 테스트 서비스** (1100+ lines) - 샌드박스 코드 실행, AI 코드 분석, 문제 은행 |
+| `whiteboard_service.py` | **화이트보드 분석 서비스** (750+ lines) - Claude Vision API, 아키텍처 평가, 동적 문제 생성 |
+| `did_avatar_service.py` | **D-ID 아바타 서비스** (520+ lines) - WebRTC 스트리밍, 실시간 아바타 영상 생성 |
+| `video_interview_server.py` | WebRTC + 감정 분석 서버 (레거시, integrated에 통합됨) |
+| `start_interview.bat` | **원클릭 시작 스크립트** (Windows Batch) - 전체 시스템 실행 |
+| `start_all.ps1` | **원클릭 시작 스크립트** (PowerShell) - 컬러 출력, 상세 로그 |
+| `start_prerequisites.bat` | **사전 서비스 스크립트** - Redis, Ollama만 실행 |
+| `requirements_integrated.txt` | 통합 의존성 목록 (FastAPI, LangChain, Celery, DeepFace, anthropic 등) |
 | `__init__.py` | 패키지 초기화 파일 |
 | `static/integrated_interview.html` | **통합 화상 면접 UI** - 실시간 평가 패널, 감정 분석 포함 |
 | `static/dashboard.html` | 감정 분석 대시보드 - 시계열 차트, 통계 시각화 |
@@ -494,6 +616,31 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 ---
 
 ## 📝 변경 이력
+
+### v3.1 (2026-02-05)
+- ✅ **코딩 테스트 시스템 추가** (`code_execution_service.py`)
+  - Python, JavaScript, Java, C, C++ 다국어 지원
+  - 샌드박스 환경에서 안전한 코드 실행 (subprocess + 타임아웃)
+  - AI 기반 코드 품질 분석 (시간/공간 복잡도, 코드 스타일)
+  - 코딩 문제 은행 (난이도별 알고리즘 문제)
+- ✅ **화이트보드 다이어그램 분석 추가** (`whiteboard_service.py`)
+  - Claude 3.5 Sonnet Vision API 연동
+  - 시스템 아키텍처 평가 (구조, 확장성, 보안, 데이터 흐름)
+  - AI 동적 문제 생성 (카테고리별 맞춤 아키텍처 문제)
+  - 컴포넌트 분석 및 피드백 자동 생성
+- ✅ **D-ID AI 아바타 서비스 추가** (`did_avatar_service.py`)
+  - Talks API: 텍스트 → 아바타 영상 생성
+  - Streams API: WebRTC 실시간 스트리밍 (1-3초 지연)
+  - 한국어 TTS 지원 (Microsoft Neural Voice)
+- ✅ **원클릭 시작 스크립트 추가**
+  - `start_interview.bat`: Windows Batch 스크립트
+  - `start_all.ps1`: PowerShell 스크립트 (컬러 출력)
+  - `start_prerequisites.bat`: 사전 서비스(Redis, Ollama) 실행
+- ✅ **비동기 처리 최적화**
+  - ThreadPoolExecutor로 LLM, RAG, DeepFace 비블로킹 처리
+  - `run_llm_async()`, `run_rag_async()`, `run_deepface_async()` 헬퍼 함수
+- ✅ **Celery 큐 확장**
+  - 7개 전용 큐: llm_evaluation, emotion_analysis, report_generation, tts_generation, rag_processing, question_generation, default
 
 ### v3.0 (2026-02-04)
 - ✅ **Celery 비동기 작업 처리 시스템 추가**
@@ -595,6 +742,9 @@ async def get_my_result(task_id: str):
 - [DeepFace 문서](https://github.com/serengil/deepface)
 - [LangChain 문서](https://python.langchain.com/)
 - [PGVector 문서](https://github.com/pgvector/pgvector)
+- [Anthropic Claude 문서](https://docs.anthropic.com/)
+- [D-ID API 문서](https://docs.d-id.com/)
+- [aiortc WebRTC 문서](https://github.com/aiortc/aiortc)
 - [core_architecture.md](../docs/Architecture_Diagram/core_architecture.md) - 시스템 아키텍처
 
 ---
