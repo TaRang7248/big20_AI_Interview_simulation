@@ -18,3 +18,17 @@ async def transcribe_audio(file_path: str):
     except Exception as e:
         print(f"STT Error: {e}")
         return ""
+
+class STTService:
+    def __init__(self):
+        pass
+
+    async def transcribe(self, file_path: str):
+        return await transcribe_audio(file_path)
+
+    def start_recording(self):
+        print("Warning: Server-side recording is not supported in this environment.")
+
+    def stop_recording(self):
+        print("Warning: Server-side recording is not supported in this environment.")
+        return None
