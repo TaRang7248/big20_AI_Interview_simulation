@@ -117,7 +117,7 @@
             overflow: hidden;
         }
         
-        .interviewer-avatar {
+        .interviewer-avatar, #didVideo {
             width: 280px;
             height: 280px;
             border-radius: 50%;
@@ -126,13 +126,13 @@
             transition: all 0.3s;
         }
         
-        .interviewer-avatar:hover {
+        .interviewer-avatar:hover, #didVideo:hover {
             transform: scale(1.05);
             border-color: #fff;
             box-shadow: 0 0 15px rgba(0, 217, 255, 0.8);
         }
         
-        .interviewer-avatar.speaking {
+        .interviewer-avatar.speaking, #didVideo.speaking {
             border-color: #00ff88;
             box-shadow: 0 0 30px rgba(0,255,136,0.5);
             animation: pulse 1s infinite;
@@ -508,6 +508,49 @@
             50% { opacity: 0.5; }
         }
         
+        /* 개입 메시지 애니메이션 */
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateX(-50%) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+        
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+        
+        /* 답변 시간 진행 표시 */
+        .answer-timer {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px 20px;
+            border-radius: 20px;
+            color: #8892b0;
+            font-size: 14px;
+            z-index: 9999;
+            display: none;
+        }
+        
+        .answer-timer.warning {
+            color: #f39c12;
+            border: 1px solid #f39c12;
+        }
+        
+        .answer-timer.danger {
+            color: #e74c3c;
+            border: 1px solid #e74c3c;
+            animation: progressPulse 0.5s infinite;
+        }
+
         .question-counter {
             text-align: center;
             color: #8892b0;
@@ -517,14 +560,25 @@
     </style>
 </head>
 <body>
+    <!-- 답변 시간 타이머 -->
+    <div class="answer-timer" id="answerTimer">
+        <span id="answerTimerText">답변 시간: 0초</span>
+    </div>
+    
     <div class="container">
         <!-- 헤더 -->
         <div class="header">
             <h1>🎯 AI 화상 면접</h1>
             <div class="header-controls">
+                <!-- 사용자 정보 -->
+                <div class="user-info" id="headerUserInfo" style="display:flex; align-items:center; gap:10px; margin-right:15px;">
+                    <span style="color:#00ff88;">👤</span>
+                    <span id="headerUserName" style="color:#8892b0; font-size:14px;"></span>
+                    <button class="btn" style="padding:6px 12px; font-size:12px; background:rgba(244,67,54,0.6);" onclick="logoutAndRedirect()">로그아웃</button>
+                </div>
                 <span class="status-badge ready" id="statusBadge">준비 완료</span>
-                <button class="btn btn-primary" id="startBtn" onclick="startInterview()">면접 시작</button>
-                <button class="btn btn-danger" id="endBtn" onclick="endInterview()" style="display:none;">면접 종료</button>
+                <button class="btn btn-primary" id="startBtn">면접 시작</button>
+                <button class="btn btn-danger" id="endBtn" style="display:none;">면접 종료</button>
             </div>
         </div>
         
@@ -535,12 +589,30 @@
                 <div class="panel-header">
                     <span class="icon">🤖</span>
                     <span>AI 면접관</span>
+                    <span class="did-badge" id="didBadge" style="display:none; margin-left:auto; font-size:10px; background:rgba(0,255,136,0.2); padding:4px 8px; border-radius:10px; color:#00ff88;">AI Avatar</span>
                 </div>
                 <div class="interviewer-container">
-                    <img src="https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400" 
-                         alt="AI 면접관" 
-                         class="interviewer-avatar" 
-                         id="interviewerAvatar">
+                    <!-- D-ID AI 아바타 비디오 (기본 표시) -->
+                    <video id="didVideo" 
+                           autoplay 
+                           playsinline
+                           muted
+                           loop
+                           poster="https://create-images-results.d-id.com/api_docs/assets/noelle.jpeg"
+                           style="width:100%; height:100%; object-fit:cover; border-radius:12px;">
+                    </video>
+                    <!-- D-ID 연결 대기 상태 표시 -->
+                    <div id="didLoadingOverlay" style="position:absolute; top:0; left:0; width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); border-radius:12px;">
+                        <div style="width:60px; height:60px; border:4px solid rgba(0,217,255,0.3); border-top-color:#00d9ff; border-radius:50%; animation:spin 1s linear infinite;"></div>
+                        <div id="didLoadingText" style="margin-top:15px; color:#00d9ff; font-size:16px;">AI 면접 준비중</div>
+                    </div>
+                    <style>
+                        @keyframes spin { to { transform: rotate(360deg); } }
+                    </style>
+                    <div class="interviewer-name" id="interviewerName">
+                        <span class="dot"></span>
+                        <span>AI 면접관</span>
+                    </div>
                     <div class="voice-visualizer" id="voiceVisualizer">
                         <div class="voice-bar"></div>
                         <div class="voice-bar"></div>
@@ -608,51 +680,8 @@
         </div>
     </div>
     
-    <!-- 사이드 패널 - 평가 정보 -->
-    <div class="side-panel" id="sidePanel" style="display: none;">
-        <div class="panel-header">
-            <span class="icon">📊</span>
-            <span>실시간 평가</span>
-        </div>
-        
-        <div class="evaluation-scores" id="evaluationScores">
-            <div class="score-item">
-                <span class="score-label">구체성</span>
-                <div class="score-bar"><div class="score-fill" id="score-specificity" style="width: 0%"></div></div>
-                <span class="score-value" id="val-specificity">0</span>
-            </div>
-            <div class="score-item">
-                <span class="score-label">논리성</span>
-                <div class="score-bar"><div class="score-fill" id="score-logic" style="width: 0%"></div></div>
-                <span class="score-value" id="val-logic">0</span>
-            </div>
-            <div class="score-item">
-                <span class="score-label">기술이해</span>
-                <div class="score-bar"><div class="score-fill" id="score-technical" style="width: 0%"></div></div>
-                <span class="score-value" id="val-technical">0</span>
-            </div>
-            <div class="score-item">
-                <span class="score-label">STAR기법</span>
-                <div class="score-bar"><div class="score-fill" id="score-star" style="width: 0%"></div></div>
-                <span class="score-value" id="val-star">0</span>
-            </div>
-            <div class="score-item">
-                <span class="score-label">전달력</span>
-                <div class="score-bar"><div class="score-fill" id="score-communication" style="width: 0%"></div></div>
-                <span class="score-value" id="val-communication">0</span>
-            </div>
-        </div>
-        
-        <div class="emotion-display">
-            <div class="emotion-title">😊 감정 분석</div>
-            <div class="emotion-grid" id="emotionGrid">
-                <div class="emotion-item"><span>행복</span><span id="emo-happy">0%</span></div>
-                <div class="emotion-item"><span>중립</span><span id="emo-neutral">0%</span></div>
-                <div class="emotion-item"><span>놀람</span><span id="emo-surprise">0%</span></div>
-                <div class="emotion-item"><span>긴장</span><span id="emo-fear">0%</span></div>
-            </div>
-        </div>
-    </div>
+    <!-- 사이드 패널 - 평가 정보 (비활성화됨) -->
+    <!-- 실시간 평가 패널이 제거되었습니다. 면접 종료 후 리포트에서 결과를 확인할 수 있습니다. -->
     
     <!-- 이력서 업로드 모달 -->
     <div class="modal-overlay" id="resumeModal">
@@ -688,11 +717,630 @@
         let speechBuffer = '';
         let silenceTimer = null;
         
+        // D-ID 관련 상태
+        let didAvailable = false;
+        let didPeerConnection = null;
+        let didDataChannel = null;
+        let didStreamReady = false;
+        let didStreamId = null;
+        let didSessionId = null;
+        let didIceServers = [];
+        let didVideoTrack = null;
+        let didAudioTrack = null;
+        let isSpeaking = false;
+        
+        // D-ID 스트리밍 모드 설정 (true: Streaming API, false: Talks API)
+        const USE_STREAMING_API = true;
+        
+        // ========== 사용자 영상/음성 WebRTC 상태 ==========
+        let userPeerConnection = null;  // 사용자 영상/음성을 서버로 전송하는 WebRTC
+        let userWebSocket = null;       // 서버 STT 결과 수신용 WebSocket
+        let serverSTTEnabled = false;   // 서버 STT 활성화 여부
+        
+        // ========== STT 설정 ==========
+        // Deepgram(서버 STT)을 항상 우선 사용
+        // Web Speech API는 Deepgram 연결 실패 시에만 폴백으로 사용
+        const PREFER_SERVER_STT = true;  // true: Deepgram 우선, false: Web Speech API 우선
+        let useServerSTT = PREFER_SERVER_STT;
+        
+        // ========== 실시간 개입 시스템 상태 ==========
+        let interventionEnabled = true;
+        let interventionCheckInterval = null;
+        let currentTurnStartTime = null;
+        let answerLengthSoFar = 0;
+        let lastVADSignalTime = null;
+        let hasReceivedSoftWarning = false;
+        let interventionSettings = {
+            max_answer_time: 120,
+            soft_warning_time: 90,
+            max_answer_length: 800,
+            topic_relevance_threshold: 0.3
+        };
+        
+        // ========== 화이트보드 상태 ==========
+        let whiteboardCanvas = null;
+        let whiteboardCtx = null;
+        let isDrawing = false;
+        let currentTool = 'pen';
+        let currentColor = '#00d9ff';
+        let lineWidth = 3;
+        let lastX = 0;
+        let lastY = 0;
+        let drawHistory = [];
+        let historyIndex = -1;
+        let currentArchProblem = null;
+        let whiteboardResults = [];
+        
+        // 로그인 상태
+        let currentUser = null;
+        
+        // ========== 로그인 확인 ==========
+        function checkLoginStatus() {
+            const userData = localStorage.getItem('interview_user');
+            if (!userData) {
+                return null;
+            }
+            try {
+                return JSON.parse(userData);
+            } catch (e) {
+                return null;
+            }
+        }
+        
+        function logoutAndRedirect() {
+            localStorage.removeItem('interview_user');
+            localStorage.removeItem('login_time');
+            alert('로그아웃 되었습니다.');
+            window.location.href = '/';
+        }
+        
+        function updateHeaderUserInfo() {
+            const userInfoEl = document.getElementById('headerUserInfo');
+            const userNameEl = document.getElementById('headerUserName');
+            if (currentUser) {
+                userNameEl.textContent = currentUser.name + '님';
+                userInfoEl.style.display = 'flex';
+            } else {
+                userInfoEl.style.display = 'none';
+            }
+        }
+        
         // ========== 초기화 ==========
         document.addEventListener('DOMContentLoaded', async () => {
-            await initCamera();
-            initSpeechRecognition();
+            // 로그인 상태 확인 - 미로그인 시 메인 페이지로 리다이렉트
+            currentUser = checkLoginStatus();
+            if (!currentUser) {
+                alert('면접을 진행하려면 먼저 로그인이 필요합니다.');
+                window.location.href = '/';
+            } else {
+                // 사용자 정보 표시
+                updateHeaderUserInfo();
+                
+                // 버튼 이벤트 바인딩
+                document.getElementById('startBtn').addEventListener('click', startInterview);
+                document.getElementById('endBtn').addEventListener('click', endInterview);
+                
+                await initCamera();
+                await checkDIDAvailability();
+                initSpeechRecognition();
+            }
         });
+        
+        // ========== D-ID 사용 가능 여부 확인 ==========
+        async function checkDIDAvailability() {
+            const loadingText = document.getElementById('didLoadingText');
+            try {
+                const response = await fetch('/api/did/status');
+                const result = await response.json();
+                didAvailable = result.available;
+                
+                if (didAvailable) {
+                    document.getElementById('didBadge').style.display = 'block';
+                    loadingText.textContent = 'AI 면접 준비중';
+                    console.log('✅ D-ID AI 아바타 사용 가능');
+                } else {
+                    loadingText.textContent = 'D-ID API 키가 설정되지 않았습니다';
+                    console.log('⚠️ D-ID 미설정');
+                }
+            } catch (err) {
+                console.log('⚠️ D-ID 상태 확인 실패:', err);
+                loadingText.textContent = 'D-ID 연결 확인 실패';
+                didAvailable = false;
+            }
+        }
+        
+        // ========== 로딩 오버레이 제어 ==========
+        function hideDIDLoadingOverlay() {
+            const overlay = document.getElementById('didLoadingOverlay');
+            if (overlay) {
+                overlay.style.display = 'none';
+            }
+        }
+        
+        function showDIDLoadingOverlay(message=None) {
+            const overlay = document.getElementById('didLoadingOverlay');
+            const text = document.getElementById('didLoadingText');
+            if (overlay) {
+                overlay.style.display = 'flex';
+                if (text) text.textContent = message;
+            }
+        }
+        
+        // ========== D-ID Streaming API 초기화 (WebRTC) ==========
+        async function initDIDStreaming() {
+            if (!didAvailable) {
+                showDIDLoadingOverlay('D-ID API 키가 설정되지 않았습니다');
+                return false;
+            }
+            
+            showDIDLoadingOverlay('D-ID 연결 중...');
+            
+            // Talks API 모드면 초기화 불필요
+            if (!USE_STREAMING_API) {
+                console.log('✅ D-ID Talks API 모드 사용 준비 완료');
+                didStreamReady = true;
+                hideDIDLoadingOverlay();
+                return true;
+            }
+            
+            console.log('🔄 D-ID Streaming API 초기화 중...');
+            
+            try {
+                // 1. 스트림 생성 요청 - SDP Offer 받기
+                const response = await fetch('/api/did/stream/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                
+                if (!response.ok) {
+                    console.warn('D-ID 스트림 생성 실패');
+                    return false;
+                }
+                
+                const result = await response.json();
+                didStreamId = result.stream_id;
+                didSessionId = result.session_id;
+                didIceServers = result.ice_servers || [];
+                const offer = result.offer;
+                
+                console.log('✅ D-ID 스트림 생성됨:', didStreamId);
+                
+                // 2. WebRTC PeerConnection 생성
+                const config = {
+                    iceServers: didIceServers.length > 0 ? didIceServers : [
+                        { urls: 'stun:stun.l.google.com:19302' }
+                    ]
+                };
+                
+                didPeerConnection = new RTCPeerConnection(config);
+                
+                // 3. ICE Candidate 이벤트 핸들러
+                didPeerConnection.onicecandidate = async (event) => {
+                    if (event.candidate) {
+                        try {
+                            await fetch('/api/did/stream/ice', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    session_id: sessionId,
+                                    candidate: {
+                                        candidate: event.candidate.candidate,
+                                        sdpMid: event.candidate.sdpMid,
+                                        sdpMLineIndex: event.candidate.sdpMLineIndex
+                                    }
+                                })
+                            });
+                        } catch (err) {
+                            console.warn('ICE candidate 전송 실패:', err);
+                        }
+                    }
+                };
+                
+                // 4. 트랙 수신 이벤트 핸들러
+                didPeerConnection.ontrack = (event) => {
+                    console.log('🎬 D-ID 스트림 트랙 수신:', event.track.kind);
+                    
+                    const didVideo = document.getElementById('didVideo');
+                    
+                    if (event.track.kind === 'video') {
+                        didVideoTrack = event.track;
+                        // 비디오 스트림 설정
+                        if (event.streams && event.streams[0]) {
+                            didVideo.srcObject = event.streams[0];
+                        } else {
+                            const stream = new MediaStream([event.track]);
+                            didVideo.srcObject = stream;
+                        }
+                    }
+                    
+                    if (event.track.kind === 'audio') {
+                        didAudioTrack = event.track;
+                        // 오디오 트랙도 같은 스트림에 연결
+                        if (didVideo.srcObject && didAudioTrack) {
+                            didVideo.srcObject.addTrack(didAudioTrack);
+                        }
+                    }
+                };
+                
+                // 5. 연결 상태 모니터링
+                didPeerConnection.onconnectionstatechange = () => {
+                    console.log('D-ID 연결 상태:', didPeerConnection.connectionState);
+                    
+                    if (didPeerConnection.connectionState === 'connected') {
+                        didStreamReady = true;
+                        console.log('✅ D-ID WebRTC 연결 완료');
+                        
+                        const didVideo = document.getElementById('didVideo');
+                        didVideo.muted = false;  // 오디오 활성화
+                        hideDIDLoadingOverlay();  // 로딩 오버레이 숨김
+                    } else if (didPeerConnection.connectionState === 'failed' || 
+                               didPeerConnection.connectionState === 'disconnected') {
+                        console.warn('⚠️ D-ID 연결 실패/끊김');
+                        didStreamReady = false;
+                        showDIDLoadingOverlay('D-ID 연결이 끊어졌습니다');
+                    }
+                };
+                
+                // 6. Remote Description 설정 (D-ID의 Offer)
+                await didPeerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+                
+                // 7. Answer 생성
+                const answer = await didPeerConnection.createAnswer();
+                await didPeerConnection.setLocalDescription(answer);
+                
+                // 8. SDP Answer를 서버로 전송
+                const sdpResponse = await fetch('/api/did/stream/sdp', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        answer: {
+                            type: answer.type,
+                            sdp: answer.sdp
+                        }
+                    })
+                });
+                
+                if (!sdpResponse.ok) {
+                    console.warn('SDP Answer 전송 실패');
+                    return false;
+                }
+                
+                console.log('✅ D-ID SDP 교환 완료');
+                
+                // 9. 스트림 시작
+                await fetch('/api/did/stream/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+                
+                console.log('✅ D-ID 스트리밍 준비 완료 (WebRTC)');
+                // 연결 완료되면 오버레이는 onconnectionstatechange에서 숨김
+                return true;
+                
+            } catch (err) {
+                console.error('D-ID 스트리밍 초기화 오류:', err);
+                didStreamReady = false;
+                showDIDLoadingOverlay('D-ID 연결 실패: ' + err.message);
+                return false;
+            }
+        }
+        
+        // ========== D-ID 아바타가 말하게 함 (영상만 - 음성은 Hume TTS) ==========
+        // D-ID: 립싱크 영상 담당
+        // Hume EVI: 음성 담당 (분리된 역할)
+        async function didSpeak(text) {
+            if (!didAvailable) {
+                return false;
+            }
+            
+            // Streaming API 모드
+            if (USE_STREAMING_API && didStreamReady && didPeerConnection) {
+                return await didSpeakStreamingWithHumeTTS(text);
+            }
+            
+            // Talks API 모드 (폴백)
+            return await didSpeakTalksWithHumeTTS(text);
+        }
+        
+        // ========== D-ID Streaming + Hume TTS 동시 발화 ==========
+        async function didSpeakStreamingWithHumeTTS(text) {
+            try {
+                console.log('🎬 D-ID 영상 + Hume TTS 동시 발화:', text.substring(0, 30) + '...');
+                
+                const didVideo = document.getElementById('didVideo');
+                
+                // 발화 중 스타일 적용
+                didVideo.classList.add('speaking');
+                isSpeaking = true;
+                
+                // D-ID 비디오는 muted로 설정 (Hume TTS가 음성 담당)
+                didVideo.muted = true;
+                
+                // 1. Hume TTS로 음성 생성 (Promise)
+                const humeTTSPromise = fetch('/tts/speak', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text })
+                });
+                
+                // 2. D-ID 스트리밍으로 립싱크 영상 요청 (동시에)
+                const didStreamPromise = fetch('/api/did/stream/speak', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        text: text,
+                        voice_type: 'female'
+                    })
+                });
+                
+                // 3. 두 요청 동시 대기
+                const [humeResponse, didResponse] = await Promise.all([humeTTSPromise, didStreamPromise]);
+                
+                // 4. Hume TTS 오디오 재생
+                let audioElement = null;
+                if (humeResponse.ok) {
+                    const audioBlob = await humeResponse.blob();
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    audioElement = new Audio(audioUrl);
+                    console.log('✅ Hume TTS 음성 준비 완료');
+                } else {
+                    console.warn('⚠️ Hume TTS 실패, Web Speech API로 폴백');
+                }
+                
+                // 5. D-ID 영상 상태 확인
+                if (didResponse.ok) {
+                    const result = await didResponse.json();
+                    console.log('✅ D-ID 립싱크 영상 시작');
+                    
+                    // 비디오 재생 시도
+                    try {
+                        await didVideo.play();
+                    } catch (playErr) {
+                        console.warn('비디오 자동 재생 실패:', playErr);
+                    }
+                } else {
+                    console.warn('⚠️ D-ID 립싱크 실패');
+                }
+                
+                // 6. 오디오와 영상 동시 재생
+                return new Promise((resolve) => {
+                    if (audioElement) {
+                        audioElement.onended = () => {
+                            isSpeaking = false;
+                            didVideo.muted = false;  // 원래대로 복원
+                            finishSpeaking();
+                            resolve(true);
+                        };
+                        audioElement.onerror = () => {
+                            console.warn('오디오 재생 오류');
+                            isSpeaking = false;
+                            didVideo.muted = false;
+                            finishSpeaking();
+                            resolve(false);
+                        };
+                        audioElement.play().catch(err => {
+                            console.warn('오디오 재생 실패:', err);
+                            // Web Speech API로 폴백
+                            fallbackTTS(text);
+                            resolve(false);
+                        });
+                    } else {
+                        // Hume TTS 실패 시 Web Speech API로 폴백
+                        const utterance = new SpeechSynthesisUtterance(text);
+                        utterance.lang = 'ko-KR';
+                        utterance.rate = 0.9;
+                        utterance.onend = () => {
+                            isSpeaking = false;
+                            didVideo.muted = false;
+                            finishSpeaking();
+                            resolve(true);
+                        };
+                        speechSynthesis.speak(utterance);
+                    }
+                });
+                
+            } catch (err) {
+                console.error('D-ID + Hume TTS 발화 오류:', err);
+                isSpeaking = false;
+                return false;
+            }
+        }
+        
+        // ========== D-ID Talks API + Hume TTS 동시 발화 ==========
+        async function didSpeakTalksWithHumeTTS(text) {
+            try {
+                console.log('🎬 D-ID 영상 생성 + Hume TTS:', text.substring(0, 30) + '...');
+                
+                const didVideo = document.getElementById('didVideo');
+                
+                // D-ID 비디오는 muted로 설정 (Hume TTS가 음성 담당)
+                didVideo.muted = true;
+                
+                // 1. Hume TTS로 음성 생성
+                let audioElement = null;
+                try {
+                    const humeResponse = await fetch('/tts/speak', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text })
+                    });
+                    
+                    if (humeResponse.ok) {
+                        const audioBlob = await humeResponse.blob();
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        audioElement = new Audio(audioUrl);
+                        console.log('✅ Hume TTS 음성 준비 완료');
+                    }
+                } catch (ttsErr) {
+                    console.warn('Hume TTS 요청 실패:', ttsErr);
+                }
+                
+                // 2. D-ID Talk 생성 요청
+                const createResponse = await fetch('/api/did/talk/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: text,
+                        voice_type: 'female'
+                    })
+                });
+                
+                if (!createResponse.ok) {
+                    console.warn('D-ID Talk 생성 실패');
+                    // Hume TTS만 재생
+                    if (audioElement) {
+                        return new Promise((resolve) => {
+                            audioElement.onended = () => {
+                                didVideo.muted = false;
+                                finishSpeaking();
+                                resolve(true);
+                            };
+                            audioElement.play();
+                        });
+                    }
+                    return false;
+                }
+                
+                const createResult = await createResponse.json();
+                const talkId = createResult.talk_id;
+                console.log('✅ D-ID Talk 생성됨:', talkId);
+                
+                // 3. Talk 완료 대기
+                updateStatus('processing', 'AI 아바타 영상 생성 중...');
+                const waitResponse = await fetch(`/api/did/talk/${talkId}/wait?timeout=60`);
+                
+                if (!waitResponse.ok) {
+                    console.warn('D-ID Talk 대기 실패');
+                    if (audioElement) {
+                        return new Promise((resolve) => {
+                            audioElement.onended = () => {
+                                didVideo.muted = false;
+                                finishSpeaking();
+                                resolve(true);
+                            };
+                            audioElement.play();
+                        });
+                    }
+                    return false;
+                }
+                
+                const waitResult = await waitResponse.json();
+                
+                if (waitResult.status === 'done' && waitResult.result_url) {
+                    console.log('✅ D-ID 영상 생성 완료:', waitResult.result_url);
+                    
+                    // 4. 비디오와 오디오 동시 재생
+                    didVideo.src = waitResult.result_url;
+                    didVideo.classList.add('speaking');
+                    
+                    return new Promise((resolve) => {
+                        didVideo.onloadeddata = async () => {
+                            // 영상과 음성 동시 시작
+                            didVideo.play();
+                            if (audioElement) {
+                                audioElement.play();
+                            }
+                        };
+                        
+                        // 영상 또는 음성 종료 시 완료 처리
+                        const onComplete = () => {
+                            didVideo.classList.remove('speaking');
+                            didVideo.muted = false;
+                            finishSpeaking();
+                            resolve(true);
+                        };
+                        
+                        if (audioElement) {
+                            audioElement.onended = onComplete;
+                        } else {
+                            didVideo.onended = onComplete;
+                        }
+                        
+                        didVideo.onerror = () => {
+                            console.warn('D-ID 영상 재생 오류');
+                            didVideo.classList.remove('speaking');
+                            didVideo.muted = false;
+                            if (audioElement) {
+                                audioElement.onended = () => {
+                                    finishSpeaking();
+                                    resolve(true);
+                                };
+                                audioElement.play();
+                            } else {
+                                finishSpeaking();
+                                resolve(false);
+                            }
+                        };
+                    });
+                } else {
+                    console.warn('D-ID 영상 생성 실패:', waitResult);
+                    // Hume TTS만 재생
+                    if (audioElement) {
+                        return new Promise((resolve) => {
+                            audioElement.onended = () => {
+                                didVideo.muted = false;
+                                finishSpeaking();
+                                resolve(true);
+                            };
+                            audioElement.play();
+                        });
+                    }
+                    return false;
+                }
+                
+            } catch (err) {
+                console.error('D-ID + Hume TTS 오류:', err);
+                return false;
+            }
+        }
+        
+        // ========== D-ID 종료 ==========
+        async function closeDIDStreaming() {
+            didStreamReady = false;
+            isSpeaking = false;
+            
+            // WebRTC PeerConnection 종료
+            if (didPeerConnection) {
+                didPeerConnection.close();
+                didPeerConnection = null;
+            }
+            
+            // 서버에 스트림 종료 요청
+            if (sessionId) {
+                try {
+                    await fetch(`/api/did/stream/${sessionId}`, {
+                        method: 'DELETE'
+                    });
+                } catch (err) {
+                    console.warn('D-ID 스트림 종료 요청 실패:', err);
+                }
+            }
+            
+            // 트랙 정리
+            didVideoTrack = null;
+            didAudioTrack = null;
+            didStreamId = null;
+            didSessionId = null;
+            
+            // 비디오 정리
+            const didVideo = document.getElementById('didVideo');
+            didVideo.pause();
+            didVideo.classList.remove('speaking');
+            if (didVideo.srcObject) {
+                didVideo.srcObject.getTracks().forEach(track => track.stop());
+                didVideo.srcObject = null;
+            }
+            didVideo.src = '';
+            
+            // 로딩 오버레이 표시
+            showDIDLoadingOverlay('면접이 종료되었습니다');
+            
+            console.log('✅ D-ID 세션 종료');
+        }
         
         // ========== 카메라 초기화 ==========
         async function initCamera() {
@@ -707,6 +1355,237 @@
                 console.error('❌ 카메라/마이크 접근 실패:', err);
                 alert('카메라와 마이크 접근 권한이 필요합니다.');
             }
+        }
+        
+        // ========== 사용자 영상/음성 WebRTC 연결 (서버 전송용) ==========
+        async function initUserWebRTC() {
+            if (!mediaStream) {
+                console.warn('⚠️ 미디어 스트림이 없어 WebRTC를 초기화할 수 없습니다.');
+                return false;
+            }
+            
+            try {
+                userPeerConnection = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                
+                // 연결 상태 모니터링
+                userPeerConnection.onconnectionstatechange = () => {
+                    console.log('👤 사용자 WebRTC 연결 상태:', userPeerConnection.connectionState);
+                    
+                    if (userPeerConnection.connectionState === 'connected') {
+                        console.log('✅ 사용자 영상/음성 서버 전송 연결 완료');
+                    } else if (userPeerConnection.connectionState === 'failed' || 
+                               userPeerConnection.connectionState === 'disconnected') {
+                        console.warn('⚠️ 사용자 WebRTC 연결 실패/끊김');
+                    }
+                };
+                
+                // ICE 후보 이벤트 (로컬 ICE 수집용)
+                userPeerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        console.log('📡 ICE 후보 수집됨');
+                    }
+                };
+                
+                // 미디어 트랙 추가 (영상 + 음성)
+                mediaStream.getTracks().forEach(track => {
+                    userPeerConnection.addTrack(track, mediaStream);
+                    console.log(`📹 트랙 추가: ${track.kind}`);
+                });
+                
+                // SDP Offer 생성
+                const offer = await userPeerConnection.createOffer();
+                await userPeerConnection.setLocalDescription(offer);
+                
+                // 서버에 Offer 전송
+                const response = await fetch('/offer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        sdp: offer.sdp,
+                        type: offer.type
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('서버 WebRTC Offer 처리 실패');
+                }
+                
+                const answer = await response.json();
+                
+                // 서버 응답 세션 ID 저장
+                if (answer.session_id && !sessionId) {
+                    sessionId = answer.session_id;
+                }
+                
+                // SDP Answer 적용
+                await userPeerConnection.setRemoteDescription(
+                    new RTCSessionDescription({ sdp: answer.sdp, type: answer.type })
+                );
+                
+                console.log('✅ 사용자 영상 WebRTC 연결 완료. 세션:', sessionId);
+                
+                // WebSocket 연결 시작 (STT 결과 수신용)
+                await initInterviewWebSocket();
+                
+                return true;
+                
+            } catch (err) {
+                console.error('❌ 사용자 WebRTC 초기화 실패:', err);
+                return false;
+            }
+        }
+        
+        // ========== WebSocket 연결 (서버 STT 결과 수신) ==========
+        async function initInterviewWebSocket() {
+            if (!sessionId) {
+                console.warn('⚠️ 세션 ID가 없어 WebSocket을 연결할 수 없습니다.');
+                return false;
+            }
+            
+            try {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws/interview/${sessionId}`;
+                
+                userWebSocket = new WebSocket(wsUrl);
+                
+                userWebSocket.onopen = () => {
+                    console.log('✅ 면접 WebSocket 연결됨');
+                };
+                
+                userWebSocket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        handleWebSocketMessage(data);
+                    } catch (e) {
+                        console.warn('WebSocket 메시지 파싱 오류:', e);
+                    }
+                };
+                
+                userWebSocket.onerror = (error) => {
+                    console.error('❌ WebSocket 오류:', error);
+                };
+                
+                userWebSocket.onclose = () => {
+                    console.log('🔌 면접 WebSocket 연결 종료');
+                    serverSTTEnabled = false;
+                };
+                
+                // 연결 대기
+                await new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => reject(new Error('WebSocket 연결 타임아웃')), 5000);
+                    userWebSocket.addEventListener('open', () => {
+                        clearTimeout(timeout);
+                        resolve();
+                    }, { once: true });
+                    userWebSocket.addEventListener('error', () => {
+                        clearTimeout(timeout);
+                        reject(new Error('WebSocket 연결 실패'));
+                    }, { once: true });
+                });
+                
+                return true;
+                
+            } catch (err) {
+                console.error('❌ WebSocket 초기화 실패:', err);
+                return false;
+            }
+        }
+        
+        // ========== WebSocket 메시지 처리 ==========
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'connected':
+                    serverSTTEnabled = data.stt_available;
+                    console.log(`✅ 서버 STT (Deepgram) ${serverSTTEnabled ? '활성화됨' : '비활성화됨'}`);
+                    
+                    // Deepgram 우선 사용 설정
+                    if (PREFER_SERVER_STT && serverSTTEnabled) {
+                        useServerSTT = true;
+                        // Web Speech API 중지 (Deepgram 사용)
+                        if (recognition && isListening) {
+                            try {
+                                recognition.stop();
+                                console.log('🎤 Deepgram(서버 STT) 우선 사용 - Web Speech API 중지');
+                            } catch (e) {}
+                        }
+                    } else if (!serverSTTEnabled) {
+                        // Deepgram 불가 시 Web Speech API로 폴백
+                        useServerSTT = false;
+                        console.log('🎤 Deepgram 불가 - Web Speech API로 폴백');
+                        if (recognition && isInterviewActive && !isMicMuted && !isListening) {
+                            try {
+                                recognition.start();
+                            } catch (e) {}
+                        }
+                    }
+                    break;
+                    
+                case 'stt_result':
+                    // Deepgram에서 받은 STT 결과 표시 (항상 우선 처리)
+                    if (serverSTTEnabled) {
+                        const speechTextEl = document.getElementById('speechText');
+                        speechTextEl.classList.remove('placeholder');
+                        speechTextEl.textContent = data.transcript || '...';
+                        
+                        // VAD 신호 전송
+                        if (data.transcript) {
+                            sendVADSignal(true, 0.7);
+                            answerLengthSoFar = speechBuffer.length + data.transcript.length;
+                        }
+                        
+                        // 최종 결과면 버퍼에 추가
+                        if (data.is_final && data.transcript) {
+                            speechBuffer += data.transcript + ' ';
+                            resetSilenceTimer();
+                        }
+                    }
+                    break;
+                    
+                case 'intervention':
+                    // 서버에서 보낸 개입 메시지 처리
+                    handleInterventionFromServer(data);
+                    break;
+                    
+                case 'pong':
+                    // 핑퐁 응답
+                    break;
+                    
+                default:
+                    console.log('📨 WebSocket 메시지:', data);
+            }
+        }
+        
+        // ========== 서버 개입 메시지 처리 ==========
+        function handleInterventionFromServer(data) {
+            console.log('🚨 서버 개입:', data.message);
+            // 기존 showInterventionMessage 함수 호출
+            if (typeof showInterventionMessage === 'function') {
+                showInterventionMessage(data.message, data.intervention_type || 'info');
+            }
+        }
+        
+        // ========== 사용자 WebRTC 연결 종료 ==========
+        async function closeUserWebRTC() {
+            // WebSocket 종료
+            if (userWebSocket) {
+                try {
+                    userWebSocket.close();
+                } catch (e) {}
+                userWebSocket = null;
+            }
+            
+            // PeerConnection 종료
+            if (userPeerConnection) {
+                try {
+                    userPeerConnection.close();
+                } catch (e) {}
+                userPeerConnection = null;
+            }
+            
+            serverSTTEnabled = false;
+            console.log('✅ 사용자 WebRTC 연결 종료');
         }
         
         // ========== 음성 인식 초기화 (Web Speech API) ==========
@@ -746,6 +1625,12 @@
                 speechTextEl.classList.remove('placeholder');
                 speechTextEl.textContent = finalTranscript || interimTranscript || '...';
                 
+                // VAD 신호 전송 (사용자가 말하고 있음)
+                if (interimTranscript || finalTranscript) {
+                    sendVADSignal(true, 0.7);
+                    answerLengthSoFar = speechBuffer.length + (finalTranscript || interimTranscript).length;
+                }
+                
                 // 최종 결과가 있으면 버퍼에 추가
                 if (finalTranscript) {
                     speechBuffer += finalTranscript + ' ';
@@ -782,9 +1667,16 @@
             if (silenceTimer) clearTimeout(silenceTimer);
             
             // 3초간 말이 없으면 답변 완료로 간주
-            silenceTimer = setTimeout(() => {
+            silenceTimer = setTimeout(async () => {
                 if (speechBuffer.trim().length > 10 && isInterviewActive) {
-                    processUserAnswer(speechBuffer.trim());
+                    // VAD 신호: 사용자가 말을 멈춤
+                    sendVADSignal(false, 0);
+                    
+                    // 정상 턴 종료 처리
+                    const answer = speechBuffer.trim();
+                    await endUserTurn(answer);
+                    
+                    processUserAnswer(answer);
                     speechBuffer = '';
                 }
             }, 3000);
@@ -792,6 +1684,14 @@
         
         // ========== 면접 시작 ==========
         async function startInterview() {
+            // 로그인 상태 재확인
+            currentUser = checkLoginStatus();
+            if (!currentUser) {
+                alert('세션이 만료되었습니다. 다시 로그인해주세요.');
+                window.location.href = '/';
+                return;
+            }
+            
             // 이력서 업로드 모달 표시
             document.getElementById('resumeModal').classList.add('active');
         }
@@ -802,19 +1702,62 @@
         }
         
         async function beginInterview() {
+            // 로그인 상태 재확인
+            currentUser = checkLoginStatus();
+            if (!currentUser) {
+                alert('세션이 만료되었습니다. 다시 로그인해주세요.');
+                window.location.href = '/';
+                return;
+            }
+            
             try {
-                // 세션 생성
-                const response = await fetch('/api/session', { method: 'POST' });
+                // 개입 설정 로드
+                await loadInterventionSettings();
+                
+                // 세션 생성 (사용자 정보 포함)
+                const response = await fetch('/api/session', { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        user_email: currentUser.email,
+                        user_id: currentUser.user_id || currentUser.id
+                    })
+                });
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    alert(error.detail || '세션 생성에 실패했습니다.');
+                    return;
+                }
+                
                 const data = await response.json();
                 sessionId = data.session_id;
                 
                 isInterviewActive = true;
                 currentQuestionIndex = 0;
                 
+                // D-ID 스트리밍 초기화 시도
+                if (didAvailable) {
+                    updateStatus('processing');
+                    const didInitialized = await initDIDStreaming();
+                    if (didInitialized) {
+                        console.log('✅ D-ID 스트리밍 준비 완료');
+                    }
+                }
+                
+                // 사용자 영상/음성 WebRTC 연결 (감정분석 + 서버 STT용)
+                const userWebRTCInitialized = await initUserWebRTC();
+                if (userWebRTCInitialized) {
+                    console.log('✅ 사용자 영상/음성 서버 전송 준비 완료');
+                } else {
+                    console.warn('⚠️ 사용자 WebRTC 연결 실패 - 클라이언트 STT 사용');
+                    useServerSTT = false;
+                }
+                
                 // UI 업데이트
                 document.getElementById('startBtn').style.display = 'none';
                 document.getElementById('endBtn').style.display = 'inline-block';
-                document.getElementById('sidePanel').style.display = 'block';
+                // 실시간 평가 패널 비활성화됨 - 면접 종료 후 리포트에서 확인
                 
                 updateStatus('ready', '면접 진행 중');
                 
@@ -822,8 +1765,14 @@
                 await getNextQuestion();
                 
                 // 음성 인식 시작
-                if (recognition && !isMicMuted) {
+                // Deepgram(서버 STT) 우선 사용 - WebRTC 연결 성공 시 자동 활성화됨
+                // Web Speech API는 Deepgram 불가 시에만 폴백으로 사용
+                if (serverSTTEnabled) {
+                    console.log('🎤 Deepgram(서버 STT) 음성 인식 활성화됨');
+                } else if (!serverSTTEnabled && recognition && !isMicMuted) {
+                    // Deepgram 불가 시 Web Speech API 폴백
                     recognition.start();
+                    console.log('🎤 Deepgram 불가 - Web Speech API 음성 인식으로 폴백');
                 }
                 
             } catch (err) {
@@ -869,7 +1818,7 @@
             
             // 음성 비주얼라이저 활성화
             document.getElementById('voiceVisualizer').classList.add('active');
-            document.getElementById('interviewerAvatar').classList.add('speaking');
+            document.getElementById('didVideo').classList.add('speaking');
             
             // 음성 인식 일시 중지
             if (recognition && isListening) {
@@ -877,6 +1826,15 @@
             }
             
             try {
+                // D-ID가 활성화된 경우 D-ID Talks API 사용
+                if (didAvailable && didStreamReady) {
+                    console.log('🎬 D-ID 아바타로 발언...');
+                    const success = await didSpeak(text);
+                    if (success) return;  // D-ID 성공 시 리턴
+                    // D-ID 실패 시 기존 TTS로 폴백
+                    console.log('⚠️ D-ID 실패, TTS로 폴백');
+                }
+                
                 // TTS API 호출 시도
                 const response = await fetch('/tts/speak', {
                     method: 'POST',
@@ -918,12 +1876,308 @@
         
         function finishSpeaking() {
             document.getElementById('voiceVisualizer').classList.remove('active');
-            document.getElementById('interviewerAvatar').classList.remove('speaking');
+            document.getElementById('didVideo').classList.remove('speaking');
             updateStatus('listening', '답변을 기다리는 중...');
             
-            // 음성 인식 재시작
+            // 음성 인식 재시작 및 사용자 턴 시작
             if (recognition && !isMicMuted && isInterviewActive) {
-                setTimeout(() => recognition.start(), 500);
+                setTimeout(() => {
+                    recognition.start();
+                    startUserTurn(); // 개입 시스템: 사용자 턴 시작
+                }, 500);
+            }
+        }
+        
+        // ========== 실시간 개입 시스템 ==========
+        
+        // 사용자 턴 시작 (질문 후 답변 시작 시점)
+        async function startUserTurn() {
+            if (!interventionEnabled || !sessionId) return;
+            
+            currentTurnStartTime = Date.now();
+            answerLengthSoFar = 0;
+            hasReceivedSoftWarning = false;
+            
+            try {
+                const response = await fetch('/api/intervention/start-turn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        question: currentQuestion
+                    })
+                });
+                
+                if (response.ok) {
+                    console.log('✅ 사용자 턴 시작됨');
+                    // 개입 체크 인터벌 시작 (2초마다)
+                    startInterventionChecking();
+                }
+            } catch (err) {
+                console.warn('턴 시작 API 오류:', err);
+            }
+        }
+        
+        // VAD 신호 전송 (음성 활동 감지 시)
+        async function sendVADSignal(isSpeaking, amplitude = 0.5) {
+            if (!interventionEnabled || !sessionId) return;
+            
+            lastVADSignalTime = Date.now();
+            
+            try {
+                await fetch('/api/intervention/vad-signal', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        is_speaking: isSpeaking,
+                        amplitude: amplitude
+                    })
+                });
+            } catch (err) {
+                // VAD 신호 오류는 조용히 무시
+            }
+        }
+        
+        // 개입 체크 시작 (주기적으로 호출)
+        function startInterventionChecking() {
+            stopInterventionChecking(); // 기존 인터벌 정리
+            
+            interventionCheckInterval = setInterval(async () => {
+                if (!isInterviewActive || isSpeaking) return;
+                await checkIntervention();
+            }, 2000); // 2초마다 체크
+        }
+        
+        // 개입 체크 중지
+        function stopInterventionChecking() {
+            if (interventionCheckInterval) {
+                clearInterval(interventionCheckInterval);
+                interventionCheckInterval = null;
+            }
+            hideAnswerTimer(); // 타이머 숨기기
+        }
+        
+        // 개입 필요 여부 체크
+        async function checkIntervention() {
+            if (!interventionEnabled || !sessionId || !currentTurnStartTime) return;
+            
+            const elapsedTime = (Date.now() - currentTurnStartTime) / 1000;
+            
+            // 답변 시간 타이머 업데이트
+            updateAnswerTimer(elapsedTime);
+            
+            try {
+                const response = await fetch('/api/intervention/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        current_answer: speechBuffer,
+                        elapsed_time: elapsedTime
+                    })
+                });
+                
+                if (response.ok) {
+                    const result = await response.json();
+                    
+                    if (result.should_intervene) {
+                        handleIntervention(result);
+                    }
+                }
+            } catch (err) {
+                console.warn('개입 체크 오류:', err);
+            }
+        }
+        
+        // 답변 시간 타이머 UI 업데이트
+        function updateAnswerTimer(elapsedTime) {
+            const timerEl = document.getElementById('answerTimer');
+            const timerTextEl = document.getElementById('answerTimerText');
+            
+            if (!timerEl || !timerTextEl) return;
+            
+            const seconds = Math.floor(elapsedTime);
+            const maxTime = interventionSettings.max_answer_time || 120;
+            const warningTime = interventionSettings.soft_warning_time || 90;
+            
+            timerTextEl.textContent = `답변 시간: ${seconds}초 / ${maxTime}초`;
+            timerEl.style.display = 'block';
+            
+            // 상태에 따른 스타일 변경
+            timerEl.classList.remove('warning', 'danger');
+            if (seconds >= maxTime - 10) {
+                timerEl.classList.add('danger');
+            } else if (seconds >= warningTime) {
+                timerEl.classList.add('warning');
+            }
+        }
+        
+        // 답변 시간 타이머 숨기기
+        function hideAnswerTimer() {
+            const timerEl = document.getElementById('answerTimer');
+            if (timerEl) {
+                timerEl.style.display = 'none';
+                timerEl.classList.remove('warning', 'danger');
+            }
+        }
+        
+        // 개입 처리
+        async function handleIntervention(interventionResult) {
+            const { intervention_type, message, details } = interventionResult;
+            
+            console.log(`🚨 개입 발생: ${intervention_type}`);
+            
+            // 개입 UI 표시
+            showInterventionMessage(intervention_type, message);
+            
+            if (intervention_type === 'soft_warning') {
+                // 부드러운 경고: TTS로 안내 (음성 인식 계속)
+                hasReceivedSoftWarning = true;
+                await speakInterventionMessage(message);
+                
+            } else if (intervention_type === 'hard_limit' || intervention_type === 'off_topic') {
+                // 강제 종료: 현재 답변 제출하고 다음 질문으로
+                stopInterventionChecking();
+                
+                if (recognition && isListening) {
+                    recognition.stop();
+                }
+                
+                // 현재까지의 답변 처리
+                if (speechBuffer.trim().length > 10) {
+                    await processUserAnswerWithIntervention(speechBuffer.trim(), intervention_type);
+                } else {
+                    // 답변이 거의 없으면 TTS 안내 후 다음 질문
+                    await speakInterventionMessage(message);
+                    await getNextQuestion();
+                }
+                
+                speechBuffer = '';
+            }
+        }
+        
+        // 개입 메시지 UI 표시
+        function showInterventionMessage(type, message) {
+            // 기존 개입 메시지 제거
+            const existingMsg = document.getElementById('interventionMessage');
+            if (existingMsg) existingMsg.remove();
+            
+            const msgDiv = document.createElement('div');
+            msgDiv.id = 'interventionMessage';
+            msgDiv.style.cssText = `
+                position: fixed;
+                top: 20px;
+                left: 50%;
+                transform: translateX(-50%);
+                padding: 15px 25px;
+                border-radius: 10px;
+                font-weight: 500;
+                z-index: 10000;
+                animation: slideDown 0.3s ease;
+                max-width: 80%;
+                text-align: center;
+            `;
+            
+            // 타입별 스타일
+            if (type === 'soft_warning') {
+                msgDiv.style.background = 'linear-gradient(135deg, #f39c12, #e67e22)';
+                msgDiv.style.color = 'white';
+                msgDiv.innerHTML = `⚡ ${message}`;
+            } else if (type === 'hard_limit') {
+                msgDiv.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+                msgDiv.style.color = 'white';
+                msgDiv.innerHTML = `⏰ ${message}`;
+            } else if (type === 'off_topic') {
+                msgDiv.style.background = 'linear-gradient(135deg, #9b59b6, #8e44ad)';
+                msgDiv.style.color = 'white';
+                msgDiv.innerHTML = `🔀 ${message}`;
+            }
+            
+            document.body.appendChild(msgDiv);
+            
+            // 5초 후 자동 제거
+            setTimeout(() => {
+                if (msgDiv.parentNode) {
+                    msgDiv.style.animation = 'fadeOut 0.3s ease';
+                    setTimeout(() => msgDiv.remove(), 300);
+                }
+            }, 5000);
+        }
+        
+        // 개입 메시지 TTS 발화
+        async function speakInterventionMessage(message) {
+            // 간단한 TTS (빠른 발화)
+            const utterance = new SpeechSynthesisUtterance(message);
+            utterance.lang = 'ko-KR';
+            utterance.rate = 1.0;
+            
+            return new Promise(resolve => {
+                utterance.onend = resolve;
+                utterance.onerror = resolve;
+                speechSynthesis.speak(utterance);
+            });
+        }
+        
+        // 개입으로 인한 답변 처리
+        async function processUserAnswerWithIntervention(answer, interventionType) {
+            stopInterventionChecking();
+            
+            try {
+                // 턴 종료 API 호출
+                await fetch('/api/intervention/end-turn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        final_answer: answer,
+                        was_intervened: true,
+                        intervention_type: interventionType
+                    })
+                });
+                
+                // 기존 답변 처리 로직 호출
+                await processUserAnswer(answer);
+                
+            } catch (err) {
+                console.warn('개입 답변 처리 오류:', err);
+                await processUserAnswer(answer);
+            }
+        }
+        
+        // 사용자 턴 종료 (정상 답변 완료 시)
+        async function endUserTurn(answer) {
+            stopInterventionChecking();
+            
+            if (!interventionEnabled || !sessionId) return;
+            
+            try {
+                await fetch('/api/intervention/end-turn', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        final_answer: answer,
+                        was_intervened: false
+                    })
+                });
+            } catch (err) {
+                console.warn('턴 종료 API 오류:', err);
+            }
+            
+            currentTurnStartTime = null;
+        }
+        
+        // 개입 설정 로드
+        async function loadInterventionSettings() {
+            try {
+                const response = await fetch('/api/intervention/settings');
+                if (response.ok) {
+                    interventionSettings = await response.json();
+                    console.log('✅ 개입 설정 로드됨:', interventionSettings);
+                }
+            } catch (err) {
+                console.warn('개입 설정 로드 오류:', err);
             }
         }
         
@@ -1099,51 +2353,1337 @@
         async function endInterview() {
             isInterviewActive = false;
             
+            // 개입 시스템 정리
+            stopInterventionChecking();
+            
             if (recognition && isListening) {
                 recognition.stop();
             }
             
-            updateStatus('ready', '면접 종료');
+            // 사용자 영상 WebRTC 연결 종료
+            await closeUserWebRTC();
             
-            // 최종 리포트 생성
-            try {
-                const response = await fetch(`/api/report/${sessionId}`);
-                const report = await response.json();
-                
-                showReportModal(report);
-                
-            } catch (err) {
-                console.error('리포트 생성 실패:', err);
-                alert('면접이 종료되었습니다.');
-            }
+            // D-ID 스트리밍 종료
+            await closeDIDStreaming();
+            
+            updateStatus('ready', '면접 종료');
             
             // UI 초기화
             document.getElementById('startBtn').style.display = 'inline-block';
             document.getElementById('endBtn').style.display = 'none';
+            
+            // 코딩 테스트로 자동 전환
+            showCodingTestTransition();
         }
         
-        // ========== 리포트 모달 표시 ==========
-        function showReportModal(report) {
+        // ========== 코딩 테스트 전환 화면 ==========
+        function showCodingTestTransition() {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay active';
+            modal.id = 'codingTestTransitionModal';
+            modal.innerHTML = `
+                <div class="modal" style="max-width: 500px; text-align: center;">
+                    <div style="font-size: 60px; margin-bottom: 20px;">🎉</div>
+                    <h2 style="margin-bottom: 15px;">화상 면접이 완료되었습니다!</h2>
+                    <p style="color: #8892b0; margin-bottom: 30px; line-height: 1.6;">
+                        다음 단계로 <strong style="color: #00d9ff;">코딩 테스트</strong>가 진행됩니다.<br>
+                        실제 코딩 문제를 풀고 AI가 코드를 분석합니다.
+                    </p>
+                    <div style="background: rgba(0,217,255,0.1); border-radius: 12px; padding: 20px; margin-bottom: 25px;">
+                        <div style="display: flex; justify-content: space-around; text-align: center;">
+                            <div>
+                                <div style="font-size: 24px;">💻</div>
+                                <div style="font-size: 12px; color: #8892b0; margin-top: 5px;">코드 작성</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 24px;">⚡</div>
+                                <div style="font-size: 12px; color: #8892b0; margin-top: 5px;">실행 테스트</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 24px;">🤖</div>
+                                <div style="font-size: 12px; color: #8892b0; margin-top: 5px;">AI 분석</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-bottom: 20px;">
+                        <span style="color: #ffc107;">⏱️</span>
+                        <span style="color: #8892b0; font-size: 14px;"> 자동으로 시작됩니다: </span>
+                        <span id="countdownTimer" style="color: #00ff88; font-weight: bold; font-size: 18px;">5</span>
+                        <span style="color: #8892b0; font-size: 14px;">초</span>
+                    </div>
+                    <div class="modal-buttons" style="justify-content: center;">
+                        <button class="btn btn-primary" onclick="startCodingTest()" style="padding: 15px 40px; font-size: 16px;">
+                            💻 지금 시작하기
+                        </button>
+                        <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="skipCodingTest()">
+                            건너뛰기
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            
+            // 카운트다운 시작
+            let countdown = 5;
+            const timerEl = document.getElementById('countdownTimer');
+            const countdownInterval = setInterval(() => {
+                countdown--;
+                if (timerEl) timerEl.textContent = countdown;
+                if (countdown <= 0) {
+                    clearInterval(countdownInterval);
+                    startCodingTest();
+                }
+            }, 1000);
+            
+            // 모달에 인터벌 저장 (취소용)
+            modal.dataset.countdownInterval = countdownInterval;
+        }
+        
+        // ========== 코딩 테스트 시작 ==========
+        function startCodingTest() {
+            // 전환 모달 제거
+            const transitionModal = document.getElementById('codingTestTransitionModal');
+            if (transitionModal) {
+                const interval = transitionModal.dataset.countdownInterval;
+                if (interval) clearInterval(parseInt(interval));
+                transitionModal.remove();
+            }
+            
+            // 코딩 테스트 화면 표시
+            showCodingTestScreen();
+        }
+        
+        // ========== 코딩 테스트 건너뛰기 ==========
+        function skipCodingTest() {
+            // 전환 모달 제거
+            const transitionModal = document.getElementById('codingTestTransitionModal');
+            if (transitionModal) {
+                const interval = transitionModal.dataset.countdownInterval;
+                if (interval) clearInterval(parseInt(interval));
+                transitionModal.remove();
+            }
+            
+            // 바로 최종 리포트 표시
+            showFinalReport();
+        }
+        
+        // ========== 코딩 테스트 화면 ==========
+        async function showCodingTestScreen() {
+            // 메인 컨테이너 숨기기
+            document.querySelector('.main-layout').style.display = 'none';
+            document.querySelector('.header h1').textContent = '💻 코딩 테스트';
+            
+            // 코딩 테스트 컨테이너 생성
+            const codingContainer = document.createElement('div');
+            codingContainer.id = 'codingTestContainer';
+            codingContainer.innerHTML = `
+                <style>
+                    #codingTestContainer {
+                        display: flex;
+                        gap: 20px;
+                        height: calc(100vh - 120px);
+                    }
+                    .problem-panel {
+                        width: 40%;
+                        background: rgba(255,255,255,0.05);
+                        border: 1px solid rgba(255,255,255,0.1);
+                        border-radius: 16px;
+                        padding: 20px;
+                        overflow-y: auto;
+                    }
+                    .code-panel {
+                        flex: 1;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 15px;
+                    }
+                    .editor-wrapper {
+                        flex: 1;
+                        background: #1e1e1e;
+                        border-radius: 12px;
+                        overflow: hidden;
+                        border: 1px solid rgba(255,255,255,0.1);
+                    }
+                    .editor-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 10px 15px;
+                        background: #2d2d30;
+                        border-bottom: 1px solid rgba(255,255,255,0.1);
+                    }
+                    .editor-header select {
+                        background: #3c3c3c;
+                        color: #fff;
+                        border: 1px solid rgba(255,255,255,0.2);
+                        padding: 6px 12px;
+                        border-radius: 6px;
+                    }
+                    #codeEditor {
+                        width: 100%;
+                        height: calc(100% - 50px);
+                        background: #1e1e1e;
+                        color: #d4d4d4;
+                        font-family: 'Consolas', 'Monaco', monospace;
+                        font-size: 14px;
+                        padding: 15px;
+                        border: none;
+                        resize: none;
+                        outline: none;
+                    }
+                    .output-panel {
+                        height: 180px;
+                        background: rgba(255,255,255,0.05);
+                        border: 1px solid rgba(255,255,255,0.1);
+                        border-radius: 12px;
+                        overflow: hidden;
+                    }
+                    .output-header {
+                        padding: 10px 15px;
+                        background: rgba(255,255,255,0.05);
+                        border-bottom: 1px solid rgba(255,255,255,0.1);
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                    }
+                    .output-content {
+                        padding: 15px;
+                        font-family: monospace;
+                        font-size: 13px;
+                        height: calc(100% - 45px);
+                        overflow-y: auto;
+                    }
+                    .test-result {
+                        display: flex;
+                        align-items: center;
+                        padding: 8px 12px;
+                        margin-bottom: 6px;
+                        background: rgba(0,0,0,0.3);
+                        border-radius: 6px;
+                        border-left: 3px solid;
+                    }
+                    .test-result.passed { border-left-color: #4caf50; }
+                    .test-result.failed { border-left-color: #f44336; }
+                    .problem-title { font-size: 20px; font-weight: 700; margin-bottom: 15px; color: #00d9ff; }
+                    .difficulty-badge { padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; margin-left: 10px; }
+                    .difficulty-easy { background: rgba(76,175,80,0.2); color: #4caf50; }
+                    .difficulty-medium { background: rgba(255,152,0,0.2); color: #ff9800; }
+                    .problem-desc { line-height: 1.8; color: #8892b0; white-space: pre-wrap; }
+                    .example-box { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 15px; margin: 15px 0; }
+                    .example-title { color: #00ff88; font-weight: 600; margin-bottom: 10px; }
+                    .example-code { background: #1e1e1e; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 13px; }
+                    .action-buttons { display: flex; gap: 10px; }
+                    .btn-run { background: #4ec9b0; color: #1e1e1e; }
+                    .btn-submit { background: linear-gradient(135deg, #00d9ff, #00ff88); color: #1e1e1e; }
+                </style>
+                
+                <div class="problem-panel">
+                    <div style="display: flex; align-items: center; margin-bottom: 20px;">
+                        <select id="problemSelect" onchange="loadProblem()" style="flex:1; background:rgba(255,255,255,0.1); color:#fff; border:1px solid rgba(255,255,255,0.2); padding:10px; border-radius:8px;">
+                            <option value="">문제 선택...</option>
+                        </select>
+                    </div>
+                    <div id="problemContent">
+                        <div class="problem-title">문제를 선택하세요</div>
+                        <p class="problem-desc">왼쪽 드롭다운에서 풀고 싶은 문제를 선택하세요.</p>
+                    </div>
+                </div>
+                
+                <div class="code-panel">
+                    <div class="editor-wrapper">
+                        <div class="editor-header">
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span style="color: #dcdcaa;">📄</span>
+                                <span id="fileName">solution.py</span>
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <select id="languageSelect" onchange="changeLanguage()">
+                                    <option value="python">Python</option>
+                                    <option value="javascript">JavaScript</option>
+                                    <option value="java">Java</option>
+                                    <option value="c">C</option>
+                                    <option value="cpp">C++</option>
+                                </select>
+                                <div class="action-buttons">
+                                    <button class="btn btn-run" onclick="runCode()">▶ 실행</button>
+                                    <button class="btn btn-submit" onclick="submitCode()">제출</button>
+                                </div>
+                            </div>
+                        </div>
+                        <textarea id="codeEditor" spellcheck="false"># Python 솔루션
+# 여기에 코드를 작성하세요
+
+def solution():
+    pass
+
+solution()</textarea>
+                    </div>
+                    
+                    <div class="output-panel">
+                        <div class="output-header">
+                            <span>📤 실행 결과</span>
+                            <span id="testResultBadge" style="font-size: 12px; color: #8892b0;">테스트: 0/0</span>
+                        </div>
+                        <div class="output-content" id="outputContent">
+                            코드를 실행하면 결과가 여기에 표시됩니다.
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                        <button class="btn btn-primary" onclick="showWhiteboardTransition()">
+                            다음 단계: 아키텍처 설계 →
+                        </button>
+                        <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="showFinalReport()">
+                            건너뛰고 결과 보기
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            document.querySelector('.container').appendChild(codingContainer);
+            
+            // 문제 목록 로드
+            await loadProblems();
+        }
+        
+        // ========== 코딩 테스트 변수 ==========
+        let currentProblem = null;
+        let currentLanguage = 'python';
+        let codingTestResults = [];
+        
+        // ========== 문제 목록 로드 ==========
+        async function loadProblems() {
+            try {
+                const response = await fetch('/api/coding/problems');
+                const data = await response.json();
+                
+                const select = document.getElementById('problemSelect');
+                if (select) {
+                    data.problems.forEach(p => {
+                        const option = document.createElement('option');
+                        option.value = p.id;
+                        option.textContent = `[${p.difficulty.toUpperCase()}] ${p.title}`;
+                        select.appendChild(option);
+                    });
+                    
+                    // 첫 번째 문제 자동 선택
+                    if (data.problems.length > 0) {
+                        select.value = data.problems[0].id;
+                        await loadProblem();
+                    }
+                }
+            } catch (e) {
+                console.error('문제 목록 로드 실패:', e);
+            }
+        }
+        
+        // ========== 문제 로드 ==========
+        async function loadProblem() {
+            const problemId = document.getElementById('problemSelect').value;
+            if (!problemId) return;
+            
+            try {
+                const response = await fetch(`/api/coding/problems/${problemId}`);
+                currentProblem = await response.json();
+                
+                const content = document.getElementById('problemContent');
+                const diffClass = currentProblem.difficulty === 'easy' ? 'difficulty-easy' : 
+                                 currentProblem.difficulty === 'medium' ? 'difficulty-medium' : 'difficulty-hard';
+                
+                let examplesHtml = '';
+                if (currentProblem.examples) {
+                    examplesHtml = currentProblem.examples.map((ex, i) => `
+                        <div class="example-box">
+                            <div class="example-title">예제 ${i + 1}</div>
+                            <div><strong>입력:</strong></div>
+                            <div class="example-code">${escapeHtml(ex.input)}</div>
+                            <div style="margin-top:10px;"><strong>출력:</strong></div>
+                            <div class="example-code">${escapeHtml(ex.output)}</div>
+                            ${ex.explanation ? `<div style="margin-top:10px; color:#8892b0; font-size:13px;">${ex.explanation}</div>` : ''}
+                        </div>
+                    `).join('');
+                }
+                
+                content.innerHTML = `
+                    <div class="problem-title">
+                        ${currentProblem.title}
+                        <span class="difficulty-badge ${diffClass}">${currentProblem.difficulty.toUpperCase()}</span>
+                    </div>
+                    <div class="problem-desc">${currentProblem.description}</div>
+                    ${examplesHtml}
+                    ${currentProblem.hints ? `<div style="margin-top:15px; padding:12px; background:rgba(0,217,255,0.1); border-radius:8px; border-left:3px solid #00d9ff;"><strong>💡 힌트:</strong> ${currentProblem.hints[0]}</div>` : ''}
+                `;
+                
+                // 템플릿 코드 로드
+                await loadTemplate();
+                
+            } catch (e) {
+                console.error('문제 로드 실패:', e);
+            }
+        }
+        
+        // ========== 템플릿 로드 ==========
+        async function loadTemplate() {
+            try {
+                const response = await fetch(`/api/coding/templates/${currentLanguage}`);
+                const data = await response.json();
+                document.getElementById('codeEditor').value = data.template;
+            } catch (e) {
+                document.getElementById('codeEditor').value = getDefaultTemplate(currentLanguage);
+            }
+        }
+        
+        function getDefaultTemplate(lang) {
+            const templates = {
+                'python': `# Python 솔루션
+def solution():
+    # TODO: 구현
+    pass
+
+solution()`,
+                'javascript': `// JavaScript 솔루션
+function solution() {
+    // TODO: 구현
+}
+
+solution();`,
+                'java': `import java.util.*;
+
+public class Solution {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        // TODO: 구현
+    }
+}`,
+                'c': `#include <stdio.h>
+
+int main() {
+    // TODO: 구현
+    
+    return 0;
+}`,
+                'cpp': `#include <iostream>
+#include <vector>
+using namespace std;
+
+int main() {
+    ios_base::sync_with_stdio(false);
+    cin.tie(NULL);
+    
+    // TODO: 구현
+    
+    return 0;
+}`
+            };
+            return templates[lang] || templates['python'];
+        }
+        
+        // ========== 언어 변경 ==========
+        function changeLanguage() {
+            currentLanguage = document.getElementById('languageSelect').value;
+            const extMap = {
+                'python': 'py',
+                'javascript': 'js',
+                'java': 'java',
+                'c': 'c',
+                'cpp': 'cpp'
+            };
+            const ext = extMap[currentLanguage] || 'txt';
+            document.getElementById('fileName').textContent = `solution.${ext}`;
+            loadTemplate();
+        }
+        
+        // ========== 코드 실행 ==========
+        async function runCode() {
+            const code = document.getElementById('codeEditor').value;
+            const output = document.getElementById('outputContent');
+            
+            output.innerHTML = '<div style="color:#00d9ff;">⏳ 실행 중...</div>';
+            
+            try {
+                const response = await fetch('/api/coding/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, language: currentLanguage })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    output.innerHTML = `<div style="color:#00ff88;">✅ 실행 성공 (${result.execution_time}ms)</div><pre style="margin-top:10px; color:#d4d4d4;">${escapeHtml(result.output) || '(출력 없음)'}</pre>`;
+                } else {
+                    output.innerHTML = `<div style="color:#f44336;">❌ 오류</div><pre style="margin-top:10px; color:#f44336;">${escapeHtml(result.error)}</pre>`;
+                }
+            } catch (e) {
+                output.innerHTML = `<div style="color:#f44336;">❌ 실행 실패: ${e.message}</div>`;
+            }
+        }
+        
+        // ========== 코드 제출 ==========
+        async function submitCode() {
+            if (!currentProblem) {
+                alert('문제를 먼저 선택해주세요.');
+                return;
+            }
+            
+            const code = document.getElementById('codeEditor').value;
+            const output = document.getElementById('outputContent');
+            
+            output.innerHTML = '<div style="color:#00d9ff;">⏳ AI 분석 중...</div>';
+            
+            try {
+                const response = await fetch('/api/coding/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code,
+                        language: currentLanguage,
+                        problem_id: currentProblem.id
+                    })
+                });
+                
+                const result = await response.json();
+                
+                // 결과 저장
+                codingTestResults.push({
+                    problem: currentProblem.title,
+                    ...result
+                });
+                
+                // 테스트 결과 표시
+                const passed = result.summary?.passed || 0;
+                const total = result.summary?.total || 0;
+                
+                document.getElementById('testResultBadge').textContent = `테스트: ${passed}/${total}`;
+                document.getElementById('testResultBadge').style.color = passed === total ? '#00ff88' : '#f44336';
+                
+                let html = '';
+                if (result.test_results) {
+                    result.test_results.forEach((tr, i) => {
+                        html += `
+                            <div class="test-result ${tr.passed ? 'passed' : 'failed'}">
+                                <span style="margin-right:10px;">${tr.passed ? '✅' : '❌'}</span>
+                                <span>테스트 ${i + 1}</span>
+                                <span style="margin-left:auto; color:#8892b0;">${tr.execution_time?.toFixed(1) || 0}ms</span>
+                            </div>
+                        `;
+                    });
+                }
+                
+                if (result.analysis) {
+                    html += `
+                        <div style="margin-top:15px; padding:15px; background:rgba(0,217,255,0.1); border-radius:8px;">
+                            <div style="font-size:24px; text-align:center; margin-bottom:10px;">
+                                🎯 <strong style="color:#00d9ff;">${result.analysis.overall_score}</strong>/100점
+                            </div>
+                            <div style="font-size:12px; color:#8892b0;">
+                                시간복잡도: ${result.analysis.time_complexity?.estimated || 'N/A'} | 
+                                코드스타일: ${result.analysis.code_style?.score || 0}/20
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                output.innerHTML = html || '<div style="color:#8892b0;">결과 없음</div>';
+                
+            } catch (e) {
+                output.innerHTML = `<div style="color:#f44336;">❌ 제출 실패: ${e.message}</div>`;
+            }
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // ========== 화이트보드 전환 화면 ==========
+        function showWhiteboardTransition() {
+            const modal = document.createElement('div');
+            modal.className = 'modal-overlay active';
+            modal.id = 'whiteboardTransitionModal';
+            modal.innerHTML = `
+                <div class="modal" style="max-width: 500px; text-align: center;">
+                    <div style="font-size: 60px; margin-bottom: 20px;">📐</div>
+                    <h2 style="margin-bottom: 15px;">코딩 테스트 완료!</h2>
+                    <p style="color: #8892b0; margin-bottom: 30px; line-height: 1.6;">
+                        다음 단계로 <strong style="color: #9b59b6;">시스템 아키텍처 설계</strong>가 진행됩니다.<br>
+                        화이트보드에 다이어그램을 그리고 AI가 분석합니다.
+                    </p>
+                    <div style="background: rgba(155,89,182,0.1); border-radius: 12px; padding: 20px; margin-bottom: 25px;">
+                        <div style="display: flex; justify-content: space-around; text-align: center;">
+                            <div>
+                                <div style="font-size: 24px;">🎨</div>
+                                <div style="font-size: 12px; color: #8892b0; margin-top: 5px;">다이어그램 작성</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 24px;">🤖</div>
+                                <div style="font-size: 12px; color: #8892b0; margin-top: 5px;">Claude Vision 분석</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 24px;">📊</div>
+                                <div style="font-size: 12px; color: #8892b0; margin-top: 5px;">아키텍처 평가</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 10px; justify-content: center;">
+                        <button class="btn btn-primary" onclick="startWhiteboard()" style="padding: 15px 40px; font-size: 16px; background: linear-gradient(135deg, #9b59b6, #8e44ad);">
+                            아키텍처 설계 시작 📐
+                        </button>
+                        <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="skipWhiteboard()">
+                            건너뛰기
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+        
+        // ========== 화이트보드 건너뛰기 ==========
+        function skipWhiteboard() {
+            const modal = document.getElementById('whiteboardTransitionModal');
+            if (modal) modal.remove();
+            showFinalReport();
+        }
+        
+        // ========== 화이트보드 시작 ==========
+        async function startWhiteboard() {
+            const modal = document.getElementById('whiteboardTransitionModal');
+            if (modal) modal.remove();
+            
+            // 코딩 테스트 컨테이너 제거
+            const codingContainer = document.getElementById('codingTestContainer');
+            if (codingContainer) codingContainer.remove();
+            
+            // 헤더 업데이트
+            document.querySelector('.header h1').textContent = '📐 시스템 아키텍처 설계';
+            
+            // 화이트보드 화면 표시
+            await showWhiteboardScreen();
+        }
+        
+        // ========== 화이트보드 화면 ==========
+        async function showWhiteboardScreen() {
+            const whiteboardContainer = document.createElement('div');
+            whiteboardContainer.id = 'whiteboardContainer';
+            whiteboardContainer.innerHTML = `
+                <div style="display: flex; gap: 20px; padding: 20px; height: calc(100vh - 120px);">
+                    <!-- 좌측: 문제 및 도구 -->
+                    <div style="width: 320px; display: flex; flex-direction: column; gap: 15px;">
+                        <!-- 문제 생성 -->
+                        <div class="panel" style="flex: 0 0 auto;">
+                            <div class="panel-header">🎲 AI 문제 생성</div>
+                            <div style="margin-top: 10px;">
+                                <div style="font-size: 12px; color: #8892b0; margin-bottom: 5px;">카테고리</div>
+                                <select id="archCategorySelect" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: white;">
+                                    <option value="">랜덤 선택</option>
+                                </select>
+                            </div>
+                            <div style="margin-top: 10px;">
+                                <div style="font-size: 12px; color: #8892b0; margin-bottom: 5px;">난이도</div>
+                                <select id="archDifficultySelect" style="width: 100%; padding: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; color: white;">
+                                    <option value="">랜덤 선택</option>
+                                    <option value="easy">🟢 Easy</option>
+                                    <option value="medium">🟡 Medium</option>
+                                    <option value="hard">🔴 Hard</option>
+                                </select>
+                            </div>
+                            <button class="btn btn-primary" onclick="generateNewProblem()" style="width: 100%; margin-top: 10px; background: linear-gradient(135deg, #9b59b6, #8e44ad);">
+                                🎲 새 문제 생성
+                            </button>
+                        </div>
+                        
+                        <!-- 현재 문제 -->
+                        <div class="panel" style="flex: 0 0 auto; max-height: 250px; overflow-y: auto;">
+                            <div class="panel-header">📋 현재 문제</div>
+                            <div id="archProblemDesc" style="margin-top: 10px; font-size: 13px; color: #8892b0; line-height: 1.6;">
+                                <div style="text-align: center; padding: 20px; color: #555;">
+                                    🎲 '새 문제 생성' 버튼을 클릭하여<br>AI가 생성한 문제를 받아보세요
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 그리기 도구 -->
+                        <div class="panel" style="flex: 0 0 auto;">
+                            <div class="panel-header">🎨 그리기 도구</div>
+                            <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px;">
+                                <button class="tool-btn active" id="tool-pen" onclick="selectTool('pen')" title="펜">✏️</button>
+                                <button class="tool-btn" id="tool-line" onclick="selectTool('line')" title="직선">📏</button>
+                                <button class="tool-btn" id="tool-rect" onclick="selectTool('rect')" title="사각형">⬜</button>
+                                <button class="tool-btn" id="tool-circle" onclick="selectTool('circle')" title="원">⭕</button>
+                                <button class="tool-btn" id="tool-arrow" onclick="selectTool('arrow')" title="화살표">➡️</button>
+                                <button class="tool-btn" id="tool-text" onclick="selectTool('text')" title="텍스트">📝</button>
+                                <button class="tool-btn" id="tool-eraser" onclick="selectTool('eraser')" title="지우개">🧹</button>
+                            </div>
+                            
+                            <!-- 색상 선택 -->
+                            <div style="margin-top: 15px;">
+                                <div style="font-size: 12px; color: #8892b0; margin-bottom: 8px;">색상</div>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <div class="color-btn active" style="background: #00d9ff;" onclick="selectColor('#00d9ff')"></div>
+                                    <div class="color-btn" style="background: #00ff88;" onclick="selectColor('#00ff88')"></div>
+                                    <div class="color-btn" style="background: #f39c12;" onclick="selectColor('#f39c12')"></div>
+                                    <div class="color-btn" style="background: #e74c3c;" onclick="selectColor('#e74c3c')"></div>
+                                    <div class="color-btn" style="background: #9b59b6;" onclick="selectColor('#9b59b6')"></div>
+                                    <div class="color-btn" style="background: #ffffff;" onclick="selectColor('#ffffff')"></div>
+                                </div>
+                            </div>
+                            
+                            <!-- 선 굵기 -->
+                            <div style="margin-top: 15px;">
+                                <div style="font-size: 12px; color: #8892b0; margin-bottom: 8px;">선 굵기: <span id="lineWidthValue">3</span>px</div>
+                                <input type="range" id="lineWidthSlider" min="1" max="10" value="3" oninput="changeLineWidth(this.value)" style="width: 100%;">
+                            </div>
+                        </div>
+                        
+                        <!-- 실행 취소/다시 실행 -->
+                        <div class="panel" style="flex: 0 0 auto;">
+                            <div style="display: flex; gap: 10px;">
+                                <button class="btn" onclick="undoDraw()" style="flex: 1;">↶ 실행취소</button>
+                                <button class="btn" onclick="redoDraw()" style="flex: 1;">↷ 다시실행</button>
+                            </div>
+                            <button class="btn" onclick="clearCanvas()" style="width: 100%; margin-top: 10px; background: rgba(231,76,60,0.3);">🗑️ 전체 지우기</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 중앙: 캔버스 -->
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 15px;">
+                        <div class="panel" style="flex: 1; position: relative; overflow: hidden;">
+                            <canvas id="whiteboardCanvas" style="width: 100%; height: 100%; background: #1a1a2e; border-radius: 8px; cursor: crosshair;"></canvas>
+                        </div>
+                        
+                        <!-- 설명 입력 -->
+                        <div class="panel" style="flex: 0 0 auto;">
+                            <div class="panel-header">💬 아키텍처 설명</div>
+                            <textarea id="archExplanation" placeholder="설계한 아키텍처에 대해 설명해주세요. (선택사항)" style="width: 100%; height: 80px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: white; padding: 10px; resize: none; margin-top: 10px;"></textarea>
+                        </div>
+                    </div>
+                    
+                    <!-- 우측: 분석 결과 -->
+                    <div style="width: 350px; display: flex; flex-direction: column; gap: 15px;">
+                        <div class="panel" style="flex: 1; overflow-y: auto;">
+                            <div class="panel-header">🤖 AI 분석 결과</div>
+                            <div id="analysisResult" style="margin-top: 10px; color: #8892b0; font-size: 13px;">
+                                다이어그램을 완성하고 '분석하기' 버튼을 클릭하세요.
+                            </div>
+                        </div>
+                        
+                        <div style="display: flex; gap: 10px;">
+                            <button class="btn btn-primary" onclick="analyzeWhiteboard()" style="flex: 1; background: linear-gradient(135deg, #9b59b6, #8e44ad);">
+                                🔍 분석하기
+                            </button>
+                        </div>
+                        <button class="btn btn-primary" onclick="showFinalReport()" style="background: linear-gradient(135deg, #00d9ff, #00ff88);">
+                            ✅ 면접 완료 및 결과 보기
+                        </button>
+                    </div>
+                </div>
+                
+                <style>
+                    .tool-btn {
+                        width: 40px;
+                        height: 40px;
+                        border: 1px solid rgba(255,255,255,0.2);
+                        border-radius: 8px;
+                        background: rgba(0,0,0,0.3);
+                        cursor: pointer;
+                        font-size: 18px;
+                        transition: all 0.2s;
+                    }
+                    .tool-btn:hover {
+                        background: rgba(155,89,182,0.3);
+                    }
+                    .tool-btn.active {
+                        background: rgba(155,89,182,0.5);
+                        border-color: #9b59b6;
+                    }
+                    .color-btn {
+                        width: 28px;
+                        height: 28px;
+                        border-radius: 50%;
+                        cursor: pointer;
+                        border: 2px solid transparent;
+                        transition: all 0.2s;
+                    }
+                    .color-btn:hover, .color-btn.active {
+                        border-color: white;
+                        transform: scale(1.1);
+                    }
+                </style>
+            `;
+            
+            document.querySelector('.container').appendChild(whiteboardContainer);
+            
+            // 캔버스 초기화
+            initWhiteboardCanvas();
+            
+            // 문제 목록 로드
+            await loadArchProblems();
+        }
+        
+        // ========== 캔버스 초기화 ==========
+        function initWhiteboardCanvas() {
+            whiteboardCanvas = document.getElementById('whiteboardCanvas');
+            whiteboardCtx = whiteboardCanvas.getContext('2d');
+            
+            // 캔버스 크기 설정
+            const container = whiteboardCanvas.parentElement;
+            whiteboardCanvas.width = container.clientWidth;
+            whiteboardCanvas.height = container.clientHeight;
+            
+            // 배경 색상
+            whiteboardCtx.fillStyle = '#1a1a2e';
+            whiteboardCtx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+            
+            // 초기 상태 저장
+            saveDrawState();
+            
+            // 이벤트 리스너
+            whiteboardCanvas.addEventListener('mousedown', startDrawing);
+            whiteboardCanvas.addEventListener('mousemove', draw);
+            whiteboardCanvas.addEventListener('mouseup', stopDrawing);
+            whiteboardCanvas.addEventListener('mouseout', stopDrawing);
+            
+            // 터치 지원
+            whiteboardCanvas.addEventListener('touchstart', handleTouchStart);
+            whiteboardCanvas.addEventListener('touchmove', handleTouchMove);
+            whiteboardCanvas.addEventListener('touchend', stopDrawing);
+            
+            // 윈도우 리사이즈 시 캔버스 크기 조정
+            window.addEventListener('resize', resizeWhiteboardCanvas);
+        }
+        
+        function resizeWhiteboardCanvas() {
+            if (!whiteboardCanvas) return;
+            const container = whiteboardCanvas.parentElement;
+            const imageData = whiteboardCtx.getImageData(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+            whiteboardCanvas.width = container.clientWidth;
+            whiteboardCanvas.height = container.clientHeight;
+            whiteboardCtx.putImageData(imageData, 0, 0);
+        }
+        
+        // ========== 그리기 함수들 ==========
+        function startDrawing(e) {
+            isDrawing = true;
+            const rect = whiteboardCanvas.getBoundingClientRect();
+            lastX = e.clientX - rect.left;
+            lastY = e.clientY - rect.top;
+            
+            if (currentTool === 'text') {
+                addTextToCanvas(lastX, lastY);
+                isDrawing = false;
+            }
+        }
+        
+        function draw(e) {
+            if (!isDrawing) return;
+            
+            const rect = whiteboardCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            whiteboardCtx.strokeStyle = currentTool === 'eraser' ? '#1a1a2e' : currentColor;
+            whiteboardCtx.lineWidth = currentTool === 'eraser' ? lineWidth * 5 : lineWidth;
+            whiteboardCtx.lineCap = 'round';
+            whiteboardCtx.lineJoin = 'round';
+            
+            if (currentTool === 'pen' || currentTool === 'eraser') {
+                whiteboardCtx.beginPath();
+                whiteboardCtx.moveTo(lastX, lastY);
+                whiteboardCtx.lineTo(x, y);
+                whiteboardCtx.stroke();
+            }
+            
+            lastX = x;
+            lastY = y;
+        }
+        
+        function stopDrawing(e) {
+            if (!isDrawing) return;
+            
+            const rect = whiteboardCanvas.getBoundingClientRect();
+            const x = e.clientX ? e.clientX - rect.left : lastX;
+            const y = e.clientY ? e.clientY - rect.top : lastY;
+            
+            // 도형 그리기
+            if (currentTool === 'line') {
+                whiteboardCtx.strokeStyle = currentColor;
+                whiteboardCtx.lineWidth = lineWidth;
+                whiteboardCtx.beginPath();
+                whiteboardCtx.moveTo(lastX, lastY);
+                whiteboardCtx.lineTo(x, y);
+                whiteboardCtx.stroke();
+            } else if (currentTool === 'rect') {
+                whiteboardCtx.strokeStyle = currentColor;
+                whiteboardCtx.lineWidth = lineWidth;
+                whiteboardCtx.strokeRect(lastX, lastY, x - lastX, y - lastY);
+            } else if (currentTool === 'circle') {
+                const radius = Math.sqrt(Math.pow(x - lastX, 2) + Math.pow(y - lastY, 2));
+                whiteboardCtx.strokeStyle = currentColor;
+                whiteboardCtx.lineWidth = lineWidth;
+                whiteboardCtx.beginPath();
+                whiteboardCtx.arc(lastX, lastY, radius, 0, Math.PI * 2);
+                whiteboardCtx.stroke();
+            } else if (currentTool === 'arrow') {
+                drawArrow(lastX, lastY, x, y);
+            }
+            
+            isDrawing = false;
+            saveDrawState();
+        }
+        
+        function drawArrow(fromX, fromY, toX, toY) {
+            const headLength = 15;
+            const angle = Math.atan2(toY - fromY, toX - fromX);
+            
+            whiteboardCtx.strokeStyle = currentColor;
+            whiteboardCtx.lineWidth = lineWidth;
+            whiteboardCtx.beginPath();
+            whiteboardCtx.moveTo(fromX, fromY);
+            whiteboardCtx.lineTo(toX, toY);
+            whiteboardCtx.lineTo(toX - headLength * Math.cos(angle - Math.PI / 6), toY - headLength * Math.sin(angle - Math.PI / 6));
+            whiteboardCtx.moveTo(toX, toY);
+            whiteboardCtx.lineTo(toX - headLength * Math.cos(angle + Math.PI / 6), toY - headLength * Math.sin(angle + Math.PI / 6));
+            whiteboardCtx.stroke();
+        }
+        
+        function addTextToCanvas(x, y) {
+            const text = prompt('텍스트를 입력하세요:');
+            if (text) {
+                whiteboardCtx.font = `${lineWidth * 5}px Arial`;
+                whiteboardCtx.fillStyle = currentColor;
+                whiteboardCtx.fillText(text, x, y);
+                saveDrawState();
+            }
+        }
+        
+        // 터치 이벤트 핸들러
+        function handleTouchStart(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousedown', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            startDrawing(mouseEvent);
+        }
+        
+        function handleTouchMove(e) {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousemove', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            draw(mouseEvent);
+        }
+        
+        // ========== 도구 선택 ==========
+        function selectTool(tool) {
+            currentTool = tool;
+            document.querySelectorAll('.tool-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`tool-${tool}`).classList.add('active');
+        }
+        
+        function selectColor(color) {
+            currentColor = color;
+            document.querySelectorAll('.color-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+        }
+        
+        function changeLineWidth(value) {
+            lineWidth = parseInt(value);
+            document.getElementById('lineWidthValue').textContent = value;
+        }
+        
+        // ========== 실행취소/다시실행 ==========
+        function saveDrawState() {
+            historyIndex++;
+            drawHistory = drawHistory.slice(0, historyIndex);
+            drawHistory.push(whiteboardCanvas.toDataURL());
+        }
+        
+        function undoDraw() {
+            if (historyIndex > 0) {
+                historyIndex--;
+                loadDrawState(drawHistory[historyIndex]);
+            }
+        }
+        
+        function redoDraw() {
+            if (historyIndex < drawHistory.length - 1) {
+                historyIndex++;
+                loadDrawState(drawHistory[historyIndex]);
+            }
+        }
+        
+        function loadDrawState(dataUrl) {
+            const img = new Image();
+            img.onload = () => {
+                whiteboardCtx.clearRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+                whiteboardCtx.drawImage(img, 0, 0);
+            };
+            img.src = dataUrl;
+        }
+        
+        function clearCanvas() {
+            if (confirm('캔버스를 완전히 지우시겠습니까?')) {
+                whiteboardCtx.fillStyle = '#1a1a2e';
+                whiteboardCtx.fillRect(0, 0, whiteboardCanvas.width, whiteboardCanvas.height);
+                saveDrawState();
+            }
+        }
+        
+        // ========== 아키텍처 문제 카테고리 로드 ==========
+        async function loadArchProblems() {
+            try {
+                // 카테고리 목록 로드
+                const response = await fetch('/api/whiteboard/categories');
+                const data = await response.json();
+                
+                const categorySelect = document.getElementById('archCategorySelect');
+                if (categorySelect) {
+                    data.categories.forEach(cat => {
+                        const option = document.createElement('option');
+                        option.value = cat.id;
+                        option.textContent = cat.name;
+                        categorySelect.appendChild(option);
+                    });
+                }
+            } catch (e) {
+                console.error('카테고리 로드 실패:', e);
+            }
+        }
+        
+        // ========== 새 문제 생성 ==========
+        async function generateNewProblem() {
+            const category = document.getElementById('archCategorySelect')?.value || null;
+            const difficulty = document.getElementById('archDifficultySelect')?.value || null;
+            const descDiv = document.getElementById('archProblemDesc');
+            
+            descDiv.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <div style="font-size: 24px; animation: spin 1s linear infinite;">🎲</div>
+                    <div style="color: #00d9ff; margin-top: 10px;">AI가 문제를 생성 중...</div>
+                </div>
+            `;
+            
+            try {
+                let url = '/api/whiteboard/generate';
+                const params = new URLSearchParams();
+                if (category) params.append('category', category);
+                if (difficulty) params.append('difficulty', difficulty);
+                if (params.toString()) url += '?' + params.toString();
+                
+                const response = await fetch(url, { method: 'POST' });
+                if (!response.ok) throw new Error('문제 생성 실패');
+                
+                const problem = await response.json();
+                currentArchProblem = problem;
+                
+                // 난이도 배지 색상
+                const diffColors = {
+                    'easy': '#00ff88',
+                    'medium': '#f39c12',
+                    'hard': '#e74c3c'
+                };
+                const diffColor = diffColors[problem.difficulty] || '#8892b0';
+                
+                descDiv.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <strong style="font-size: 14px;">${problem.title}</strong>
+                        <span style="background: ${diffColor}; color: #000; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">
+                            ${problem.difficulty.toUpperCase()}
+                        </span>
+                    </div>
+                    <div style="white-space: pre-line; margin-bottom: 12px; font-size: 12px; line-height: 1.5;">${problem.description}</div>
+                    <div style="margin-bottom: 10px;">
+                        <strong style="font-size: 12px; color: #00d9ff;">📌 요구사항:</strong>
+                        <ul style="margin: 5px 0; padding-left: 18px; font-size: 11px;">
+                            ${problem.requirements.map(r => `<li>${r}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 11px; color: #8892b0; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 8px; margin-top: 8px;">
+                        <span>⏱️ 제한시간: ${problem.time_limit}분</span>
+                        <span>📁 ${problem.category || '일반'}</span>
+                    </div>
+                `;
+                
+                // 새 문제 생성 버튼 텍스트 변경
+                console.log('✅ 새 문제 생성됨:', problem.title);
+                
+            } catch (e) {
+                console.error('문제 생성 실패:', e);
+                descDiv.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: #e74c3c;">
+                        ❌ 문제 생성 실패<br>
+                        <button class="btn" onclick="generateNewProblem()" style="margin-top: 10px;">다시 시도</button>
+                    </div>
+                `;
+            }
+        }
+        
+        // ========== 기존 문제 선택 (호환성) ==========
+        async function selectArchProblem() {
+            const select = document.getElementById('archProblemSelect');
+            if (!select) return;
+            
+            const problemId = select.value;
+            
+            if (!problemId) {
+                document.getElementById('archProblemDesc').innerHTML = '';
+                currentArchProblem = null;
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/whiteboard/problems/${problemId}`);
+                const problem = await response.json();
+                currentArchProblem = problem;
+                
+                document.getElementById('archProblemDesc').innerHTML = `
+                    <div style="margin-bottom: 10px;"><strong>${problem.title}</strong></div>
+                    <div style="white-space: pre-line; margin-bottom: 10px;">${problem.description}</div>
+                    <div style="margin-bottom: 10px;">
+                        <strong>요구사항:</strong>
+                        <ul style="margin: 5px 0; padding-left: 20px;">
+                            ${problem.requirements.map(r => `<li>${r}</li>`).join('')}
+                        </ul>
+                    </div>
+                    <div style="color: #f39c12;">⏱️ 제한시간: ${problem.time_limit}분</div>
+                `;
+            } catch (e) {
+                console.error('문제 상세 로드 실패:', e);
+            }
+        }
+        
+        // ========== 화이트보드 분석 ==========
+        async function analyzeWhiteboard() {
+            const analysisResult = document.getElementById('analysisResult');
+            analysisResult.innerHTML = '<div style="color: #00d9ff;">🔄 Claude Vision이 다이어그램을 분석 중...</div>';
+            
+            try {
+                // 캔버스를 이미지로 변환
+                const imageData = whiteboardCanvas.toDataURL('image/png');
+                const explanation = document.getElementById('archExplanation').value;
+                
+                const response = await fetch('/api/whiteboard/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_data: imageData,
+                        session_id: sessionId,
+                        problem_context: currentArchProblem?.id || null,
+                        user_explanation: explanation || null
+                    })
+                });
+                
+                if (!response.ok) throw new Error('분석 요청 실패');
+                
+                const data = await response.json();
+                const result = data.result;
+                
+                // 결과 저장
+                whiteboardResults.push(result);
+                
+                // 결과 표시
+                analysisResult.innerHTML = `
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <div style="font-size: 48px; font-weight: 700; background: linear-gradient(135deg, #9b59b6, #00d9ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                            ${result.overall_score}<span style="font-size: 20px;">/100</span>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px;">
+                        <div style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 11px; color: #8892b0;">구조</div>
+                            <div style="font-size: 18px; color: #00d9ff;">${result.architecture_evaluation.structure_score || 0}/25</div>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 11px; color: #8892b0;">확장성</div>
+                            <div style="font-size: 18px; color: #00ff88;">${result.architecture_evaluation.scalability_score || 0}/25</div>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 11px; color: #8892b0;">보안</div>
+                            <div style="font-size: 18px; color: #f39c12;">${result.architecture_evaluation.security_score || 0}/25</div>
+                        </div>
+                        <div style="background: rgba(0,0,0,0.3); padding: 10px; border-radius: 8px; text-align: center;">
+                            <div style="font-size: 11px; color: #8892b0;">성능</div>
+                            <div style="font-size: 18px; color: #9b59b6;">${result.architecture_evaluation.performance_score || 0}/25</div>
+                        </div>
+                    </div>
+                    
+                    ${result.strengths.length > 0 ? `
+                        <div style="margin-bottom: 15px;">
+                            <div style="color: #00ff88; font-weight: 500; margin-bottom: 5px;">✅ 강점</div>
+                            <ul style="margin: 0; padding-left: 20px; font-size: 12px;">
+                                ${result.strengths.map(s => `<li>${s}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    
+                    ${result.weaknesses.length > 0 ? `
+                        <div style="margin-bottom: 15px;">
+                            <div style="color: #f39c12; font-weight: 500; margin-bottom: 5px;">⚠️ 개선점</div>
+                            <ul style="margin: 0; padding-left: 20px; font-size: 12px;">
+                                ${result.weaknesses.map(w => `<li>${w}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                    
+                    ${result.feedback.length > 0 ? `
+                        <div>
+                            <div style="color: #00d9ff; font-weight: 500; margin-bottom: 5px;">💡 피드백</div>
+                            <ul style="margin: 0; padding-left: 20px; font-size: 12px;">
+                                ${result.feedback.map(f => `<li>${f}</li>`).join('')}
+                            </ul>
+                        </div>
+                    ` : ''}
+                `;
+                
+            } catch (e) {
+                analysisResult.innerHTML = `<div style="color: #e74c3c;">❌ 분석 실패: ${e.message}</div>`;
+            }
+        }
+        
+        // ========== 최종 리포트 표시 ==========
+        async function showFinalReport() {
+            // 코딩 테스트 컨테이너 제거
+            const codingContainer = document.getElementById('codingTestContainer');
+            if (codingContainer) codingContainer.remove();
+            
+            // 화이트보드 컨테이너 제거
+            const whiteboardContainer = document.getElementById('whiteboardContainer');
+            if (whiteboardContainer) whiteboardContainer.remove();
+            
+            // 면접 리포트 가져오기
+            let interviewReport = null;
+            try {
+                const response = await fetch(`/api/report/${sessionId}`);
+                interviewReport = await response.json();
+            } catch (e) {
+                console.error('면접 리포트 로드 실패:', e);
+            }
+            
+            // 코딩 테스트 점수 계산
+            let codingScore = 0;
+            if (codingTestResults.length > 0) {
+                codingScore = Math.round(
+                    codingTestResults.reduce((sum, r) => sum + (r.analysis?.overall_score || 0), 0) / codingTestResults.length
+                );
+            }
+            
+            // 화이트보드 점수 계산
+            let whiteboardScore = 0;
+            if (whiteboardResults.length > 0) {
+                whiteboardScore = Math.round(
+                    whiteboardResults.reduce((sum, r) => sum + (r.overall_score || 0), 0) / whiteboardResults.length
+                );
+            }
+            
+            // 헤더 업데이트
+            document.querySelector('.header h1').textContent = '📋 면접 결과';
+            
+            // 최종 리포트 모달
             const modal = document.createElement('div');
             modal.className = 'modal-overlay active';
             modal.innerHTML = `
-                <div class="modal" style="max-width: 600px; text-align: left;">
-                    <h2>📋 면접 결과 리포트</h2>
-                    <div style="margin: 20px 0;">
-                        <h3 style="margin-bottom: 15px; color: #00d9ff;">📊 종합 점수</h3>
-                        <div style="font-size: 36px; text-align: center; margin: 20px 0;">
-                            ${report.llm_evaluation?.average_total || 0}/25점
+                <div class="modal" style="max-width: 800px; text-align: left; max-height: 90vh; overflow-y: auto;">
+                    <h2 style="text-align:center; margin-bottom:25px;">📋 종합 면접 결과</h2>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin-bottom: 25px;">
+                        <!-- 화상 면접 결과 -->
+                        <div style="background: rgba(0,217,255,0.1); border-radius: 12px; padding: 20px; text-align: center;">
+                            <div style="font-size: 14px; color: #8892b0; margin-bottom: 10px;">🎥 화상 면접</div>
+                            <div style="font-size: 32px; font-weight: 700; color: #00d9ff;">
+                                ${interviewReport?.llm_evaluation?.average_total || 0}<span style="font-size: 16px; color: #8892b0;">/25</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 코딩 테스트 결과 -->
+                        <div style="background: rgba(0,255,136,0.1); border-radius: 12px; padding: 20px; text-align: center;">
+                            <div style="font-size: 14px; color: #8892b0; margin-bottom: 10px;">💻 코딩 테스트</div>
+                            <div style="font-size: 32px; font-weight: 700; color: #00ff88;">
+                                ${codingScore}<span style="font-size: 16px; color: #8892b0;">/100</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 아키텍처 설계 결과 -->
+                        <div style="background: rgba(155,89,182,0.1); border-radius: 12px; padding: 20px; text-align: center;">
+                            <div style="font-size: 14px; color: #8892b0; margin-bottom: 10px;">📐 아키텍처 설계</div>
+                            <div style="font-size: 32px; font-weight: 700; color: #9b59b6;">
+                                ${whiteboardScore}<span style="font-size: 16px; color: #8892b0;">/100</span>
+                            </div>
                         </div>
                     </div>
-                    <div style="margin: 20px 0;">
-                        <h3 style="margin-bottom: 15px; color: #00ff88;">💡 피드백</h3>
-                        <ul style="color: #8892b0; line-height: 1.8;">
-                            ${(report.feedback || []).map(f => `<li>${f}</li>`).join('')}
+                    
+                    ${interviewReport?.feedback?.length ? `
+                    <div style="margin-bottom: 20px;">
+                        <h3 style="margin-bottom: 10px; color: #00d9ff;">💡 면접 피드백</h3>
+                        <ul style="color: #8892b0; line-height: 1.8; padding-left: 20px;">
+                            ${interviewReport.feedback.map(f => `<li>${f}</li>`).join('')}
                         </ul>
                     </div>
-                    <div class="modal-buttons">
+                    ` : ''}
+                    
+                    ${codingTestResults.length > 0 ? `
+                    <div style="margin-bottom: 20px;">
+                        <h3 style="margin-bottom: 10px; color: #00ff88;">💻 코딩 테스트 상세</h3>
+                        ${codingTestResults.map(r => `
+                            <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <span>${r.problem}</span>
+                                    <span style="color: #00ff88; font-weight: 600;">${r.analysis?.overall_score || 0}점</span>
+                                </div>
+                                <div style="font-size: 12px; color: #8892b0; margin-top: 5px;">
+                                    테스트: ${r.summary?.passed || 0}/${r.summary?.total || 0} 통과
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ` : '<div style="color: #8892b0; margin-bottom: 20px;">코딩 테스트를 완료하지 않았습니다.</div>'}
+                    
+                    ${whiteboardResults.length > 0 ? `
+                    <div style="margin-bottom: 20px;">
+                        <h3 style="margin-bottom: 10px; color: #9b59b6;">📐 아키텍처 설계 상세</h3>
+                        ${whiteboardResults.map((r, idx) => `
+                            <div style="background: rgba(155,89,182,0.1); border-radius: 8px; padding: 12px; margin-bottom: 8px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <span>아키텍처 설계 #${idx + 1}</span>
+                                    <span style="color: #9b59b6; font-weight: 600;">${r.overall_score || 0}점</span>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 5px; font-size: 11px;">
+                                    <div style="text-align: center; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                        <div style="color: #8892b0;">구조</div>
+                                        <div style="color: #00d9ff;">${r.architecture_evaluation?.structure_score || 0}</div>
+                                    </div>
+                                    <div style="text-align: center; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                        <div style="color: #8892b0;">확장</div>
+                                        <div style="color: #00ff88;">${r.architecture_evaluation?.scalability_score || 0}</div>
+                                    </div>
+                                    <div style="text-align: center; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                        <div style="color: #8892b0;">보안</div>
+                                        <div style="color: #f39c12;">${r.architecture_evaluation?.security_score || 0}</div>
+                                    </div>
+                                    <div style="text-align: center; padding: 5px; background: rgba(0,0,0,0.2); border-radius: 4px;">
+                                        <div style="color: #8892b0;">성능</div>
+                                        <div style="color: #9b59b6;">${r.architecture_evaluation?.performance_score || 0}</div>
+                                    </div>
+                                </div>
+                                ${r.feedback?.length > 0 ? `
+                                <div style="margin-top: 8px; font-size: 12px; color: #8892b0;">
+                                    💡 ${r.feedback[0]}
+                                </div>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                    ` : '<div style="color: #8892b0; margin-bottom: 20px;">아키텍처 설계를 완료하지 않았습니다.</div>'}
+                    
+                    <div class="modal-buttons" style="justify-content: center;">
                         <button class="btn btn-primary" onclick="location.href='/'">홈으로</button>
-                        <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="this.closest('.modal-overlay').remove()">닫기</button>
+                        <button class="btn" style="background: rgba(255,255,255,0.1);" onclick="location.reload()">새 면접 시작</button>
                     </div>
                 </div>
             `;
