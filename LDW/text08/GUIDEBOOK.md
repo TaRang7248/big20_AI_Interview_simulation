@@ -2,7 +2,22 @@
 
 ## 소개 (Introduction)
 이 프로그램은 **GPT-4o** 기반의 AI 면접 시뮬레이터입니다.
-사용자가 지원한 직무(Job Title)에 맞춰, **20년차 전문가 페르소나**를 가진 AI 면접관이 실제 면접처럼 깊이 있는 질문을 던지고 피드백을 제공합니다.
+지원자가 선택한 직무(Job Title)에 맞춰, 20년차 베테랑 전문가 페르소나를 가진 AI 면접관이 실제 면접과 유사한 경험을 제공합니다.
+
+---
+
+## 🎯 면접 진행 단계 (Interview Process)
+면접은 총 **10단계**의 메인 질문으로 구성되며, 상황에 따라 **꼬리 질문(Follow-up)**이 추가될 수 있습니다.
+
+| 단계 | 유형 | 설명 |
+| :-- | :-- | :-- |
+| **1단계** | **자기소개** | 지원자의 기본 정보와 강점을 파악하기 위한 자기소개 시간입니다. |
+| **2~4단계** | **인성/역량** | 지원자의 가치관, 협업 능력, 문제 해결 방식 등 인성 면접이 진행됩니다. |
+| **5~9단계** | **직무 지식** | `interview.db` 및 RAG(검색 증강 생성)를 활용하여 직무와 관련된 심도 있는 기술 면접이 진행됩니다. |
+| **10단계** | **마무리** | 면접을 정리하며 마지막으로 하고 싶은 말이나 질문을 받습니다. |
+
+> **💡 꼬리 질문 (Tail Questions)**
+> 지원자의 답변이 불충분하거나 더 깊이 파고들 필요가 있을 경우, AI 면접관이 추가 질문을 던집니다. 이는 메인 단계 카운트에 포함되지 않습니다.
 
 ---
 
@@ -13,7 +28,6 @@
 - `.env` 파일에 `OPENAI_API_KEY` 설정 필수
 
 ### 2. 설치 (Installation)
-프로젝트 루트(`text08`)에서 라이브러리를 설치합니다.
 ```bash
 pip install -r requirements.txt
 ```
@@ -22,67 +36,25 @@ pip install -r requirements.txt
 ```bash
 python start_app.py
 ```
-서버가 시작되면 콘솔에 접속 주소가 표시됩니다 (기본: `http://127.0.0.1:8000`).
+서버가 시작되면 브라우저에서 `http://127.0.0.1:8000/interview.html` 로 접속하세요.
 
 ---
 
 ## 📝 API 사용법 (API Usage)
 
 ### 1. 면접 시작 (`POST /api/interview/start`)
-새로운 면접 세션을 시작하고 첫 번째 질문(자기소개)을 받습니다.
+- **기능**: 새로운 면접 세션을 생성하고 1단계(자기소개) 질문을 반환합니다.
+- **파라미터**: `candidate_name`, `job_role`, `user_id`
 
-- **URL**: `/api/interview/start`
-- **Body (`multipart/form-data`)**:
-    - `candidate_name`: 지원자 이름 (예: 김철수)
-    - `job_role`: 지원 직무 (예: Python 백엔드 개발자)
-    - `user_id`: 사용자 ID (숫자, 예: 1)
-- **Response**:
-    ```json
-    {
-        "status": "started",
-        "session_id": "uuid-string",
-        "question": "자기소개를 부탁드립니다...",
-        "step": 1,
-        "total_steps": 10
-    }
-    ```
-
-### 2. 답변 제출 및 피드백 (`POST /api/interview/submit`)
-음성 또는 텍스트로 답변을 제출하면, AI가 평가 후 다음 질문을 제공합니다.
-
-- **URL**: `/api/interview/submit`
-- **Body (`multipart/form-data`)**:
-    - `session_id`: 시작 시 발급받은 세션 ID
-    - `answer_text`: (옵션) 텍스트 답변
-    - `audio`: (옵션) 음성 파일 (.webm 등)
-    - `image`: (옵션) 아키텍처 다이어그램 등 이미지 파일
-- **Response**:
-    ```json
-    {
-        "status": "success",
-        "next_question": "다음 질문 내용...",
-        "evaluation": {
-            "score": 85,
-            "feedback": "구체적인 사례가 좋아...",
-            "is_follow_up": false
-        },
-        "step": 2,
-        "is_completed": false
-    }
-    ```
+### 2. 답변 제출 (`POST /api/interview/submit`)
+- **기능**: 사용자의 답변(텍스트/음성)을 분석하여 평가하고, 다음 질문을 생성합니다.
+- **로직**:
+    - AI가 답변을 평가하여 점수를 매깁니다.
+    - 꼬리 질문 필요 여부를 판단합니다.
+    - 10단계가 모두 끝나면 합격/불합격 여부와 평균 점수를 반환합니다.
 
 ---
 
-## ⚠️ 트러블슈팅 (Troubleshooting)
-
-### Q1. "AttributeError: module 'services.llm_service' has no attribute..."
-- **원인**: 구형 코드와 신규 `LLMService` 클래스 간의 불일치.
-- **해결**: 최신 코드로 업데이트되었는지 확인하고 서버를 재시작하세요.
-
-### Q2. "OpenAI Rate Limit Error"
-- **원인**: API 키 쿼터 초과.
-- **해결**: `.env`의 API 키를 확인하거나 충전하세요.
-
-### Q3. 음성 인식이 안 돼요.
-- **원인**: `stt_service` 설정 또는 마이크 권한 문제.
-- **해결**: 우선 텍스트 답변(`answer_text`)을 사용하여 면접을 진행할 수 있습니다.
+## ⚠️ 주의사항
+- **DB 데이터**: 직무 지식 질문은 `db/interview.db`의 데이터를 참조하므로, 해당 파일이 존재해야 정확한 직무 질문이 생성됩니다.
+- **오디오**: 음성 답변 기능은 브라우저의 마이크 권한이 필요합니다.

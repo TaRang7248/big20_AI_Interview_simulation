@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from interview_core import InterviewEngine
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI(
     title="AI Simulator Interview API",
@@ -22,7 +23,15 @@ app = FastAPI(
     }
 )
 
-# 아주 간단한 메모리 세션 저장(학원 데모용)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://127.0.0.1:5500", "http://localhost:5500"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 아주 간단한 메모리 세션 저장(데모용)
 SESSIONS: Dict[str, Dict] = {}
 
 

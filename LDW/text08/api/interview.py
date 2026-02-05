@@ -123,14 +123,8 @@ async def submit_answer(
         # No, let's just pass "Current Question" for now if missing, or rely on frontend sending it.
         # original `submit_answer` took `question_id`.
         
-        current_question_text = "질문 내용 복원 불가" 
-        # If we had access to the last generated question.
-        # Let's look at `InterviewService.start_interview`: returns `question`.
-        # `process_answer`: returns `next_question`.
-        # So the frontend HAS the question. Assuming `answer_text` or a new form field `question_text`?
-        # The form definition above has `question_id`.
-        # Let's just pass a placeholder and rely on the Answer Content itself for evaluation context
-        # "Evaluator, please evaluate this answer to the previous question..."
+        # Use stored session question effectively (Service ignores this arg if session has current_question)
+        current_question_text = "" 
         
         result = await interview_service.process_answer(session_id, current_question_text, text_content)
         
@@ -148,16 +142,13 @@ async def submit_answer(
 
 @router.get("/{session_id}/current")
 async def get_current_question(session_id: str):
-    # This endpoint was for polling. 
-    # With the new flow, the next question is returned in submit response.
-    # But if page reloads?
     session = interview_service.sessions.get(session_id)
     if not session:
          return {"finished": True}
     
-    # We don't easily have the text of the *current* question unless we stored it.
+    # Return the actual current question stored in session
     return {
-        "question": "진행 중인 면접입니다. 답변을 제출해 주세요.",
+        "question": session.get("current_question", "진행 중인 면접입니다."),
         "index": session.get("current_step", 1),
         "total": 10
     }
