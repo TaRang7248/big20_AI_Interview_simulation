@@ -40,7 +40,7 @@ def init_sqlite():
     conn.close()
 
 def get_questions_by_job(job_title: str):
-    """Reads interview questions from the source interview.db."""
+    """Reads interview questions from the source interview.db filtered by job_title."""
     if not os.path.exists(INTERVIEW_DB_PATH):
         print(f"Warning: {INTERVIEW_DB_PATH} not found.")
         return []
@@ -48,16 +48,25 @@ def get_questions_by_job(job_title: str):
     conn = sqlite3.connect(INTERVIEW_DB_PATH)
     cursor = conn.cursor()
     try:
-        # User specified to use interview.db questions. 
-        # Based on inspection, we use interview_results table.
-        cursor.execute("SELECT question FROM interview_results")
+        # Filter questions by job_title to provide relevant context
+        # Using LIKE for flexible matching (e.g., "Software Engineer" matches "Senior Software Engineer")
+        cursor.execute("SELECT question FROM interview_results WHERE job_title LIKE ?", (f"%{job_title}%",))
         questions = [row[0] for row in cursor.fetchall()]
+        
+        # If no specific questions found, fetch a random sample of generic questions to ensure some context exists
+        if not questions:
+            print(f"No specific questions found for {job_title}, fetching all questions.")
+            cursor.execute("SELECT question FROM interview_results ORDER BY RANDOM() LIMIT 20")
+            questions = [row[0] for row in cursor.fetchall()]
+            
     except Exception as e:
         print(f"SQLite Query Error: {e}")
         questions = []
     finally:
         conn.close()
-    return questions
+    
+    # Remove duplicates
+    return list(set(questions))
 
 def log_interview_step(candidate_name, job_title, question, answer, evaluation):
     """Writes interview results to interview_save.db."""
