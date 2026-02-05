@@ -1,5 +1,6 @@
 from .llm_service import LLMService
 from .stt_service import STTService
+from .confidence_service import ConfidenceService
 from db.sqlite import log_interview_step, get_questions_by_job
 from db.postgres import SessionLocal, InterviewResult, QuestionPool
 import uuid
@@ -9,7 +10,7 @@ class InterviewService:
     def __init__(self):
         self.llm = LLMService()
         self.stt = STTService()
-        self.sessions = {} # session_id -> { "current_step": 1, "is_follow_up": False, "history": [] }
+        self.sessions = {} # session_id -> { "current_step": 1, "is_follow_up": False, "history": [], "confidence_service": ... }
 
     async def get_rag_context(self, job_title: str, limit: int = 3):
         """Fetches similar questions from PostgreSQL (pgvector) for RAG context."""
@@ -58,7 +59,8 @@ class InterviewService:
             "current_step": 1,
             "is_follow_up": False,
             "history": [],
-            "combined_context": combined_context
+            "combined_context": combined_context,
+            "confidence_service": ConfidenceService()
         }
         
         return {
@@ -137,6 +139,10 @@ class InterviewService:
                 is_completed = True
                 evaluation["avg_score"] = avg_score
                 evaluation["result_status"] = pass_fail
+                
+                # Confidence Score
+                conf_score = self.get_final_confidence_score(session_id)
+                evaluation["confidence_score"] = conf_score
             else:
                 stage = self._get_stage(session["current_step"])
                 next_question = await self.llm.generate_question(job_title, stage, session["combined_context"])
@@ -149,3 +155,28 @@ class InterviewService:
             "is_completed": is_completed,
             "is_follow_up": session.get("is_follow_up_active", False)
         }
+
+    def process_frame(self, session_id: str, image_data: bytes):
+        if session_id in self.sessions:
+            service = self.sessions[session_id]["confidence_service"]
+            service.process_frame(image_data)
+
+    def get_final_confidence_score(self, session_id: str):
+        if session_id in self.sessions:
+            service = self.sessions[session_id]["confidence_service"]
+            return service.get_confidence_score()
+        return 0
+
+    async def evaluate_architecture_drawing(self, session_id: str, image_data_url: str):
+        """Evaluates the architecture drawing provided by the candidate."""
+        if session_id not in self.sessions:
+             # Just proceed without saving if session is invalid for testing, or raise
+             pass
+        
+        evaluation = await self.llm.evaluate_architecture(image_data_url)
+        
+        # Log to session history if needed, or just return
+        # Might want to add to session scores or separate architecture score
+        
+        return evaluation
+

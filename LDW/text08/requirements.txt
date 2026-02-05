@@ -12,3 +12,4 @@ python-multipart
 deepface
 opencv-python
 tf-keras
+mediapipe
