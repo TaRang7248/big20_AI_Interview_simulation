@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 코딩 테스트 - Web IDE</title>
+    
+    <!-- Monaco Editor -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-primary: #1e1e1e;
+            --bg-secondary: #252526;
+            --bg-tertiary: #2d2d30;
+            --text-primary: #cccccc;
+            --text-secondary: #858585;
+            --accent-blue: #007acc;
+            --accent-green: #4ec9b0;
+            --accent-orange: #ce9178;
+            --accent-red: #f14c4c;
+            --accent-yellow: #dcdcaa;
+            --border-color: #3c3c3c;
+            --success: #4caf50;
+            --warning: #ff9800;
+            --error: #f44336;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 헤더 */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 20px;
+            background-color: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            height: 50px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--accent-blue);
+        }
+
+        .logo i {
+            font-size: 24px;
+        }
+
+        .problem-selector {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .problem-selector select {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .difficulty-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .difficulty-easy { background-color: rgba(76, 175, 80, 0.2); color: var(--success); }
+        .difficulty-medium { background-color: rgba(255, 152, 0, 0.2); color: var(--warning); }
+        .difficulty-hard { background-color: rgba(244, 67, 54, 0.2); color: var(--error); }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .language-selector select {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-run {
+            background-color: var(--accent-green);
+            color: var(--bg-primary);
+        }
+
+        .btn-run:hover {
+            background-color: #5fd9c0;
+        }
+
+        .btn-submit {
+            background-color: var(--accent-blue);
+            color: white;
+        }
+
+        .btn-submit:hover {
+            background-color: #1e90ff;
+        }
+
+        .btn-reset {
+            background-color: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-reset:hover {
+            background-color: var(--bg-tertiary);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* 메인 레이아웃 */
+        .main-container {
+            display: flex;
+            height: calc(100vh - 50px);
+        }
+
+        /* 문제 패널 */
+        .problem-panel {
+            width: 35%;
+            min-width: 300px;
+            background-color: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .problem-tabs {
+            display: flex;
+            background-color: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .problem-tab {
+            padding: 12px 20px;
+            font-size: 14px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .problem-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .problem-tab.active {
+            color: var(--text-primary);
+            border-bottom-color: var(--accent-blue);
+        }
+
+        .problem-content {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .problem-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            color: white;
+        }
+
+        .problem-description {
+            font-size: 14px;
+            line-height: 1.8;
+            white-space: pre-wrap;
+        }
+
+        .example-box {
+            background-color: var(--bg-primary);
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .example-title {
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: var(--accent-green);
+        }
+
+        .example-content {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            background-color: var(--bg-tertiary);
+            padding: 10px;
+            border-radius: 4px;
+            margin: 5px 0;
+        }
+
+        .example-explanation {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 10px;
+            padding-left: 10px;
+            border-left: 2px solid var(--accent-blue);
+        }
+
+        .hint-box {
+            background-color: rgba(0, 122, 204, 0.1);
+            border-left: 3px solid var(--accent-blue);
+            padding: 12px 15px;
+            margin-top: 15px;
+            border-radius: 0 4px 4px 0;
+        }
+
+        .hint-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: var(--accent-blue);
+        }
+
+        /* 에디터 패널 */
+        .editor-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 15px;
+            background-color: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .file-tab {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            background-color: var(--bg-secondary);
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        .file-tab i {
+            color: var(--accent-yellow);
+        }
+
+        .editor-container {
+            flex: 1;
+            position: relative;
+        }
+
+        #editor {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* 출력 패널 */
+        .output-panel {
+            height: 250px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            background-color: var(--bg-secondary);
+        }
+
+        .output-tabs {
+            display: flex;
+            background-color: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .output-tab {
+            padding: 10px 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .output-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .output-tab.active {
+            color: var(--text-primary);
+            border-bottom-color: var(--accent-blue);
+        }
+
+        .output-tab .badge {
+            background-color: var(--accent-blue);
+            color: white;
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 10px;
+        }
+
+        .output-content {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+        }
+
+        .test-result {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            margin-bottom: 8px;
+            background-color: var(--bg-primary);
+            border-radius: 6px;
+            border-left: 3px solid;
+        }
+
+        .test-result.passed {
+            border-left-color: var(--success);
+        }
+
+        .test-result.failed {
+            border-left-color: var(--error);
+        }
+
+        .test-result-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            font-size: 12px;
+        }
+
+        .test-result.passed .test-result-icon {
+            background-color: rgba(76, 175, 80, 0.2);
+            color: var(--success);
+        }
+
+        .test-result.failed .test-result-icon {
+            background-color: rgba(244, 67, 54, 0.2);
+            color: var(--error);
+        }
+
+        .test-result-info {
+            flex: 1;
+        }
+
+        .test-result-title {
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .test-result-detail {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .test-result-time {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .console-output {
+            white-space: pre-wrap;
+            color: var(--text-primary);
+        }
+
+        .console-error {
+            color: var(--error);
+        }
+
+        /* 분석 결과 패널 */
+        .analysis-panel {
+            position: fixed;
+            top: 0;
+            right: -500px;
+            width: 500px;
+            height: 100vh;
+            background-color: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.3);
+            z-index: 1000;
+            transition: right 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .analysis-panel.open {
+            right: 0;
+        }
+
+        .analysis-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background-color: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .analysis-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .close-analysis {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+        }
+
+        .close-analysis:hover {
+            color: var(--text-primary);
+        }
+
+        .analysis-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .score-card {
+            text-align: center;
+            padding: 30px;
+            background: linear-gradient(135deg, var(--accent-blue), #1e90ff);
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .score-value {
+            font-size: 48px;
+            font-weight: 700;
+            color: white;
+        }
+
+        .score-label {
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+            margin-top: 5px;
+        }
+
+        .analysis-section {
+            margin-bottom: 20px;
+        }
+
+        .analysis-section-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--accent-blue);
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .analysis-item {
+            background-color: var(--bg-primary);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+        }
+
+        .analysis-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .analysis-item-label {
+            font-weight: 500;
+        }
+
+        .analysis-item-score {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .score-bar {
+            height: 6px;
+            background-color: var(--bg-tertiary);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .score-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+
+        .analysis-item-feedback {
+            font-size: 13px;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        .feedback-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feedback-list li {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px;
+            background-color: var(--bg-primary);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .feedback-list li i {
+            color: var(--accent-orange);
+            margin-top: 3px;
+        }
+
+        /* 로딩 오버레이 */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 100;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-content {
+            text-align: center;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--bg-tertiary);
+            border-top-color: var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            margin-top: 15px;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        /* 리사이저 */
+        .resizer {
+            width: 5px;
+            background-color: var(--border-color);
+            cursor: col-resize;
+            transition: background-color 0.2s;
+        }
+
+        .resizer:hover {
+            background-color: var(--accent-blue);
+        }
+
+        .v-resizer {
+            height: 5px;
+            width: 100%;
+            background-color: var(--border-color);
+            cursor: row-resize;
+        }
+
+        .v-resizer:hover {
+            background-color: var(--accent-blue);
+        }
+
+        /* 스크롤바 커스텀 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-secondary);
+        }
+
+        /* 반응형 */
+        @media (max-width: 1024px) {
+            .problem-panel {
+                width: 40%;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .main-container {
+                flex-direction: column;
+            }
+
+            .problem-panel {
+                width: 100%;
+                height: 40%;
+            }
+
+            .resizer {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 헤더 -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <i class="fas fa-code"></i>
+                <span>AI 코딩 테스트</span>
+            </div>
+            <div class="problem-selector">
+                <select id="problemSelect" onchange="loadProblem()">
+                    <option value="">문제 선택...</option>
+                </select>
+                <span id="difficultyBadge" class="difficulty-badge" style="display: none;"></span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="language-selector">
+                <select id="languageSelect" onchange="changeLanguage()">
+                    <option value="python">Python</option>
+                    <option value="javascript">JavaScript</option>
+                    <option value="java">Java</option>
+                </select>
+            </div>
+            <button class="btn btn-reset" onclick="resetCode()">
+                <i class="fas fa-undo"></i> 초기화
+            </button>
+            <button class="btn btn-run" id="runBtn" onclick="runCode()">
+                <i class="fas fa-play"></i> 실행
+            </button>
+            <button class="btn btn-submit" id="submitBtn" onclick="submitCode()">
+                <i class="fas fa-paper-plane"></i> 제출
+            </button>
+        </div>
+    </header>
+
+    <!-- 메인 컨테이너 -->
+    <div class="main-container">
+        <!-- 문제 패널 -->
+        <div class="problem-panel" id="problemPanel">
+            <div class="problem-tabs">
+                <div class="problem-tab active" data-tab="description">문제</div>
+                <div class="problem-tab" data-tab="examples">예제</div>
+                <div class="problem-tab" data-tab="hints">힌트</div>
+            </div>
+            <div class="problem-content" id="problemContent">
+                <div class="problem-title" id="problemTitle">문제를 선택하세요</div>
+                <div class="problem-description" id="problemDescription">
+                    왼쪽 상단의 문제 선택 드롭다운에서 문제를 선택하면 
+                    문제 설명이 여기에 표시됩니다.
+                </div>
+            </div>
+        </div>
+
+        <!-- 리사이저 -->
+        <div class="resizer" id="horizontalResizer"></div>
+
+        <!-- 에디터 패널 -->
+        <div class="editor-panel">
+            <div class="editor-header">
+                <div class="file-tab">
+                    <i class="fab fa-python"></i>
+                    <span id="fileName">solution.py</span>
+                </div>
+                <span id="statusText" style="font-size: 12px; color: var(--text-secondary);">
+                    준비됨
+                </span>
+            </div>
+            <div class="editor-container">
+                <div id="editor"></div>
+                <div class="loading-overlay" id="loadingOverlay">
+                    <div class="loading-content">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text" id="loadingText">코드 실행 중...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 수직 리사이저 -->
+            <div class="v-resizer" id="verticalResizer"></div>
+
+            <!-- 출력 패널 -->
+            <div class="output-panel" id="outputPanel">
+                <div class="output-tabs">
+                    <div class="output-tab active" data-tab="testcase">
+                        테스트 결과 <span class="badge" id="testResultBadge">0/0</span>
+                    </div>
+                    <div class="output-tab" data-tab="console">콘솔</div>
+                </div>
+                <div class="output-content" id="outputContent">
+                    <div class="console-output" id="consoleOutput">
+                        코드를 실행하면 결과가 여기에 표시됩니다.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 분석 결과 패널 -->
+    <div class="analysis-panel" id="analysisPanel">
+        <div class="analysis-header">
+            <span class="analysis-title">
+                <i class="fas fa-chart-bar"></i> AI 코드 분석
+            </span>
+            <button class="close-analysis" onclick="closeAnalysisPanel()">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div class="analysis-content" id="analysisContent">
+            <!-- 분석 결과가 여기에 동적으로 추가됨 -->
+        </div>
+    </div>
+
+    <script>
+        // ========== 전역 변수 ==========
+        let editor = null;
+        let currentProblem = null;
+        let currentLanguage = 'python';
+        let testResults = [];
+        let currentOutputTab = 'testcase';
+
+        // 언어별 파일 확장자
+        const languageExtensions = {
+            python: 'py',
+            javascript: 'js',
+            java: 'java'
+        };
+
+        // 언어별 아이콘
+        const languageIcons = {
+            python: 'fab fa-python',
+            javascript: 'fab fa-js-square',
+            java: 'fab fa-java'
+        };
+
+        // ========== Monaco Editor 초기화 ==========
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
+
+        require(['vs/editor/editor.main'], function() {
+            // VS Code Dark+ 테마 정의
+            monaco.editor.defineTheme('customDark', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: [
+                    { token: 'comment', foreground: '6A9955', fontStyle: 'italic' },
+                    { token: 'keyword', foreground: '569CD6' },
+                    { token: 'string', foreground: 'CE9178' },
+                    { token: 'number', foreground: 'B5CEA8' },
+                    { token: 'function', foreground: 'DCDCAA' },
+                    { token: 'variable', foreground: '9CDCFE' },
+                    { token: 'type', foreground: '4EC9B0' },
+                ],
+                colors: {
+                    'editor.background': '#1e1e1e',
+                    'editor.foreground': '#d4d4d4',
+                    'editorLineNumber.foreground': '#858585',
+                    'editorCursor.foreground': '#ffffff',
+                    'editor.selectionBackground': '#264f78',
+                    'editor.lineHighlightBackground': '#2d2d30',
+                }
+            });
+
+            editor = monaco.editor.create(document.getElementById('editor'), {
+                value: getDefaultCode('python'),
+                language: 'python',
+                theme: 'customDark',
+                fontSize: 14,
+                fontFamily: "'JetBrains Mono', Consolas, 'Courier New', monospace",
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                tabSize: 4,
+                insertSpaces: true,
+                wordWrap: 'on',
+                lineNumbers: 'on',
+                renderWhitespace: 'selection',
+                bracketPairColorization: { enabled: true },
+                suggest: {
+                    showKeywords: true,
+                    showSnippets: true,
+                },
+            });
+
+            // Ctrl+Enter로 실행
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, function() {
+                runCode();
+            });
+
+            // Ctrl+Shift+Enter로 제출
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter, function() {
+                submitCode();
+            });
+        });
+
+        // ========== 기본 코드 템플릿 ==========
+        function getDefaultCode(language) {
+            const templates = {
+                python: `# Python 솔루션
+# 입력을 받아 처리하는 코드를 작성하세요
+
+def solution():
+    # TODO: 구현
+    pass
+
+# 메인 실행
+if __name__ == "__main__":
+    solution()
+`,
+                javascript: `// JavaScript 솔루션
+// 입력을 받아 처리하는 코드를 작성하세요
+
+function solution() {
+    // TODO: 구현
+}
+
+// 메인 실행
+solution();
+`,
+                java: `import java.util.*;
+
+public class Solution {
+    public static void main(String[] args) {
+        Scanner sc = new Scanner(System.in);
+        // TODO: 구현
+    }
+}
+`
+            };
+            return templates[language] || templates.python;
+        }
+
+        // ========== 문제 로드 ==========
+        async function loadProblems() {
+            try {
+                const response = await fetch('/api/coding/problems');
+                const data = await response.json();
+                
+                const select = document.getElementById('problemSelect');
+                data.problems.forEach(problem => {
+                    const option = document.createElement('option');
+                    option.value = problem.id;
+                    option.textContent = `[${problem.difficulty.toUpperCase()}] ${problem.title}`;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                console.error('문제 목록 로드 실패:', error);
+            }
+        }
+
+        async function loadProblem() {
+            const problemId = document.getElementById('problemSelect').value;
+            if (!problemId) {
+                currentProblem = null;
+                document.getElementById('problemTitle').textContent = '문제를 선택하세요';
+                document.getElementById('problemDescription').textContent = 
+                    '왼쪽 상단의 문제 선택 드롭다운에서 문제를 선택하면 문제 설명이 여기에 표시됩니다.';
+                document.getElementById('difficultyBadge').style.display = 'none';
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/coding/problems/${problemId}`);
+                currentProblem = await response.json();
+                
+                // 제목 표시
+                document.getElementById('problemTitle').textContent = currentProblem.title;
+                
+                // 난이도 배지
+                const badge = document.getElementById('difficultyBadge');
+                badge.textContent = currentProblem.difficulty.toUpperCase();
+                badge.className = `difficulty-badge difficulty-${currentProblem.difficulty}`;
+                badge.style.display = 'inline-block';
+                
+                // 문제 설명 표시
+                showProblemTab('description');
+                
+                // 템플릿 코드 로드
+                await loadTemplate();
+                
+            } catch (error) {
+                console.error('문제 로드 실패:', error);
+            }
+        }
+
+        function showProblemTab(tabName) {
+            // 탭 활성화
+            document.querySelectorAll('.problem-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
+            });
+            
+            const content = document.getElementById('problemContent');
+            
+            if (!currentProblem) {
+                return;
+            }
+            
+            if (tabName === 'description') {
+                content.innerHTML = `
+                    <div class="problem-title">${currentProblem.title}</div>
+                    <div class="problem-description">${currentProblem.description}</div>
+                `;
+            } else if (tabName === 'examples') {
+                let html = `<div class="problem-title">예제</div>`;
+                currentProblem.examples.forEach((ex, i) => {
+                    html += `
+                        <div class="example-box">
+                            <div class="example-title">예제 ${i + 1}</div>
+                            <div>
+                                <strong>입력:</strong>
+                                <div class="example-content">${escapeHtml(ex.input)}</div>
+                            </div>
+                            <div>
+                                <strong>출력:</strong>
+                                <div class="example-content">${escapeHtml(ex.output)}</div>
+                            </div>
+                            ${ex.explanation ? `<div class="example-explanation">${ex.explanation}</div>` : ''}
+                        </div>
+                    `;
+                });
+                content.innerHTML = html;
+            } else if (tabName === 'hints') {
+                let html = `<div class="problem-title">힌트</div>`;
+                if (currentProblem.hints && currentProblem.hints.length > 0) {
+                    currentProblem.hints.forEach((hint, i) => {
+                        html += `
+                            <div class="hint-box">
+                                <div class="hint-title">💡 힌트 ${i + 1}</div>
+                                <div>${hint}</div>
+                            </div>
+                        `;
+                    });
+                } else {
+                    html += `<p>이 문제에 대한 힌트가 없습니다.</p>`;
+                }
+                content.innerHTML = html;
+            }
+        }
+
+        // ========== 언어 변경 ==========
+        function changeLanguage() {
+            currentLanguage = document.getElementById('languageSelect').value;
+            
+            // Monaco 언어 변경
+            const monacoLanguage = currentLanguage === 'python' ? 'python' : 
+                                   currentLanguage === 'javascript' ? 'javascript' : 'java';
+            monaco.editor.setModelLanguage(editor.getModel(), monacoLanguage);
+            
+            // 파일명 업데이트
+            const ext = languageExtensions[currentLanguage];
+            document.getElementById('fileName').textContent = `solution.${ext}`;
+            
+            // 아이콘 업데이트
+            const icon = document.querySelector('.file-tab i');
+            icon.className = languageIcons[currentLanguage];
+            
+            // 템플릿 로드
+            loadTemplate();
+        }
+
+        async function loadTemplate() {
+            try {
+                const problemId = currentProblem ? currentProblem.id : '';
+                const response = await fetch(`/api/coding/templates/${currentLanguage}?problem_id=${problemId}`);
+                const data = await response.json();
+                editor.setValue(data.template);
+            } catch (error) {
+                editor.setValue(getDefaultCode(currentLanguage));
+            }
+        }
+
+        // ========== 코드 초기화 ==========
+        function resetCode() {
+            if (confirm('코드를 초기화하시겠습니까?')) {
+                loadTemplate();
+            }
+        }
+
+        // ========== 코드 실행 ==========
+        async function runCode() {
+            const code = editor.getValue();
+            
+            showLoading('코드 실행 중...');
+            setStatus('실행 중...', 'running');
+            
+            try {
+                const response = await fetch('/api/coding/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: code,
+                        language: currentLanguage
+                    })
+                });
+                
+                const result = await response.json();
+                
+                hideLoading();
+                showOutputTab('console');
+                
+                const consoleOutput = document.getElementById('consoleOutput');
+                if (result.success) {
+                    consoleOutput.innerHTML = `<div class="console-output">${escapeHtml(result.output) || '(출력 없음)'}</div>`;
+                    setStatus('실행 완료', 'success');
+                } else {
+                    consoleOutput.innerHTML = `<div class="console-error">${escapeHtml(result.error)}</div>`;
+                    setStatus('실행 오류', 'error');
+                }
+                
+                if (result.execution_time) {
+                    consoleOutput.innerHTML += `<div style="margin-top: 10px; color: var(--text-secondary);">실행 시간: ${result.execution_time}ms</div>`;
+                }
+                
+            } catch (error) {
+                hideLoading();
+                setStatus('실행 실패', 'error');
+                document.getElementById('consoleOutput').innerHTML = 
+                    `<div class="console-error">오류: ${error.message}</div>`;
+            }
+        }
+
+        // ========== 코드 제출 ==========
+        async function submitCode() {
+            if (!currentProblem) {
+                alert('문제를 먼저 선택해주세요.');
+                return;
+            }
+            
+            const code = editor.getValue();
+            
+            showLoading('코드 분석 중...');
+            setStatus('제출 중...', 'running');
+            
+            try {
+                const response = await fetch('/api/coding/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: code,
+                        language: currentLanguage,
+                        problem_id: currentProblem.id
+                    })
+                });
+                
+                const result = await response.json();
+                
+                hideLoading();
+                
+                // 테스트 결과 표시
+                testResults = result.test_results || [];
+                showOutputTab('testcase');
+                displayTestResults();
+                
+                // 분석 결과 표시
+                if (result.analysis) {
+                    displayAnalysis(result.analysis, result.summary);
+                    openAnalysisPanel();
+                }
+                
+                const passed = result.summary?.passed || 0;
+                const total = result.summary?.total || 0;
+                
+                if (passed === total && total > 0) {
+                    setStatus(`통과 (${passed}/${total})`, 'success');
+                } else {
+                    setStatus(`실패 (${passed}/${total})`, 'error');
+                }
+                
+            } catch (error) {
+                hideLoading();
+                setStatus('제출 실패', 'error');
+                alert('코드 제출 중 오류가 발생했습니다: ' + error.message);
+            }
+        }
+
+        // ========== 테스트 결과 표시 ==========
+        function displayTestResults() {
+            const content = document.getElementById('outputContent');
+            const badge = document.getElementById('testResultBadge');
+            
+            const passed = testResults.filter(r => r.passed).length;
+            const total = testResults.length;
+            
+            badge.textContent = `${passed}/${total}`;
+            badge.style.backgroundColor = passed === total ? 'var(--success)' : 
+                                          passed > 0 ? 'var(--warning)' : 'var(--error)';
+            
+            if (testResults.length === 0) {
+                content.innerHTML = '<div class="console-output">테스트 케이스가 없습니다.</div>';
+                return;
+            }
+            
+            let html = '';
+            testResults.forEach((result, i) => {
+                html += `
+                    <div class="test-result ${result.passed ? 'passed' : 'failed'}">
+                        <div class="test-result-icon">
+                            <i class="fas ${result.passed ? 'fa-check' : 'fa-times'}"></i>
+                        </div>
+                        <div class="test-result-info">
+                            <div class="test-result-title">테스트 케이스 ${i + 1}</div>
+                            <div class="test-result-detail">
+                                ${result.passed ? '통과' : `기대: ${escapeHtml(result.expected)} / 출력: ${escapeHtml(result.actual)}`}
+                            </div>
+                        </div>
+                        <div class="test-result-time">${result.execution_time?.toFixed(2) || 0}ms</div>
+                    </div>
+                `;
+            });
+            
+            content.innerHTML = html;
+        }
+
+        // ========== 분석 결과 표시 ==========
+        function displayAnalysis(analysis, summary) {
+            const content = document.getElementById('analysisContent');
+            
+            const scoreColor = analysis.overall_score >= 80 ? 'var(--success)' :
+                              analysis.overall_score >= 60 ? 'var(--warning)' : 'var(--error)';
+            
+            let html = `
+                <div class="score-card" style="background: linear-gradient(135deg, ${scoreColor}, ${adjustColor(scoreColor, 20)});">
+                    <div class="score-value">${analysis.overall_score}</div>
+                    <div class="score-label">종합 점수 / 100</div>
+                </div>
+                
+                <div class="analysis-section">
+                    <div class="analysis-section-title">
+                        <i class="fas fa-check-circle"></i> 정확성
+                    </div>
+                    ${createAnalysisItem('테스트 통과', analysis.correctness?.score || 0, 25, analysis.correctness?.feedback)}
+                </div>
+                
+                <div class="analysis-section">
+                    <div class="analysis-section-title">
+                        <i class="fas fa-clock"></i> 복잡도 분석
+                    </div>
+                    ${createAnalysisItem('시간 복잡도', analysis.time_complexity?.score || 0, 20, 
+                        `${analysis.time_complexity?.estimated || 'N/A'} (최적: ${analysis.time_complexity?.optimal || 'N/A'})`)}
+                    ${createAnalysisItem('공간 복잡도', analysis.space_complexity?.score || 0, 15, 
+                        analysis.space_complexity?.estimated || 'N/A')}
+                </div>
+                
+                <div class="analysis-section">
+                    <div class="analysis-section-title">
+                        <i class="fas fa-code"></i> 코드 품질
+                    </div>
+                    ${createAnalysisItem('코드 스타일', analysis.code_style?.score || 0, 20, analysis.code_style?.feedback)}
+                    ${createAnalysisItem('주석 및 문서화', analysis.comments?.score || 0, 10, analysis.comments?.feedback)}
+                    ${createAnalysisItem('모범 사례', analysis.best_practices?.score || 0, 10, analysis.best_practices?.feedback)}
+                </div>
+            `;
+            
+            // 피드백
+            if (analysis.feedback && analysis.feedback.length > 0) {
+                html += `
+                    <div class="analysis-section">
+                        <div class="analysis-section-title">
+                            <i class="fas fa-lightbulb"></i> 개선 제안
+                        </div>
+                        <ul class="feedback-list">
+                            ${analysis.feedback.map(f => `<li><i class="fas fa-arrow-right"></i><span>${escapeHtml(f)}</span></li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // 상세 분석
+            if (analysis.detailed_analysis) {
+                html += `
+                    <div class="analysis-section">
+                        <div class="analysis-section-title">
+                            <i class="fas fa-file-alt"></i> 상세 분석
+                        </div>
+                        <div class="analysis-item">
+                            <div class="analysis-item-feedback" style="white-space: pre-wrap;">
+                                ${escapeHtml(analysis.detailed_analysis)}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+            
+            content.innerHTML = html;
+        }
+
+        function createAnalysisItem(label, score, maxScore, feedback) {
+            const percentage = (score / maxScore) * 100;
+            return `
+                <div class="analysis-item">
+                    <div class="analysis-item-header">
+                        <span class="analysis-item-label">${label}</span>
+                        <span class="analysis-item-score">${score}/${maxScore}</span>
+                    </div>
+                    <div class="score-bar">
+                        <div class="score-bar-fill" style="width: ${percentage}%"></div>
+                    </div>
+                    ${feedback ? `<div class="analysis-item-feedback">${escapeHtml(feedback)}</div>` : ''}
+                </div>
+            `;
+        }
+
+        // ========== 분석 패널 제어 ==========
+        function openAnalysisPanel() {
+            document.getElementById('analysisPanel').classList.add('open');
+        }
+
+        function closeAnalysisPanel() {
+            document.getElementById('analysisPanel').classList.remove('open');
+        }
+
+        // ========== 출력 탭 제어 ==========
+        function showOutputTab(tabName) {
+            currentOutputTab = tabName;
+            
+            document.querySelectorAll('.output-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.tab === tabName);
+            });
+            
+            const content = document.getElementById('outputContent');
+            
+            if (tabName === 'testcase') {
+                displayTestResults();
+            } else if (tabName === 'console') {
+                // 콘솔 출력 유지
+            }
+        }
+
+        // ========== 유틸리티 함수 ==========
+        function showLoading(text) {
+            document.getElementById('loadingText').textContent = text;
+            document.getElementById('loadingOverlay').classList.add('active');
+            document.getElementById('runBtn').disabled = true;
+            document.getElementById('submitBtn').disabled = true;
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').classList.remove('active');
+            document.getElementById('runBtn').disabled = false;
+            document.getElementById('submitBtn').disabled = false;
+        }
+
+        function setStatus(text, type) {
+            const status = document.getElementById('statusText');
+            status.textContent = text;
+            
+            switch (type) {
+                case 'running':
+                    status.style.color = 'var(--accent-blue)';
+                    break;
+                case 'success':
+                    status.style.color = 'var(--success)';
+                    break;
+                case 'error':
+                    status.style.color = 'var(--error)';
+                    break;
+                default:
+                    status.style.color = 'var(--text-secondary)';
+            }
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function adjustColor(color, percent) {
+            // 간단한 색상 밝기 조절
+            return color;
+        }
+
+        // ========== 리사이저 ==========
+        function initResizers() {
+            const hResizer = document.getElementById('horizontalResizer');
+            const vResizer = document.getElementById('verticalResizer');
+            const problemPanel = document.getElementById('problemPanel');
+            const outputPanel = document.getElementById('outputPanel');
+            
+            let isResizingH = false;
+            let isResizingV = false;
+            
+            hResizer.addEventListener('mousedown', (e) => {
+                isResizingH = true;
+                document.addEventListener('mousemove', onMouseMoveH);
+                document.addEventListener('mouseup', onMouseUpH);
+            });
+            
+            function onMouseMoveH(e) {
+                if (!isResizingH) return;
+                const newWidth = e.clientX;
+                if (newWidth > 250 && newWidth < window.innerWidth - 400) {
+                    problemPanel.style.width = newWidth + 'px';
+                }
+            }
+            
+            function onMouseUpH() {
+                isResizingH = false;
+                document.removeEventListener('mousemove', onMouseMoveH);
+                document.removeEventListener('mouseup', onMouseUpH);
+            }
+            
+            vResizer.addEventListener('mousedown', (e) => {
+                isResizingV = true;
+                document.addEventListener('mousemove', onMouseMoveV);
+                document.addEventListener('mouseup', onMouseUpV);
+            });
+            
+            function onMouseMoveV(e) {
+                if (!isResizingV) return;
+                const containerRect = document.querySelector('.editor-panel').getBoundingClientRect();
+                const newHeight = containerRect.bottom - e.clientY;
+                if (newHeight > 100 && newHeight < 500) {
+                    outputPanel.style.height = newHeight + 'px';
+                }
+            }
+            
+            function onMouseUpV() {
+                isResizingV = false;
+                document.removeEventListener('mousemove', onMouseMoveV);
+                document.removeEventListener('mouseup', onMouseUpV);
+            }
+        }
+
+        // ========== 이벤트 리스너 ==========
+        document.addEventListener('DOMContentLoaded', () => {
+            loadProblems();
+            initResizers();
+            
+            // 문제 탭 클릭
+            document.querySelectorAll('.problem-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    showProblemTab(tab.dataset.tab);
+                });
+            });
+            
+            // 출력 탭 클릭
+            document.querySelectorAll('.output-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    showOutputTab(tab.dataset.tab);
+                });
+            });
+        });
+
+        // 키보드 단축키 안내
+        console.log('🎹 단축키: Ctrl+Enter (실행), Ctrl+Shift+Enter (제출)');
+    </script>
+</body>
+</html>
