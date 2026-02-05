@@ -59,37 +59,16 @@ async def websocket_stt(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket Error: {e}")
 
-@router.post("/evaluate_architecture")
-async def evaluate_architecture(payload: dict):
-    """Evaluates the architecture diagram sent as Base64 image."""
-    try:
-        session_id = payload.get("session_id")
-        image_data = payload.get("image")
-        result = await interview_service.evaluate_architecture_drawing(session_id, image_data)
-        return result
-    except Exception as e:
-        print(f"Architecture Eval Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 # --- Vision AI (DeepFace) ---
 from services.vision_service import VisionService
 vision_service = VisionService()
 
 @router.post("/analyze_face")
-async def analyze_face(file: UploadFile = File(...), session_id: str = Form(None)):
-    """Analyzes a video frame for emotion and processes confidence."""
+async def analyze_face(file: UploadFile = File(...)):
+    """Analyzes a video frame for emotion."""
     try:
         image_content = await file.read()
-        
-        # 1. Vision Analysis (Emotion) - for UI feedback
-        # We need to run this concurrently effectively or just await it
         result = await vision_service.analyze_frame(image_content)
-        
-        # 2. Confidence Analysis (Background process)
-        if session_id:
-            # Run directly since it's fast media pipe calculation
-            interview_service.process_frame(session_id, image_content)
-            
         return result
     except Exception as e:
         print(f"Face Analysis Error: {e}")

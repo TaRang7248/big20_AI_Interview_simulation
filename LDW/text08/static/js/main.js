@@ -8,55 +8,47 @@ let timerInterval;
 let timeLeft = 90;
 let interviewHistory = [];
 
-// Initialize on load for Interview Page
-document.addEventListener('DOMContentLoaded', async () => {
-    // Check if we are on the interview page by looking for the question text element
-    if (document.getElementById('question-text')) {
-        await initInterviewPage();
-    }
-});
+async function startInterview() {
+    const candidateName = document.getElementById('name').value;
+    const jobTitle = document.getElementById('job_title').value;
 
-async function initInterviewPage() {
-    const intervieweeName = sessionStorage.getItem('interviewee_name');
-    const intervieweeJob = sessionStorage.getItem('interviewee_job');
-
-    if (!intervieweeName || !intervieweeJob) {
-        // Only redirect if we are NOT on feedback page or login page
-        // Wait, main.js is loaded on index/interview pages
-        alert("로그인 정보가 없습니다.");
-        window.location.href = '/';
+    if (!candidateName || !jobTitle) {
+        alert("이름과 지원 직무를 입력해 주세요.");
         return;
     }
+
+    const startBtn = document.getElementById('btn-start');
+    startBtn.disabled = true;
+    startBtn.innerText = "면접관 연결 중...";
 
     try {
         const response = await fetch('/api/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: intervieweeName, job_title: intervieweeJob })
+            body: JSON.stringify({ name: candidateName, job_title: jobTitle })
         });
-        const data = await response.json();
 
+        const data = await response.json();
         currentSession = data.session_id;
         currentQuestion = data.question;
         currentStep = data.step;
-        sessionStorage.setItem('current_session_id', currentSession);
 
-        document.getElementById('interview-area').style.display = 'block';
-        setTimeout(() => document.getElementById('interview-area').style.opacity = '1', 100);
+        document.getElementById('start-area').style.opacity = '0';
+        setTimeout(() => {
+            document.getElementById('start-area').style.display = 'none';
+            const interviewArea = document.getElementById('interview-area');
+            interviewArea.style.display = 'block';
+            setTimeout(() => interviewArea.style.opacity = '1', 50);
+            updateUIForQuestion();
+            startCamera(); // Start camera for vision AI
+        }, 300);
 
-        updateUIForQuestion();
-        startCamera();
-
-    } catch (e) {
-        console.error("Session Start Error", e);
-        alert("면접 세션을 시작할 수 없습니다.");
+    } catch (error) {
+        console.error("Start Error:", error);
+        alert("면접을 시작할 수 없습니다. 서버 상태를 확인하세요.");
+        startBtn.disabled = false;
+        startBtn.innerText = "면접 시작하기";
     }
-}
-
-// Global scope startInterview not needed as Login page handles it via form/redirect
-function startInterview() {
-    // Legacy support or removed
-    console.warn("Using legacy startInterview function");
 }
 
 function updateUIForQuestion() {
@@ -64,16 +56,6 @@ function updateUIForQuestion() {
     document.getElementById('step-counter').innerText = `질문 ${currentStep} / 10`;
     document.getElementById('progress-bar').style.width = `${(currentStep / 10) * 100}%`;
     resetTimer();
-
-    // Architect Question Handling (Mock logic: if question contains "아키텍처" or "설계", show canvas tools)
-    // For now, always visible or user toggles.
-    // Let's autoshow submit button if keyword detected for UX
-    if (currentQuestion.includes("아키텍처") || currentQuestion.includes("구조") || currentQuestion.includes("설계") || currentQuestion.includes("그려")) {
-        document.getElementById('btn-submit-architecture').style.display = 'inline-block';
-        // Highlight canvas panel?
-    } else {
-        document.getElementById('btn-submit-architecture').style.display = 'none';
-    }
 }
 
 function resetTimer() {
@@ -99,18 +81,16 @@ function updateTimerUI() {
     const timerText = document.getElementById('timer-text');
     const timerProgress = document.querySelector('.timer-progress');
 
-    if (timerText) timerText.innerText = timeLeft;
+    timerText.innerText = timeLeft;
 
-    if (timerProgress) {
-        // Circular progress - 283 is approx 2 * PI * 45
-        const offset = 283 - (timeLeft / 90) * 283;
-        timerProgress.style.strokeDashoffset = offset;
+    // Circular progress - 283 is approx 2 * PI * 45
+    const offset = 283 - (timeLeft / 90) * 283;
+    timerProgress.style.strokeDashoffset = offset;
 
-        if (timeLeft <= 10) {
-            timerProgress.style.stroke = '#fb7185';
-        } else {
-            timerProgress.style.stroke = 'var(--primary)';
-        }
+    if (timeLeft <= 10) {
+        timerProgress.style.stroke = '#fb7185';
+    } else {
+        timerProgress.style.stroke = 'var(--primary)';
     }
 }
 
@@ -123,6 +103,7 @@ async function toggleRecording() {
 }
 
 let sttSocket = null;
+let silenceTimer = null;
 
 async function startRecording() {
     try {
@@ -130,6 +111,7 @@ async function startRecording() {
         mediaRecorder = new MediaRecorder(stream);
         audioChunks = [];
 
+        // Setup WebSocket for real-time STT
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         sttSocket = new WebSocket(`${protocol}//${window.location.host}/api/ws/stt`);
 
@@ -138,6 +120,7 @@ async function startRecording() {
             if (data.text) {
                 const resultDiv = document.getElementById('stt-result');
                 resultDiv.innerText = data.text;
+                // Scroll to bottom
                 resultDiv.scrollTop = resultDiv.scrollHeight;
             }
         };
@@ -145,6 +128,7 @@ async function startRecording() {
         mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
                 audioChunks.push(event.data);
+                // Send cumulative blob for reliable decoding
                 if (sttSocket && sttSocket.readyState === WebSocket.OPEN) {
                     const cumulativeBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
                     sttSocket.send(cumulativeBlob);
@@ -158,6 +142,7 @@ async function startRecording() {
             await processFinalAnswer(finalAnswer);
         };
 
+        // Collect data every 3 seconds for "real-time" feel
         mediaRecorder.start(3000);
         isRecording = true;
 
@@ -198,6 +183,7 @@ async function processFinalAnswer(answerText) {
     }
 
     try {
+        // 2. Process Answer
         const response = await fetch('/api/answer', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -210,22 +196,22 @@ async function processFinalAnswer(answerText) {
 
         const result = await response.json();
 
+        // Save to history
         interviewHistory.push({
             question: currentQuestion,
             answer: answerText,
             evaluation: result.evaluation
         });
 
-        // Update session storage for feedback page
-        sessionStorage.setItem('interview_history', JSON.stringify(interviewHistory));
-
         if (result.is_completed) {
-            finishInterview(result.evaluation);
+            showResults(result.evaluation.pass_fail);
         } else {
             currentQuestion = result.next_question;
             currentStep = result.step;
+
             const qText = document.getElementById('question-text');
             qText.style.opacity = '0';
+
             setTimeout(() => {
                 updateUIForQuestion();
                 qText.style.opacity = '1';
@@ -247,71 +233,44 @@ function enableRecordButton() {
     btnRecord.innerText = "답변 시작";
 }
 
-function finishInterview(finalEvaluation) {
-    // Prepare data for feedback page
-    let finalData = {
-        passFail: finalEvaluation ? finalEvaluation.result_status : "평가 완료",
-        confidence: finalEvaluation ? finalEvaluation.confidence_score : 0,
-        details: interviewHistory
-    };
+function showResults(passFail) {
+    document.getElementById('interview-area').style.display = 'none';
+    const resultArea = document.getElementById('result-area');
+    resultArea.style.display = 'block';
 
-    sessionStorage.setItem('interview_results', JSON.stringify(finalData));
-
-    // Redirect
-    window.location.href = '/feedback';
-}
-
-// --- Architecture Canvas Logic ---
-async function submitArchitecture() {
-    if (!confirm("현재 캔버스에 그려진 아키텍처를 제출하고 평가받으시겠습니까?")) return;
-
-    try {
-        const imgData = getCanvasImage(); // from canvas.js
-        document.getElementById('status-msg').innerText = "아키텍처 분석 중...";
-
-        const response = await fetch('/api/evaluate_architecture', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                session_id: currentSession,
-                image: imgData
-            })
-        });
-
-        const result = await response.json();
-        alert(`평가 결과: ${result.score}점\n피드백: ${result.feedback}`);
-
-        // Save this feedback to show in final report if needed
-        let archFeedback = JSON.parse(sessionStorage.getItem('arch_feedback') || '[]');
-        archFeedback.push(result);
-        sessionStorage.setItem('arch_feedback', JSON.stringify(archFeedback));
-
-        document.getElementById('status-msg').innerText = "아키텍처 평가가 완료되었습니다.";
-
-    } catch (e) {
-        console.error("Arch Submit Error", e);
-        alert("아키텍처 제출 실패");
+    document.getElementById('pass-fail-value').innerText = passFail || "평가 완료";
+    if (passFail === "불합격") {
+        document.getElementById('pass-fail-value').style.color = '#fb7185';
     }
+
+    const feedbackList = document.getElementById('feedback-list');
+    feedbackList.innerHTML = "";
+
+    interviewHistory.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'feedback-item';
+        div.innerHTML = `
+            <div class="feedback-q">Q${index + 1}: ${item.question}</div>
+            <div class="feedback-f">${item.evaluation.feedback}</div>
+            <div class="feedback-s">점수: ${item.evaluation.score}점</div>
+        `;
+        feedbackList.appendChild(div);
+    });
 }
-
-
 // --- Vision AI Logic ---
 let visionInterval = null;
 
 async function startCamera() {
     try {
         const video = document.getElementById('camera-preview');
-        // Only if element exists
-        if (!video) return;
-
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = stream;
-
+        
+        // Start analyzing every 3 seconds
         visionInterval = setInterval(analyzeFrame, 3000);
     } catch (err) {
         console.error("Camera Error:", err);
-        const badge = document.getElementById('emotion-badge');
-        if (badge) badge.innerText = "No Camera";
+        document.getElementById('emotion-badge').innerText = "No Camera";
     }
 }
 
@@ -329,9 +288,6 @@ async function analyzeFrame() {
         if (!blob) return;
         const formData = new FormData();
         formData.append('file', blob, 'frame.jpg');
-        if (currentSession) {
-            formData.append('session_id', currentSession);
-        }
 
         try {
             const response = await fetch('/api/analyze_face', {
@@ -341,18 +297,17 @@ async function analyzeFrame() {
             const data = await response.json();
             if (data.dominant_emotion) {
                 const badge = document.getElementById('emotion-badge');
-                if (badge) {
-                    const emotionMap = {
-                        "angry": "분노",
-                        "disgust": "혐오",
-                        "fear": "공포",
-                        "happy": "행복", // happy -> 행복 (미소)
-                        "sad": "슬픔",
-                        "surprise": "놀람",
-                        "neutral": "평온"
-                    };
-                    badge.innerText = emotionMap[data.dominant_emotion] || data.dominant_emotion;
-                }
+                // Translate emotion to Korean if desired, or keep English
+                const emotionMap = {
+                    "angry": "분노",
+                    "disgust": "혐오",
+                    "fear": "공포",
+                    "happy": "행복",
+                    "sad": "슬픔",
+                    "surprise": "놀람",
+                    "neutral": "평온"
+                };
+                badge.innerText = emotionMap[data.dominant_emotion] || data.dominant_emotion;
             }
         } catch (err) {
             console.error("Frame Analysis Error:", err);
