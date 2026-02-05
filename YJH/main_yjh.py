@@ -141,14 +141,34 @@ async def chat_voice_audio_endpoint(
         final_input_text = user_text
         if retrieved_context:
             print(f"📚 [RAG 검색 성공] 이력서 내용 참고함 (길이: {len(retrieved_context)})")
-            # 프롬프트 엔지니어링: 사용자 몰래 컨텍스트를 주입
-            final_input_text = f"""
-            [System Note: The following is relevant information retrieved from the candidate's resume. Use it to formulate your response or next question.]
-            --- Resume Context ---
-            {retrieved_context}
-            ----------------------
             
-            User's Input: {user_text}
+            # [수정] 프롬프트를 훨씬 강력하게(Strict) 변경합니다.
+            final_input_text = f"""
+            [System Instruction]
+            You are a strict technical interviewer evaluating a candidate based on their Resume.
+            
+            ⚠️ CRITICAL RULES:
+            1. You MUST generate a follow-up question based **ONLY** on the [Resume Context] provided below.
+            2. DO NOT ask generic questions or questions about topics not mentioned in the resume (e.g., Do NOT ask about NLP, AI, or Deep Learning unless the resume explicitly lists them).
+            3. The candidate is a **Backend Developer** (Java, Python, FastAPI, Redis, AWS). Ask specifically about these technologies.
+            4. If the candidate mentioned "Migration from Java to Python", ask about the challenges or trade-offs of that specific experience.
+
+            [Resume Context]
+            {retrieved_context}
+            
+            [Candidate's Last Response]
+            "{user_text}"
+            
+            Based on the context above, ask a deep technical question related to their project experience.
+            """
+        else:
+            print("⚠️ [RAG 검색 실패] 관련 이력서 내용 없음")
+            # 이력서 내용이 없을 때도 대비
+            final_input_text = f"""
+            User Answer: "{user_text}"
+            
+            You are a technical interviewer. The user introduced themselves as a Backend Developer.
+            Ask a standard backend question about Database, API design, or System Architecture.
             """
         # ---------------------------------------------------------
 
