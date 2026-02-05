@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>AI 면접 진행 중</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <header>면접 진행 중 - <span id="progress">1/10</span></header>
+        <main>
+            <div class="interview-layout">
+                <!-- Left: Video & Question -->
+                <div>
+                    <div class="question-area" id="question-text">
+                        질문을 불러오는 중...
+                    </div>
+
+                    <div class="video-area">
+                        <video id="webcam" autoplay muted></video>
+                    </div>
+
+                    <div class="stt-display" id="stt-output">
+                        [실시간 답변 인식 중...]
+                    </div>
+                </div>
+
+                <!-- Right: Controls & Canvas -->
+                <div>
+                    <div class="timer" id="timer">90</div>
+
+                    <div class="controls">
+                        <button id="start-btn" onclick="startRecording()">답변 시작</button>
+                        <button id="stop-btn" onclick="stopRecording()" disabled>답변 종료</button>
+                    </div>
+
+                    <hr>
+                    <h3>아키텍처 캔버스</h3>
+                    <canvas id="archCanvas" width="300" height="300"></canvas>
+                    <div>
+                        <button onclick="clearCanvas()">지우기</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Need to serve interview.html from FastAPI templates or static -->
+    <!-- Creating a pure HTML file in templates usually requires a route to render it. -->
+    <!-- Ideally, I should add a route in main.py to serve this. -->
+
+    <script src="/static/js/interview.js"></script>
+    <script src="/static/js/canvas.js"></script>
+</body>
+
+</html>
