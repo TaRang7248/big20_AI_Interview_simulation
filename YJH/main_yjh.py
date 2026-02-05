@@ -10,8 +10,11 @@ sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware # <--- 이거 추가!
+from fastapi import Form  # [필수] Form 데이터 수신용
 from pydantic import BaseModel
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_openai import ChatOpenAI
+import json
 
 # 프로젝트 모듈 임포트
 from YJH.agents.interview_graph import app as interview_graph
@@ -26,6 +29,7 @@ from YJH.services.report_service import generate_interview_report
 from YJH.services.vision_service import analyze_face_emotion
 # [추가] 업로드 API 추가 및 RAG 연동 임포트
 from YJH.services.rag_service import process_resume_pdf, get_relevant_context
+from YJH.services.transcript_service import save_transcript # [★추가] 방금 만든 서비스 가져오기
 
 # 1. FastAPI 앱 초기화
 app = FastAPI(
@@ -53,27 +57,7 @@ class ChatResponse(BaseModel):
     current_phase: str
     question_count: int
 
-# --- [Helper] DB 저장 함수 ---
-def save_transcript(db, thread_id: str, sender: str, content: str):
-    """대화 내용을 DB에 저장하고 로그를 출력합니다."""
-    try:
-        # 1. 세션 찾기 (없으면 생성)
-        session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
-        if not session:
-            print(f"🆕 [DB] 새 세션 생성: {thread_id}")
-            session = InterviewSession(thread_id=thread_id, candidate_name="Unknown")
-            db.add(session)
-            db.commit()
-            db.refresh(session)
-        
-        # 2. 대화 기록 저장
-        transcript = Transcript(session_id=session.id, sender=sender, content=content)
-        db.add(transcript)
-        db.commit()
-        print(f"💾 [DB 저장] {sender}: {content[:30]}...") # 로그 출력
-    except Exception as e:
-        print(f"❌ [DB 저장 실패] {e}")
-        db.rollback()
+
 
 # 3. 헬스 체크
 @app.get("/")
@@ -114,7 +98,8 @@ async def chat_endpoint(request: ChatRequest):
 @app.post("/chat/voice/audio")
 async def chat_voice_audio_endpoint(
     file: UploadFile = File(...), 
-    thread_id: str = "voice_session_final_test" # # 기본값 통일
+    thread_id: str = "voice_session_final_test", # # 기본값 통일
+    current_emotion: str = Form("neutral") # [신규] 프론트에서 보낸 감정 받기
 ):
     """
     [Full Duplex] 음성 파일 업로드 -> STT -> LangGraph -> TTS -> 음성 파일 반환
@@ -130,7 +115,7 @@ async def chat_voice_audio_endpoint(
             raise HTTPException(status_code=400, detail="음성이 인식되지 않았습니다.")
 
         # [저장] 사용자 입력
-        save_transcript(db, thread_id, "human", user_text)
+        save_transcript(db, thread_id, "human", user_text, emotion=current_emotion)
 
         # ---------------------------------------------------------
         # [RAG 핵심 로직] 이력서에서 관련 내용 검색
@@ -155,6 +140,10 @@ async def chat_voice_audio_endpoint(
 
             [Resume Context]
             {retrieved_context}
+
+            [User Emotion]
+            The candidate is currently feeling: '{current_emotion}'.
+            (If the emotion is 'fear' or 'sad', be a bit more encouraging. If 'happy', keep the momentum.)
             
             [Candidate's Last Response]
             "{user_text}"
@@ -198,75 +187,105 @@ async def chat_voice_audio_endpoint(
     finally:
         db.close()
 
-# 6. [신규 추가] 면접 결과 리포트 생성 API
+
+# 6. [수정됨] 면접 결과 리포트 생성 API (ID 타입 에러 해결 버전)
 @app.post("/report/{thread_id}")
 async def create_report_endpoint(thread_id: str):
     """
-    특정 세션(thread_id)의 대화 기록을 분석하여 상세 평가 리포트를 생성합니다.
+    thread_id(문자열)로 session_id(숫자)를 찾은 뒤, 대화 내용을 조회합니다.
     """
+    print(f"📊 [리포트 생성 요청] Thread ID: {thread_id}")
+    
     db = SessionLocal()
     try:
-        # 1. 세션 조회
+        # 1. [핵심 수정] 문자열 ID(thread_id)로 DB의 숫자 ID(session.id)를 먼저 찾습니다.
         session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
+        
         if not session:
-            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+            print("⚠️ 해당 thread_id를 가진 세션이 없습니다.")
+            return {
+                "total_score": 0,
+                "feedback_summary": "저장된 세션 정보가 없습니다. (면접이 시작되지 않았을 수 있습니다)",
+                "details": []
+            }
 
-        # 2. 대화 기록 조회
-        transcripts = db.query(Transcript).filter(Transcript.session_id == session.id).order_by(Transcript.timestamp).all()
+        # 2. 찾은 숫자 ID (session.id)로 대화 내용 조회
+        transcripts = db.query(Transcript).filter(Transcript.session_id == session.id).order_by(Transcript.id).all()
         
         if not transcripts:
-            raise HTTPException(status_code=400, detail="대화 기록이 없습니다.")
+            print("⚠️ 대화 기록 없음")
+            return {
+                "total_score": 0,
+                "feedback_summary": "대화 기록이 없습니다.",
+                "details": []
+            }
 
-        print(f"📊 [리포트 생성 시작] 세션: {thread_id}, 대화 수: {len(transcripts)}건")
+        # 3. 대화 내용을 텍스트로 변환
+        full_conversation = ""
+        for t in transcripts:
+            role = "면접관(AI)" if t.sender == "ai" else "지원자"
+            full_conversation += f"[{role}]: {t.content}\n"
 
-        # 3. LLM 분석 실행 (Rubric 기반)
-        report_data = await generate_interview_report(transcripts)
+        print(f"📝 분석 대상 텍스트 길이: {len(full_conversation)}자")
         
-        if not report_data:
-            raise HTTPException(status_code=500, detail="리포트 생성 실패")
+        if len(full_conversation) < 50:
+             return {
+                "total_score": 0,
+                "feedback_summary": "면접 데이터가 너무 부족하여 분석할 수 없습니다.",
+                "details": []
+            }
 
-        # 4. 결과 DB 저장
-        # Pydantic 모델의 필드들을 DB 테이블 컬럼에 매핑
-        report = db.query(EvaluationReport).filter(EvaluationReport.session_id == session.id).first()
+        # 4. LLM에게 채점 요청 (GPT-4o)
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
         
-        # 점수 형변환 (float -> int)
-        total_score_int = int(report_data.get("total_weighted_score", 0))
+        system_prompt = """
+        당신은 20년 경력의 베테랑 기술 면접관입니다.
+        아래 [대화 기록]을 분석하여 면접 결과 리포트를 JSON 형식으로 작성하십시오.
         
-        if not report:
-            report = EvaluationReport(
-                session_id=session.id,
-                total_score=total_score_int,
-                technical_score=report_data["hard_skill"]["score"],
-                communication_score=report_data["communication"]["score"],
-                summary=report_data["overall_summary"],
-                details=report_data # 전체 상세 데이터(JSON) 저장
-            )
-            db.add(report)
-        else:
-            # 기존 리포트 갱신
-            report.total_score = total_score_int
-            report.technical_score = report_data["hard_skill"]["score"]
-            report.communication_score = report_data["communication"]["score"]
-            report.summary = report_data["overall_summary"]
-            report.details = report_data
-        
-        db.commit()
-        db.refresh(report)
+        [필수 출력 형식]
+        반드시 아래 JSON 구조를 그대로 따르세요. (Markdown backticks 없이 순수 JSON만 출력)
+        {
+            "total_score": 85,
+            "feedback_summary": "지원자는 ... 점이 훌륭했으나, ... 에 대한 설명이 부족했습니다. (전반적인 총평을 3~4문장으로 서술)",
+            "details": [
+                {"category": "직무 역량(Hard Skill)", "score": 80, "comment": "Redis 캐싱 전략에 대한 설명이 논리적임"},
+                {"category": "의사소통(Soft Skill)", "score": 90, "comment": "질문의 요지를 잘 파악하고 두괄식으로 답변함"},
+                {"category": "문제 해결력", "score": 85, "comment": "마이그레이션 과정의 트러블 슈팅 경험이 구체적임"}
+            ]
+        }
+        """
 
-        print(f"✅ [리포트 저장 완료] ID: {report.id}, 점수: {total_score_int}점")
-        return {"status": "success", "report": report_data}
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=f"[대화 기록]\n{full_conversation}")
+        ]
+
+        response = llm.invoke(messages)
+        
+        # 5. JSON 파싱 및 반환
+        content = response.content.replace("```json", "").replace("```", "").strip()
+        try:
+            report_json = json.loads(content)
+            print("✅ 리포트 생성 성공!")
+            return report_json
+        except json.JSONDecodeError:
+            print("❌ LLM 응답 파싱 실패")
+            return {
+                "total_score": 0,
+                "feedback_summary": "분석 결과 파싱 중 오류가 발생했습니다.",
+                "details": []
+            }
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "total_score": 0,
+            "feedback_summary": f"서버 에러 발생: {str(e)}",
+            "details": []
+        }
     finally:
         db.close()
-
-if __name__ == "__main__":
-    import uvicorn
-    # 모든 IP 허용, 포트 8001
-    uvicorn.run("YJH.main_yjh:app", host="0.0.0.0", port=8001, reload=True)
 
 
 
