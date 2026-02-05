@@ -59,6 +59,18 @@ async def websocket_stt(websocket: WebSocket):
     except Exception as e:
         print(f"WebSocket Error: {e}")
 
+@router.post("/evaluate_architecture")
+async def evaluate_architecture(payload: dict):
+    """Evaluates the architecture diagram sent as Base64 image."""
+    try:
+        session_id = payload.get("session_id")
+        image_data = payload.get("image")
+        result = await interview_service.evaluate_architecture_drawing(session_id, image_data)
+        return result
+    except Exception as e:
+        print(f"Architecture Eval Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- Vision AI (DeepFace) ---
 from services.vision_service import VisionService
 vision_service = VisionService()

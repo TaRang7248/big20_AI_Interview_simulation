@@ -167,3 +167,16 @@ class InterviewService:
             return service.get_confidence_score()
         return 0
 
+    async def evaluate_architecture_drawing(self, session_id: str, image_data_url: str):
+        """Evaluates the architecture drawing provided by the candidate."""
+        if session_id not in self.sessions:
+             # Just proceed without saving if session is invalid for testing, or raise
+             pass
+        
+        evaluation = await self.llm.evaluate_architecture(image_data_url)
+        
+        # Log to session history if needed, or just return
+        # Might want to add to session scores or separate architecture score
+        
+        return evaluation
+

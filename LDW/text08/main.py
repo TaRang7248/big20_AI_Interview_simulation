@@ -42,8 +42,16 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+async def read_login(request: Request):
+    return templates.TemplateResponse("login.html", {"request": request})
+
+@app.get("/interview", response_class=HTMLResponse)
+async def read_interview(request: Request):
+    return templates.TemplateResponse("interview.html", {"request": request})
+
+@app.get("/feedback", response_class=HTMLResponse)
+async def read_feedback(request: Request):
+    return templates.TemplateResponse("feedback.html", {"request": request})
 
 def open_browser():
     """Automatically opens matching URL in default browser after server starts."""
