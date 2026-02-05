@@ -44,7 +44,7 @@ def get_llm():
     if _llm is None:
         try:
             from langchain_ollama import ChatOllama
-            DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
+            DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0")
             _llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.3)
         except Exception as e:
             print(f"LLM 초기화 실패: {e}")
@@ -882,6 +882,197 @@ def complete_interview_workflow_task(
             "session_id": session_id,
             "error": str(e),
             "workflow_task_id": task_id
+        }
+
+
+# ========== TTS 프리페칭 태스크 ==========
+
+@celery_app.task(
+    bind=True,
+    name="celery_tasks.prefetch_tts_task",
+    soft_time_limit=60,
+    time_limit=90
+)
+def prefetch_tts_task(
+    self,
+    session_id: str,
+    texts: List[str]
+) -> Dict:
+    """
+    여러 텍스트의 TTS를 미리 생성 (프리페칭)
+    
+    Args:
+        session_id: 세션 ID
+        texts: TTS로 변환할 텍스트 리스트
+    
+    Returns:
+        생성된 오디오 URL 딕셔너리
+    """
+    task_id = self.request.id
+    print(f"[Task {task_id}] TTS 프리페칭 시작 - {len(texts)}개 텍스트")
+    
+    results = {}
+    import asyncio
+    
+    tts_service = get_tts_service()
+    if not tts_service:
+        return {"error": "TTS 서비스 사용 불가", "task_id": task_id}
+    
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    
+    try:
+        for i, text in enumerate(texts):
+            try:
+                audio_url = loop.run_until_complete(tts_service.speak(text))
+                results[f"text_{i}"] = {
+                    "text": text[:50] + "..." if len(text) > 50 else text,
+                    "audio_url": audio_url,
+                    "success": True
+                }
+            except Exception as e:
+                results[f"text_{i}"] = {
+                    "text": text[:50] + "..." if len(text) > 50 else text,
+                    "error": str(e),
+                    "success": False
+                }
+    finally:
+        loop.close()
+    
+    print(f"[Task {task_id}] TTS 프리페칭 완료 - 성공: {sum(1 for r in results.values() if r.get('success'))}/{len(texts)}")
+    return {
+        "session_id": session_id,
+        "results": results,
+        "task_id": task_id
+    }
+
+
+# ========== 실시간 LLM 질문 생성 태스크 ==========
+
+INTERVIEWER_PROMPT_CELERY = """당신은 IT 기업의 30년차 수석 개발자 면접관입니다.
+자연스럽고 전문적인 면접을 진행해주세요.
+질문은 명확하고 구체적으로 해주세요."""
+
+
+@celery_app.task(
+    bind=True,
+    name="celery_tasks.generate_question_task",
+    soft_time_limit=30,
+    time_limit=45,
+    max_retries=2
+)
+def generate_question_task(
+    self,
+    session_id: str,
+    user_answer: str,
+    chat_history: List[Dict],
+    question_count: int
+) -> Dict:
+    """
+    LLM을 사용하여 다음 면접 질문 생성 (비동기 태스크)
+    
+    Args:
+        session_id: 세션 ID
+        user_answer: 사용자의 이전 답변
+        chat_history: 대화 기록
+        question_count: 현재 질문 수
+    
+    Returns:
+        생성된 질문
+    """
+    task_id = self.request.id
+    print(f"[Task {task_id}] 질문 생성 시작 - Session: {session_id}")
+    
+    try:
+        llm = get_llm()
+        if not llm:
+            return {
+                "question": "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
+                "fallback": True,
+                "task_id": task_id
+            }
+        
+        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
+        
+        messages = [SystemMessage(content=INTERVIEWER_PROMPT_CELERY)]
+        
+        # 대화 기록 추가
+        for msg in chat_history[-6:]:  # 최근 6개만
+            if msg["role"] == "assistant":
+                messages.append(AIMessage(content=msg["content"]))
+            elif msg["role"] == "user":
+                messages.append(HumanMessage(content=msg["content"]))
+        
+        # 질문 생성 요청
+        question_prompt = f"""[현재 상황]
+- 진행된 질문 수: {question_count}
+- 지원자의 마지막 답변을 바탕으로 다음 질문을 생성해주세요.
+- 질문만 작성하세요."""
+        
+        messages.append(HumanMessage(content=question_prompt))
+        
+        response = llm.invoke(messages)
+        question = response.content.strip()
+        
+        print(f"[Task {task_id}] 질문 생성 완료")
+        return {
+            "question": question,
+            "session_id": session_id,
+            "task_id": task_id
+        }
+        
+    except Exception as e:
+        print(f"[Task {task_id}] 질문 생성 오류: {e}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e)
+        return {
+            "question": "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
+            "fallback": True,
+            "error": str(e),
+            "task_id": task_id
+        }
+
+
+# ========== Redis 세션 저장 태스크 ==========
+
+@celery_app.task(name="celery_tasks.save_session_to_redis_task")
+def save_session_to_redis_task(
+    session_id: str,
+    session_data: Dict
+) -> Dict:
+    """
+    세션 데이터를 Redis에 저장 (백업용)
+    
+    Args:
+        session_id: 세션 ID
+        session_data: 세션 데이터
+    
+    Returns:
+        저장 결과
+    """
+    try:
+        import redis
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        r = redis.from_url(redis_url)
+        
+        key = f"session:{session_id}"
+        r.hset(key, mapping={
+            "data": json.dumps(session_data, ensure_ascii=False, default=str),
+            "updated_at": datetime.now().isoformat()
+        })
+        r.expire(key, 86400)  # 24시간 TTL
+        
+        return {
+            "session_id": session_id,
+            "status": "saved",
+            "key": key
+        }
+        
+    except Exception as e:
+        return {
+            "session_id": session_id,
+            "status": "error",
+            "error": str(e)
         }
 
 

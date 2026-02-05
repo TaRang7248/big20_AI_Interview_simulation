@@ -33,7 +33,7 @@ sys.path.append(root_dir)
 load_dotenv()
 
 # LLM 모델 설정 (환경변수로 오버라이드 가능)
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7")) 
 
 

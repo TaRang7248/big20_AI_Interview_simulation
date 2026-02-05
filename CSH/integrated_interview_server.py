@@ -10,6 +10,7 @@ AI 모의면접 통합 시스템
 6. STAR 기법 기반 리포트 생성
 
 실행 방법:
+    터미널에 아래 명령어를 입력
     uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 """
 
@@ -23,6 +24,8 @@ from datetime import datetime
 from typing import Optional, Dict, List, Set, Any
 from collections import Counter
 import re
+from concurrent.futures import ThreadPoolExecutor
+import functools
 
 # FastAPI 및 웹 프레임워크
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File, Form
@@ -39,6 +42,11 @@ from aiortc.contrib.media import MediaBlackhole
 # 환경 설정
 from dotenv import load_dotenv
 
+# PostgreSQL 데이터베이스
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
 # 경로 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(current_dir)
@@ -48,7 +56,7 @@ sys.path.append(current_dir)
 load_dotenv()
 
 # ========== 설정 ==========
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
@@ -64,6 +72,91 @@ OAUTH_REDIRECT_BASE = os.getenv("OAUTH_REDIRECT_BASE", "http://localhost:8000")
 # 업로드 디렉토리 설정
 UPLOAD_DIR = os.path.join(current_dir, "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# ========== 비동기 처리를 위한 ThreadPoolExecutor ==========
+# LLM, RAG, DeepFace 등 CPU/IO 바운드 작업을 비블로킹으로 처리
+LLM_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="llm_worker")
+RAG_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rag_worker")
+VISION_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vision_worker")
+
+
+async def run_in_executor(executor: ThreadPoolExecutor, func, *args, **kwargs):
+    """동기 함수를 ThreadPoolExecutor에서 비동기로 실행"""
+    loop = asyncio.get_event_loop()
+    if kwargs:
+        func_with_kwargs = functools.partial(func, **kwargs)
+        return await loop.run_in_executor(executor, func_with_kwargs, *args)
+    return await loop.run_in_executor(executor, func, *args)
+
+
+async def run_llm_async(llm, messages):
+    """LLM invoke를 비동기로 실행 (이벤트 루프 블로킹 방지)"""
+    return await run_in_executor(LLM_EXECUTOR, llm.invoke, messages)
+
+
+async def run_rag_async(retriever, query):
+    """RAG retriever invoke를 비동기로 실행"""
+    return await run_in_executor(RAG_EXECUTOR, retriever.invoke, query)
+
+
+async def run_deepface_async(img, actions=None):
+    """DeepFace analyze를 비동기로 실행 (CPU 바운드 작업)"""
+    if actions is None:
+        actions = ["emotion"]
+    return await run_in_executor(
+        VISION_EXECUTOR, 
+        DeepFace.analyze, 
+        img, 
+        actions=actions, 
+        enforce_detection=False
+    )
+
+
+# ========== PostgreSQL 데이터베이스 설정 ==========
+# POSTGRES_CONNECTION_STRING 환경변수가 있으면 우선 사용
+DATABASE_URL = os.getenv("POSTGRES_CONNECTION_STRING")
+
+# 없으면 개별 환경변수로 조합
+if not DATABASE_URL:
+    POSTGRES_USER = os.getenv("POSTGRES_USER", "postgres")
+    POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
+    POSTGRES_HOST = os.getenv("POSTGRES_HOST", "localhost")
+    POSTGRES_PORT = os.getenv("POSTGRES_PORT", "5432")
+    POSTGRES_DB = os.getenv("POSTGRES_DB", "interview_db")
+    DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:{POSTGRES_PORT}/{POSTGRES_DB}"
+
+print(f"🔗 DB 연결 시도: {DATABASE_URL.replace(DATABASE_URL.split(':')[2].split('@')[0], '****')}")
+
+# DB 연결 시도
+try:
+    engine = create_engine(DATABASE_URL)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base = declarative_base()
+    
+    # 사용자 테이블 모델
+    class User(Base):
+        __tablename__ = "users"
+        
+        id = Column(Integer, primary_key=True, index=True)
+        email = Column(String(255), unique=True, nullable=False)
+        role = Column(String(20), nullable=False, default="candidate")  # candidate, recruiter
+        password_hash = Column(String(255), nullable=False)
+        created_at = Column(DateTime, default=datetime.utcnow)
+        name = Column(String(50), nullable=True)
+        birth_date = Column(String(10), nullable=True)  # DATE 타입이지만 문자열로 처리
+        gender = Column(String(10), nullable=True)
+        address = Column(String(500), nullable=True)
+    
+    # 연결 테스트
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
+    
+    DB_AVAILABLE = True
+    print("✅ PostgreSQL 데이터베이스 연결됨")
+except Exception as e:
+    DB_AVAILABLE = False
+    print(f"⚠️ PostgreSQL 데이터베이스 연결 실패: {e}")
+    print("   → 메모리 저장소를 사용합니다.")
 
 # ========== FastAPI 앱 초기화 ==========
 app = FastAPI(
@@ -117,6 +210,23 @@ except ImportError as e:
     LLM_AVAILABLE = False
     print(f"⚠️ LLM 서비스 비활성화: {e}")
 
+# LangChain Memory (선택적)
+MEMORY_AVAILABLE = False
+ConversationBufferMemory = None
+try:
+    # 최신 LangChain (v0.2+)
+    from langchain_community.chat_message_histories import ChatMessageHistory
+    MEMORY_AVAILABLE = True
+    print("✅ LangChain Memory 모듈 활성화됨 (ChatMessageHistory)")
+except ImportError:
+    try:
+        # 레거시 LangChain
+        from langchain.memory import ConversationBufferMemory
+        MEMORY_AVAILABLE = True
+        print("✅ LangChain Memory 모듈 활성화됨 (ConversationBufferMemory)")
+    except ImportError:
+        print("⚠️ LangChain Memory 모듈 비활성화 (수동 대화 기록 사용)")
+
 # 감정 분석
 try:
     from deepface import DeepFace
@@ -148,7 +258,10 @@ try:
         generate_tts_task,
         process_resume_task,
         retrieve_resume_context_task,
-        complete_interview_workflow_task
+        complete_interview_workflow_task,
+        prefetch_tts_task,
+        generate_question_task,
+        save_session_to_redis_task
     )
     from celery.result import AsyncResult
     CELERY_AVAILABLE = True
@@ -157,11 +270,169 @@ except ImportError as e:
     CELERY_AVAILABLE = False
     print(f"⚠️ Celery 서비스 비활성화: {e}")
 
+# D-ID AI 아바타 서비스
+try:
+    from did_avatar_service import create_did_router, is_did_available
+    did_router = create_did_router()
+    app.include_router(did_router)
+    DID_AVAILABLE = is_did_available()
+    if DID_AVAILABLE:
+        print("✅ D-ID AI 아바타 서비스 활성화됨")
+    else:
+        print("⚠️ D-ID API 키가 설정되지 않음 (정적 이미지 사용)")
+except ImportError as e:
+    DID_AVAILABLE = False
+    print(f"⚠️ D-ID 서비스 비활성화: {e}")
+
+# 코딩 테스트 서비스
+try:
+    from code_execution_service import create_coding_router, CODING_PROBLEMS
+    coding_router = create_coding_router()
+    app.include_router(coding_router)
+    CODING_TEST_AVAILABLE = True
+    print(f"✅ 코딩 테스트 서비스 활성화됨 (문제 수: {len(CODING_PROBLEMS)})")
+except ImportError as e:
+    CODING_TEST_AVAILABLE = False
+    print(f"⚠️ 코딩 테스트 서비스 비활성화: {e}")
+
+# 화이트보드 아키텍처 서비스
+try:
+    from whiteboard_service import router as whiteboard_router
+    app.include_router(whiteboard_router)
+    WHITEBOARD_AVAILABLE = True
+    print("✅ 화이트보드 아키텍처 서비스 활성화됨")
+except ImportError as e:
+    WHITEBOARD_AVAILABLE = False
+    print(f"⚠️ 화이트보드 서비스 비활성화: {e}")
+
+# Deepgram STT 서비스
+try:
+    from deepgram import DeepgramClient
+    from deepgram.core.events import EventType
+    DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
+    if DEEPGRAM_API_KEY:
+        deepgram_client = DeepgramClient(api_key=DEEPGRAM_API_KEY)
+        DEEPGRAM_AVAILABLE = True
+        print("✅ Deepgram STT 서비스 활성화됨")
+    else:
+        DEEPGRAM_AVAILABLE = False
+        deepgram_client = None
+        print("⚠️ Deepgram API 키가 설정되지 않음")
+except ImportError as e:
+    DEEPGRAM_AVAILABLE = False
+    deepgram_client = None
+    EventType = None
+    print(f"⚠️ Deepgram STT 서비스 비활성화: {e}")
+
 
 # ========== 전역 상태 관리 ==========
 
-# 회원 정보 저장소 (실제 운영에서는 DB 사용)
+# 회원 정보 저장소 (DB 연결 실패 시 폴백용)
 users_db: Dict[str, Dict] = {}
+
+# DB 헬퍼 함수
+def get_db():
+    """DB 세션 생성"""
+    if not DB_AVAILABLE:
+        return None
+    db = SessionLocal()
+    try:
+        return db
+    except:
+        db.close()
+        return None
+
+def get_user_by_email(email: str) -> Optional[Dict]:
+    """이메일로 사용자 조회"""
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                user = db.query(User).filter(User.email == email).first()
+                if user:
+                    return {
+                        "id": user.id,
+                        "user_id": str(user.id),  # id를 user_id로 사용
+                        "email": user.email,
+                        "password_hash": user.password_hash,
+                        "name": user.name,
+                        "birth_date": str(user.birth_date) if user.birth_date else None,
+                        "address": user.address,
+                        "gender": user.gender,
+                        "role": user.role,
+                        "created_at": user.created_at.isoformat() if user.created_at else None
+                    }
+            finally:
+                db.close()
+    # 폴백: 메모리 저장소
+    return users_db.get(email)
+
+def create_user(user_data: Dict) -> bool:
+    """사용자 생성"""
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                new_user = User(
+                    email=user_data["email"],
+                    password_hash=user_data["password_hash"],
+                    name=user_data.get("name"),
+                    birth_date=user_data.get("birth_date"),
+                    address=user_data.get("address"),
+                    gender=user_data.get("gender"),
+                    role=user_data.get("role", "candidate")  # 기본값: candidate
+                )
+                db.add(new_user)
+                db.commit()
+                db.refresh(new_user)  # id 가져오기
+                print(f"✅ DB에 사용자 저장됨: {user_data['email']} (ID: {new_user.id})")
+                return True
+            except Exception as e:
+                db.rollback()
+                print(f"❌ DB 저장 실패: {e}")
+            finally:
+                db.close()
+    # 폴백: 메모리 저장소
+    users_db[user_data["email"]] = user_data
+    print(f"⚠️ 메모리에 사용자 저장됨: {user_data['email']}")
+    return True
+
+def update_user(email: str, update_data: Dict) -> bool:
+    """사용자 정보 수정"""
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                user = db.query(User).filter(User.email == email).first()
+                if user:
+                    if "name" in update_data:
+                        user.name = update_data["name"]
+                    if "birth_date" in update_data:
+                        user.birth_date = update_data["birth_date"]
+                    if "address" in update_data:
+                        user.address = update_data["address"]
+                    if "gender" in update_data:
+                        user.gender = update_data["gender"]
+                    if "password_hash" in update_data:
+                        user.password_hash = update_data["password_hash"]
+                    db.commit()
+                    print(f"✅ DB에서 사용자 정보 수정됨: {email}")
+                    return True
+                else:
+                    print(f"❌ 사용자를 찾을 수 없음: {email}")
+                    return False
+            except Exception as e:
+                db.rollback()
+                print(f"❌ DB 수정 실패: {e}")
+                return False
+            finally:
+                db.close()
+    # 폴백: 메모리 저장소
+    if email in users_db:
+        users_db[email].update(update_data)
+        print(f"⚠️ 메모리에서 사용자 정보 수정됨: {email}")
+        return True
+    return False
 
 class InterviewState:
     """면접 세션 상태 관리"""
@@ -171,6 +442,12 @@ class InterviewState:
         self.pc_sessions: Dict[RTCPeerConnection, str] = {}
         self.last_emotion: Optional[Dict] = None
         self.emotion_lock = asyncio.Lock()
+        # WebSocket 연결 관리 (session_id -> List[WebSocket])
+        self.websocket_connections: Dict[str, List[WebSocket]] = {}
+        # STT 세션 관리 (session_id -> deepgram_connection)
+        self.stt_connections: Dict[str, Any] = {}
+        # 오디오 버퍼 (session_id -> asyncio.Queue)
+        self.audio_queues: Dict[str, asyncio.Queue] = {}
         
     def create_session(self, session_id: str = None) -> str:
         """새 면접 세션 생성"""
@@ -189,7 +466,14 @@ class InterviewState:
             "resume_uploaded": False,
             "resume_path": None,
             "resume_filename": None,
-            "retriever": None  # 세션별 RAG retriever
+            "retriever": None,  # 세션별 RAG retriever
+            # LangChain Memory
+            "memory": None,  # ConversationBufferMemory 인스턴스
+            # 꼬리질문 추적
+            "current_topic": None,  # 현재 질문 주제
+            "topic_question_count": 0,  # 해당 주제에서 진행된 질문 수
+            "topic_history": [],  # 주제별 질문 이력 [{"topic": str, "count": int}]
+            "follow_up_mode": False  # 꼬리질문 모드 여부
         }
         return session_id
     
@@ -203,11 +487,378 @@ class InterviewState:
 state = InterviewState()
 
 
+# ========== 실시간 개입 시스템 (VAD + Turn-taking) ==========
+class InterviewInterventionManager:
+    """
+    실시간 면접 개입 관리자
+    - VAD(Voice Activity Detection) 기반 발화 감지
+    - Turn-taking 알고리즘으로 적절한 개입 타이밍 결정
+    - 답변 길이/시간 초과, 주제 이탈 감지
+    """
+    
+    # 개입 임계값 설정
+    MAX_ANSWER_TIME_SECONDS = 120  # 최대 답변 시간 (2분)
+    MAX_ANSWER_LENGTH = 800  # 최대 답변 길이 (글자 수)
+    SOFT_WARNING_TIME = 90  # 부드러운 경고 시간 (1분 30초)
+    SOFT_WARNING_LENGTH = 600  # 부드러운 경고 길이
+    SILENCE_THRESHOLD_MS = 2000  # 침묵 감지 임계값 (2초)
+    TOPIC_RELEVANCE_THRESHOLD = 0.3  # 주제 관련성 임계값
+    
+    # 개입 메시지 템플릿
+    INTERVENTION_MESSAGES = {
+        "soft_time_warning": [
+            "네, 잘 듣고 있습니다. 핵심 내용을 정리해서 마무리해 주시겠어요?",
+            "좋은 경험이네요. 시간 관계상 결론 부분을 말씀해 주시겠어요?",
+            "알겠습니다. 간단히 정리해서 마무리해 주세요."
+        ],
+        "hard_time_limit": [
+            "네, 충분히 이해했습니다. 다음 질문으로 넘어가겠습니다.",
+            "좋습니다. 시간 관계상 다음 질문을 드리겠습니다.",
+            "감사합니다. 이제 다음 주제로 넘어가 볼까요?"
+        ],
+        "off_topic": [
+            "좋은 말씀이시네요. 다만 질문과 조금 다른 방향인 것 같은데, 원래 질문으로 돌아가 볼까요?",
+            "흥미로운 내용이지만, 질문에 좀 더 집중해서 답변해 주시겠어요?",
+            "네, 이해합니다. 원래 질문의 핵심에 대해 답변 부탁드립니다."
+        ],
+        "encourage_more": [
+            "조금 더 구체적으로 설명해 주시겠어요?",
+            "예시를 들어 설명해 주시면 좋겠습니다.",
+            "그 부분에 대해 좀 더 자세히 말씀해 주세요."
+        ],
+        "silence_detected": [
+            "생각 정리가 필요하시면 잠시 시간을 드릴게요.",
+            "천천히 생각하셔도 됩니다.",
+            "준비가 되시면 말씀해 주세요."
+        ]
+    }
+    
+    def __init__(self):
+        self.session_states: Dict[str, Dict] = {}  # 세션별 VAD 상태
+        self.intervention_history: Dict[str, List] = {}  # 개입 이력
+    
+    def init_session(self, session_id: str):
+        """세션별 개입 상태 초기화"""
+        self.session_states[session_id] = {
+            "answer_start_time": None,
+            "current_answer_text": "",
+            "is_speaking": False,
+            "last_speech_time": None,
+            "silence_duration_ms": 0,
+            "intervention_count": 0,
+            "soft_warning_given": False,
+            "current_question_keywords": [],
+            "vad_buffer": [],  # VAD 신호 버퍼
+            "turn_state": "ai_speaking"  # ai_speaking, user_speaking, silence
+        }
+        self.intervention_history[session_id] = []
+        print(f"🎙️ [Intervention] 세션 {session_id[:8]}... 개입 시스템 초기화")
+    
+    def start_user_turn(self, session_id: str, question_keywords: List[str] = None):
+        """사용자 발화 시작 (질문 후)"""
+        if session_id not in self.session_states:
+            self.init_session(session_id)
+        
+        state = self.session_states[session_id]
+        state["answer_start_time"] = datetime.now()
+        state["current_answer_text"] = ""
+        state["is_speaking"] = True
+        state["last_speech_time"] = datetime.now()
+        state["silence_duration_ms"] = 0
+        state["soft_warning_given"] = False
+        state["turn_state"] = "user_speaking"
+        
+        if question_keywords:
+            state["current_question_keywords"] = question_keywords
+        
+        print(f"🎤 [VAD] 세션 {session_id[:8]}... 사용자 발화 시작")
+    
+    def update_vad_signal(self, session_id: str, is_speech: bool, audio_level: float = 0.0):
+        """VAD 신호 업데이트 (실시간)"""
+        if session_id not in self.session_states:
+            return None
+        
+        state = self.session_states[session_id]
+        current_time = datetime.now()
+        
+        # VAD 버퍼에 신호 추가
+        state["vad_buffer"].append({
+            "timestamp": current_time,
+            "is_speech": is_speech,
+            "audio_level": audio_level
+        })
+        
+        # 버퍼 크기 제한 (최근 100개)
+        if len(state["vad_buffer"]) > 100:
+            state["vad_buffer"] = state["vad_buffer"][-100:]
+        
+        if is_speech:
+            state["is_speaking"] = True
+            state["last_speech_time"] = current_time
+            state["silence_duration_ms"] = 0
+            state["turn_state"] = "user_speaking"
+        else:
+            # 침묵 시간 계산
+            if state["last_speech_time"]:
+                silence_ms = (current_time - state["last_speech_time"]).total_seconds() * 1000
+                state["silence_duration_ms"] = silence_ms
+                
+                if silence_ms > self.SILENCE_THRESHOLD_MS:
+                    state["turn_state"] = "silence"
+                    state["is_speaking"] = False
+        
+        return state["turn_state"]
+    
+    def update_answer_text(self, session_id: str, text: str):
+        """답변 텍스트 업데이트 (STT 결과)"""
+        if session_id not in self.session_states:
+            return
+        
+        self.session_states[session_id]["current_answer_text"] = text
+    
+    def check_intervention_needed(self, session_id: str, answer_text: str = None) -> Optional[Dict]:
+        """개입이 필요한지 확인"""
+        if session_id not in self.session_states:
+            return None
+        
+        state = self.session_states[session_id]
+        
+        if answer_text:
+            state["current_answer_text"] = answer_text
+        
+        answer_length = len(state["current_answer_text"])
+        elapsed_seconds = 0
+        
+        if state["answer_start_time"]:
+            elapsed_seconds = (datetime.now() - state["answer_start_time"]).total_seconds()
+        
+        intervention = None
+        
+        # 1. 강제 시간 제한 초과
+        if elapsed_seconds >= self.MAX_ANSWER_TIME_SECONDS:
+            intervention = {
+                "type": "hard_time_limit",
+                "reason": f"시간 초과 ({elapsed_seconds:.0f}초)",
+                "message": self._get_random_message("hard_time_limit"),
+                "action": "force_next_question",
+                "priority": "high"
+            }
+        
+        # 2. 소프트 시간 경고
+        elif elapsed_seconds >= self.SOFT_WARNING_TIME and not state["soft_warning_given"]:
+            intervention = {
+                "type": "soft_time_warning",
+                "reason": f"시간 경고 ({elapsed_seconds:.0f}초)",
+                "message": self._get_random_message("soft_time_warning"),
+                "action": "warn",
+                "priority": "medium"
+            }
+            state["soft_warning_given"] = True
+        
+        # 3. 답변 길이 초과
+        elif answer_length >= self.MAX_ANSWER_LENGTH:
+            intervention = {
+                "type": "hard_time_limit",
+                "reason": f"답변 길이 초과 ({answer_length}자)",
+                "message": self._get_random_message("hard_time_limit"),
+                "action": "force_next_question",
+                "priority": "high"
+            }
+        
+        # 4. 소프트 길이 경고
+        elif answer_length >= self.SOFT_WARNING_LENGTH and not state["soft_warning_given"]:
+            intervention = {
+                "type": "soft_time_warning",
+                "reason": f"답변 길이 경고 ({answer_length}자)",
+                "message": self._get_random_message("soft_time_warning"),
+                "action": "warn",
+                "priority": "medium"
+            }
+            state["soft_warning_given"] = True
+        
+        # 5. 주제 이탈 감지
+        if intervention is None and answer_length > 100:
+            relevance = self._check_topic_relevance(
+                state["current_answer_text"],
+                state["current_question_keywords"]
+            )
+            if relevance < self.TOPIC_RELEVANCE_THRESHOLD:
+                intervention = {
+                    "type": "off_topic",
+                    "reason": f"주제 관련성 낮음 ({relevance:.2f})",
+                    "message": self._get_random_message("off_topic"),
+                    "action": "redirect",
+                    "priority": "medium"
+                }
+        
+        # 6. 장시간 침묵 감지
+        if intervention is None and state["silence_duration_ms"] > 5000:  # 5초 이상 침묵
+            intervention = {
+                "type": "silence_detected",
+                "reason": f"침묵 감지 ({state['silence_duration_ms']/1000:.1f}초)",
+                "message": self._get_random_message("silence_detected"),
+                "action": "encourage",
+                "priority": "low"
+            }
+        
+        if intervention:
+            state["intervention_count"] += 1
+            self.intervention_history[session_id].append({
+                **intervention,
+                "timestamp": datetime.now().isoformat(),
+                "elapsed_seconds": elapsed_seconds,
+                "answer_length": answer_length
+            })
+            print(f"⚠️ [Intervention] 세션 {session_id[:8]}... {intervention['type']}: {intervention['reason']}")
+        
+        return intervention
+    
+    def _check_topic_relevance(self, answer: str, question_keywords: List[str]) -> float:
+        """주제 관련성 점수 계산 (0.0 ~ 1.0)"""
+        if not question_keywords:
+            return 1.0  # 키워드가 없으면 관련성 체크 스킵
+        
+        answer_lower = answer.lower()
+        matches = sum(1 for kw in question_keywords if kw.lower() in answer_lower)
+        
+        # 기본 관련성 점수
+        keyword_score = matches / len(question_keywords) if question_keywords else 0
+        
+        # 일반적인 면접 관련 키워드 체크 (보너스)
+        general_keywords = ["경험", "프로젝트", "개발", "팀", "기술", "결과", "성과", "학습"]
+        general_matches = sum(1 for kw in general_keywords if kw in answer_lower)
+        general_score = min(general_matches * 0.1, 0.3)
+        
+        return min(keyword_score + general_score, 1.0)
+    
+    def _get_random_message(self, message_type: str) -> str:
+        """랜덤 개입 메시지 선택"""
+        import random
+        messages = self.INTERVENTION_MESSAGES.get(message_type, [])
+        return random.choice(messages) if messages else ""
+    
+    def extract_question_keywords(self, question: str) -> List[str]:
+        """질문에서 키워드 추출"""
+        # 불용어 목록
+        stopwords = ["무엇", "어떻게", "왜", "있", "하", "되", "을", "를", "이", "가", "은", "는",
+                     "에", "서", "로", "으로", "의", "와", "과", "도", "만", "까지", "부터",
+                     "말씀", "해주", "주세요", "싶", "있나요", "인가요", "대해", "관해"]
+        
+        # 한글 단어 추출
+        import re
+        words = re.findall(r'[가-힣]{2,}', question)
+        
+        # 불용어 제거
+        keywords = [w for w in words if w not in stopwords and len(w) >= 2]
+        
+        # 기술 키워드 우선
+        tech_keywords = ["python", "java", "react", "api", "서버", "데이터", "알고리즘",
+                         "프로젝트", "개발", "설계", "배포", "테스트", "협업"]
+        
+        return keywords[:10]  # 상위 10개
+    
+    def get_turn_taking_signal(self, session_id: str) -> Dict:
+        """Turn-taking 신호 반환"""
+        if session_id not in self.session_states:
+            return {"can_interrupt": False, "turn_state": "unknown"}
+        
+        state = self.session_states[session_id]
+        
+        # Turn-taking 결정 로직
+        can_interrupt = False
+        interrupt_reason = ""
+        
+        # 1. 긴 침묵 후 개입 가능
+        if state["turn_state"] == "silence" and state["silence_duration_ms"] > 3000:
+            can_interrupt = True
+            interrupt_reason = "silence_pause"
+        
+        # 2. 시간/길이 초과 시 개입 가능
+        if state["answer_start_time"]:
+            elapsed = (datetime.now() - state["answer_start_time"]).total_seconds()
+            if elapsed > self.SOFT_WARNING_TIME:
+                can_interrupt = True
+                interrupt_reason = "time_exceeded"
+        
+        # 3. VAD 버퍼 분석 - 발화 패턴 감지
+        recent_vad = state["vad_buffer"][-20:] if state["vad_buffer"] else []
+        if len(recent_vad) >= 10:
+            # 최근 발화 비율 계산
+            speech_ratio = sum(1 for v in recent_vad if v["is_speech"]) / len(recent_vad)
+            # 발화가 줄어들고 있으면 (문장 끝) 개입 가능
+            if speech_ratio < 0.3 and state["silence_duration_ms"] > 1000:
+                can_interrupt = True
+                interrupt_reason = "speech_ending"
+        
+        return {
+            "can_interrupt": can_interrupt,
+            "interrupt_reason": interrupt_reason,
+            "turn_state": state["turn_state"],
+            "silence_duration_ms": state["silence_duration_ms"],
+            "is_speaking": state["is_speaking"]
+        }
+    
+    def end_user_turn(self, session_id: str) -> Dict:
+        """사용자 발화 종료"""
+        if session_id not in self.session_states:
+            return {}
+        
+        state = self.session_states[session_id]
+        
+        # 발화 통계 계산
+        elapsed_seconds = 0
+        if state["answer_start_time"]:
+            elapsed_seconds = (datetime.now() - state["answer_start_time"]).total_seconds()
+        
+        stats = {
+            "total_time_seconds": elapsed_seconds,
+            "answer_length": len(state["current_answer_text"]),
+            "intervention_count": state["intervention_count"],
+            "soft_warning_given": state["soft_warning_given"]
+        }
+        
+        # 상태 리셋
+        state["turn_state"] = "ai_speaking"
+        state["is_speaking"] = False
+        
+        print(f"🎙️ [VAD] 세션 {session_id[:8]}... 사용자 발화 종료 ({elapsed_seconds:.1f}초, {stats['answer_length']}자)")
+        
+        return stats
+    
+    def get_session_stats(self, session_id: str) -> Dict:
+        """세션 개입 통계 반환"""
+        return {
+            "intervention_history": self.intervention_history.get(session_id, []),
+            "total_interventions": len(self.intervention_history.get(session_id, [])),
+            "state": self.session_states.get(session_id, {})
+        }
+
+
+# 개입 관리자 인스턴스
+intervention_manager = InterviewInterventionManager()
+
+
 # ========== LLM 면접관 서비스 ==========
 class AIInterviewer:
-    """AI 면접관 - 질문 은행 기반 질문 + LLM 기반 답변 분석/평가"""
+    """AI 면접관 - LangChain LLM 기반 동적 질문 생성 + 답변 분석/평가"""
     
-    # LLM 분석용 프롬프트 (질문 생성이 아닌 답변 평가용)
+    # 면접관 시스템 프롬프트 (동적 질문 생성용)
+    INTERVIEWER_PROMPT = """당신은 IT 기업의 30년차 수석 개발자 면접관입니다.
+지원자의 이력서 내용과 답변을 바탕으로 기술 스택과 경험에 대해 심도 있는 질문을 던지세요.
+제공된 '참고용 이력서 내용'을 적극 활용하여 구체적인 질문을 하세요.
+
+[중요 규칙]
+1. 답변이 부실하면 구체적인 예시를 요구하거나 꼬리 질문을 하세요.
+2. 꼬리 질문은 주제당 최대 2번까지만 허용합니다. 
+3. 동일한 기술적 주제에 대해 2번의 답변을 들었다면, "알겠습니다. 다음은..."이라며 주제를 전환하세요.
+4. 질문은 한 번에 하나만 하세요.
+5. 면접은 총 5개의 질문으로 진행됩니다.
+6. 현재 질문 번호를 인지하고, 5번째 질문에서는 마무리 질문을 하세요.
+
+질문을 할 때 너무 공격적이지 않게, 정중하지만 날카로운 태도를 유지하세요.
+면접은 자기소개로 시작합니다."""
+
+    # LLM 분석용 프롬프트 (답변 평가용)
     EVALUATION_PROMPT = """당신은 IT 기업의 30년차 수석 개발자 면접관입니다.
 지원자의 답변을 분석하고 평가해주세요.
 
@@ -233,52 +884,12 @@ class AIInterviewer:
     "brief_feedback": "한 줄 피드백"
 }}"""
 
-    # 질문 은행 - 카테고리별 질문 목록
-    QUESTION_BANK = {
-        "intro": [
-            "안녕하세요. 오늘 면접을 진행하게 된 면접관입니다. 먼저 간단한 자기소개를 부탁드립니다.",
-        ],
-        "motivation": [
-            "지원하신 포지션에 관심을 갖게 된 계기가 무엇인가요?",
-            "우리 회사에 지원하게 된 이유를 말씀해주세요.",
-        ],
-        "strength": [
-            "본인의 가장 큰 기술적 강점은 무엇이라고 생각하시나요?",
-            "다른 지원자와 비교했을 때 본인만의 차별점은 무엇인가요?",
-        ],
-        "project": [
-            "가장 도전적이었던 프로젝트 경험에 대해 말씀해주세요.",
-            "최근에 진행한 프로젝트에서 맡았던 역할과 기여도를 설명해주세요.",
-            "프로젝트 진행 중 가장 어려웠던 기술적 문제와 해결 과정을 설명해주세요.",
-        ],
-        "teamwork": [
-            "팀 프로젝트에서 갈등이 발생했을 때 어떻게 해결하셨나요?",
-            "팀원과의 협업 경험 중 가장 기억에 남는 것은 무엇인가요?",
-        ],
-        "technical": [
-            "사용하시는 주요 기술 스택에 대해 설명해주세요.",
-            "최근에 학습하고 있는 기술이 있다면 무엇인가요?",
-            "코드 품질을 위해 어떤 노력을 하시나요?",
-        ],
-        "problem_solving": [
-            "예상치 못한 버그나 장애가 발생했을 때 어떻게 대처하시나요?",
-            "기술적으로 가장 어려웠던 문제와 해결 방법을 설명해주세요.",
-        ],
-        "growth": [
-            "앞으로의 커리어 목표는 무엇인가요?",
-            "5년 후 어떤 개발자가 되어있을 것 같나요?",
-        ],
-        "closing": [
-            "마지막으로 저희 회사에 궁금한 점이 있으신가요?",
-        ]
-    }
-    
-    # 면접 진행 순서
-    INTERVIEW_FLOW = ["intro", "motivation", "strength", "project", "teamwork", 
-                       "technical", "problem_solving", "growth", "closing"]
+    # 최대 질문 개수
+    MAX_QUESTIONS = 5
 
     def __init__(self):
         self.llm = None
+        self.question_llm = None  # 질문 생성용 LLM (높은 temperature)
         self.rag = None
         self.retriever = None
         self.tts_service = None
@@ -287,14 +898,20 @@ class AIInterviewer:
     
     def _init_services(self):
         """서비스 초기화"""
-        # LLM 초기화 (평가/분석용)
+        # LLM 초기화
         if LLM_AVAILABLE:
             try:
+                # 평가용 LLM (낮은 temperature)
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL, 
-                    temperature=0.3  # 평가는 낮은 temperature
+                    temperature=0.3
                 )
-                print(f"✅ LLM 초기화 완료 (평가용): {DEFAULT_LLM_MODEL}")
+                # 질문 생성용 LLM (높은 temperature)
+                self.question_llm = ChatOllama(
+                    model=DEFAULT_LLM_MODEL, 
+                    temperature=DEFAULT_LLM_TEMPERATURE
+                )
+                print(f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}")
             except Exception as e:
                 print(f"❌ LLM 초기화 실패: {e}")
         
@@ -317,40 +934,283 @@ class AIInterviewer:
             except Exception as e:
                 print(f"⚠️ TTS 초기화 실패: {e}")
     
+    def init_session_memory(self, session_id: str):
+        """세션별 대화 기록 메모리 초기화 (수동 관리 방식)"""
+        session = state.get_session(session_id)
+        if not session:
+            return None
+        
+        # 이미 메모리가 있으면 반환
+        if session.get("memory"):
+            return session["memory"]
+        
+        try:
+            # 수동 대화 기록 관리 (LangChain 버전 무관)
+            memory = {
+                "messages": [],  # [HumanMessage, AIMessage, ...]
+                "summary": ""    # 요약 (나중에 사용)
+            }
+            
+            # 세션에 저장
+            state.update_session(session_id, {"memory": memory})
+            print(f"✅ 세션 {session_id[:8]}... Memory 초기화 완료")
+            return memory
+        except Exception as e:
+            print(f"⚠️ Memory 초기화 실패: {e}")
+            return None
+    
+    def save_to_memory(self, session_id: str, question: str, answer: str):
+        """대화를 메모리에 저장"""
+        session = state.get_session(session_id)
+        if not session or not session.get("memory"):
+            return
+        
+        memory = session["memory"]
+        if isinstance(memory, dict) and "messages" in memory:
+            memory["messages"].append(AIMessage(content=question))
+            memory["messages"].append(HumanMessage(content=answer))
+    
+    def get_memory_messages(self, session_id: str) -> list:
+        """메모리에서 대화 기록 가져오기"""
+        session = state.get_session(session_id)
+        if not session or not session.get("memory"):
+            return []
+        
+        memory = session["memory"]
+        if isinstance(memory, dict) and "messages" in memory:
+            return memory["messages"]
+        return []
+    
+    def detect_topic_from_answer(self, answer: str) -> str:
+        """답변에서 주제를 추출 (간단한 키워드 기반)"""
+        topic_keywords = {
+            "project": ["프로젝트", "개발", "구현", "만들", "제작"],
+            "technical": ["기술", "스택", "언어", "프레임워크", "도구", "python", "java", "react"],
+            "experience": ["경험", "경력", "회사", "팀", "업무"],
+            "problem_solving": ["문제", "해결", "버그", "오류", "이슈", "장애"],
+            "teamwork": ["팀", "협업", "동료", "커뮤니케이션", "갈등"],
+            "motivation": ["지원", "이유", "동기", "관심", "목표"],
+            "growth": ["성장", "발전", "학습", "공부", "목표", "계획"]
+        }
+        
+        answer_lower = answer.lower()
+        topic_scores = {}
+        
+        for topic, keywords in topic_keywords.items():
+            score = sum(1 for kw in keywords if kw in answer_lower)
+            if score > 0:
+                topic_scores[topic] = score
+        
+        if topic_scores:
+            return max(topic_scores, key=topic_scores.get)
+        return "general"
+    
+    def should_follow_up(self, session_id: str, answer: str) -> tuple[bool, str]:
+        """꼬리질문이 필요한지 판단 (답변 품질 + 주제 추적)"""
+        session = state.get_session(session_id)
+        if not session:
+            return False, ""
+        
+        current_topic = session.get("current_topic")
+        topic_count = session.get("topic_question_count", 0)
+        
+        # 답변 품질 분석 (간단한 휴리스틱)
+        answer_length = len(answer)
+        has_specifics = any(word in answer for word in ["예를 들어", "구체적으로", "실제로", "결과적으로", "%", "개월", "명"])
+        
+        # 꼬리질문 필요 여부 결정
+        needs_follow_up = False
+        follow_up_reason = ""
+        
+        # 1. 답변이 너무 짧은 경우
+        if answer_length < 50:
+            needs_follow_up = True
+            follow_up_reason = "답변이 짧음 - 구체적인 예시 요청"
+        # 2. 구체적인 내용이 없는 경우 (길이는 되지만 추상적)
+        elif answer_length < 150 and not has_specifics:
+            needs_follow_up = True
+            follow_up_reason = "구체성 부족 - 상세 설명 요청"
+        
+        # 3. 같은 주제로 2번 이상 질문했으면 꼬리질문 중단
+        if topic_count >= 2:
+            needs_follow_up = False
+            follow_up_reason = "주제 전환 필요"
+        
+        return needs_follow_up, follow_up_reason
+    
+    def update_topic_tracking(self, session_id: str, answer: str, is_follow_up: bool):
+        """주제 추적 정보 업데이트"""
+        session = state.get_session(session_id)
+        if not session:
+            return
+        
+        detected_topic = self.detect_topic_from_answer(answer)
+        current_topic = session.get("current_topic")
+        topic_count = session.get("topic_question_count", 0)
+        topic_history = session.get("topic_history", [])
+        
+        if is_follow_up:
+            # 꼬리질문: 같은 주제 카운트 증가
+            state.update_session(session_id, {
+                "topic_question_count": topic_count + 1,
+                "follow_up_mode": True
+            })
+        else:
+            # 새 질문: 주제 전환
+            if current_topic:
+                topic_history.append({
+                    "topic": current_topic,
+                    "count": topic_count
+                })
+            
+            state.update_session(session_id, {
+                "current_topic": detected_topic,
+                "topic_question_count": 1,
+                "topic_history": topic_history,
+                "follow_up_mode": False
+            })
+    
     def get_initial_greeting(self) -> str:
         """초기 인사말 반환"""
-        return self.QUESTION_BANK["intro"][0]
+        return "안녕하세요. 오늘 면접을 진행하게 된 면접관입니다. 먼저 간단한 자기소개를 부탁드립니다."
     
-    def get_next_question(self, session_id: str) -> str:
-        """질문 은행에서 다음 질문 가져오기"""
+    async def generate_llm_question(self, session_id: str, user_answer: str) -> str:
+        """LLM을 사용하여 다음 질문 생성 (Memory + 꼬리질문 추적)"""
         session = state.get_session(session_id)
         if not session:
             return self.get_initial_greeting()
         
-        current_idx = session.get("current_question_idx", 0)
-        flow_idx = session.get("flow_idx", 0)
+        question_count = session.get("question_count", 1)
         
-        # 면접 순서에 따라 질문 선택
-        if flow_idx >= len(self.INTERVIEW_FLOW):
-            return "면접이 종료되었습니다. 수고하셨습니다. 리포트 버튼을 눌러 결과를 확인해보세요."
+        # 최대 질문 수 도달 시 면접 종료 + 백그라운드 워크플로우 시작
+        if question_count >= self.MAX_QUESTIONS:
+            # Celery 백그라운드 워크플로우 시작 (리포트 생성 등)
+            asyncio.create_task(self.start_interview_completion_workflow(session_id))
+            return "면접이 종료되었습니다. 수고하셨습니다. 결과 보고서를 확인해주세요."
         
-        category = self.INTERVIEW_FLOW[flow_idx]
-        questions = self.QUESTION_BANK.get(category, [])
+        # LLM이 없으면 기본 질문 반환
+        if not self.question_llm:
+            fallback_questions = [
+                "지원하신 포지션에 관심을 갖게 된 계기가 무엇인가요?",
+                "가장 도전적이었던 프로젝트 경험에 대해 말씀해주세요.",
+                "사용하시는 주요 기술 스택에 대해 설명해주세요.",
+                "앞으로의 커리어 목표는 무엇인가요?",
+                "마지막으로 저희 회사에 궁금한 점이 있으신가요?"
+            ]
+            return fallback_questions[min(question_count, len(fallback_questions) - 1)]
         
-        if not questions:
-            return "다음 질문을 준비 중입니다..."
-        
-        # 해당 카테고리에서 질문 선택 (순환)
-        question = questions[current_idx % len(questions)]
-        
-        # 다음 카테고리로 이동
-        state.update_session(session_id, {
-            "flow_idx": flow_idx + 1,
-            "current_question_idx": 0,
-            "current_category": category
-        })
-        
-        return question
+        try:
+            # ========== 1. 세션 Memory 초기화/활용 ==========
+            memory = self.init_session_memory(session_id)
+            
+            # Memory에 현재 대화 저장 (있으면)
+            if memory and user_answer:
+                # 마지막 질문 가져오기
+                chat_history = session.get("chat_history", [])
+                last_question = ""
+                for msg in reversed(chat_history):
+                    if msg["role"] == "assistant":
+                        last_question = msg["content"]
+                        break
+                
+                if last_question:
+                    self.save_to_memory(session_id, last_question, user_answer)
+            
+            # ========== 2. 꼬리질문 필요 여부 판단 ==========
+            needs_follow_up, follow_up_reason = self.should_follow_up(session_id, user_answer)
+            current_topic = session.get("current_topic", "general")
+            topic_count = session.get("topic_question_count", 0)
+            
+            # 꼬리질문 상태 로깅
+            print(f"📊 [Session {session_id[:8]}] 주제: {current_topic}, 주제내 질문수: {topic_count}, 꼬리질문 필요: {needs_follow_up} ({follow_up_reason})")
+            
+            # ========== 3. RAG 컨텍스트 가져오기 (세션별 retriever 우선) - 비동기 ==========
+            resume_context = ""
+            session_retriever = session.get("retriever") or self.retriever
+            if session_retriever and user_answer:
+                try:
+                    # ThreadPoolExecutor로 블로킹 RAG 검색을 비동기로 실행
+                    docs = await run_rag_async(session_retriever, user_answer)
+                    if docs:
+                        resume_context = "\n".join([d.page_content for d in docs[:3]])
+                        print(f"📚 [RAG] {len(docs)}개 문서에서 컨텍스트 추출 (비동기)")
+                except Exception as e:
+                    print(f"⚠️ RAG 검색 오류: {e}")
+            
+            # ========== 4. 대화 기록을 LangChain 메시지로 변환 ==========
+            chat_history = session.get("chat_history", [])
+            messages = [SystemMessage(content=self.INTERVIEWER_PROMPT)]
+            
+            # Memory에서 대화 기록 가져오기 (있으면)
+            memory_messages = self.get_memory_messages(session_id)
+            if memory_messages:
+                messages.extend(memory_messages)
+            else:
+                # Memory가 없으면 수동 chat_history 사용
+                for msg in chat_history:
+                    if msg["role"] == "assistant":
+                        messages.append(AIMessage(content=msg["content"]))
+                    elif msg["role"] == "user":
+                        messages.append(HumanMessage(content=msg["content"]))
+            
+            # ========== 5. 이력서 RAG 컨텍스트 추가 ==========
+            if resume_context:
+                context_msg = f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n{resume_context}\n------------------------------------------"
+                messages.append(SystemMessage(content=context_msg))
+            
+            # ========== 6. 질문 생성 프롬프트 (꼬리질문 정보 포함) ==========
+            follow_up_instruction = ""
+            if needs_follow_up and topic_count < 2:
+                follow_up_instruction = f"""
+⚠️ 지원자의 답변이 부실합니다. ({follow_up_reason})
+꼬리질문을 해주세요. 현재 주제({current_topic})에서 {topic_count}번째 질문입니다.
+더 구체적인 예시, 수치, 결과를 요청하세요."""
+            elif topic_count >= 2:
+                follow_up_instruction = """
+✅ 이 주제에서 충분히 질문했습니다. 
+"알겠습니다. 다음은..." 이라며 새로운 주제로 전환하세요."""
+            
+            question_prompt = f"""[현재 상황]
+- 진행된 질문 수: {question_count}/{self.MAX_QUESTIONS}
+- 남은 질문 수: {self.MAX_QUESTIONS - question_count}
+- 현재 주제: {current_topic}
+- 주제 내 질문 횟수: {topic_count}/2
+{follow_up_instruction}
+
+지원자의 답변을 바탕으로 다음 질문을 생성해주세요.
+{f'마지막 질문이니 마무리 질문을 해주세요.' if question_count == self.MAX_QUESTIONS - 1 else ''}
+질문만 작성하세요. 부가 설명은 필요 없습니다."""
+            
+            messages.append(HumanMessage(content=question_prompt))
+            
+            # ========== 7. LLM 호출 - 비동기 ==========
+            # ThreadPoolExecutor로 블로킹 LLM 호출을 비동기로 실행
+            response = await run_llm_async(self.question_llm, messages)
+            next_question = response.content.strip()
+            
+            # ========== 8. 주제 추적 업데이트 ==========
+            self.update_topic_tracking(session_id, user_answer, needs_follow_up)
+            
+            # 질문 카운트 증가 (꼬리질문이 아닐 때만)
+            if not needs_follow_up:
+                state.update_session(session_id, {"question_count": question_count + 1})
+            else:
+                # 꼬리질문도 카운트에 포함 (총 질문 수 제한을 위해)
+                state.update_session(session_id, {"question_count": question_count + 1})
+            
+            return next_question
+            
+        except Exception as e:
+            print(f"LLM 질문 생성 오류: {e}")
+            # 폴백 질문
+            fallback = [
+                "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
+                "구체적인 예시를 들어 설명해주실 수 있나요?",
+                "그 결과는 어땠나요?",
+                "다른 프로젝트 경험도 공유해주시겠어요?",
+                "마지막으로 하고 싶은 말씀이 있으신가요?"
+            ]
+            return fallback[min(question_count, len(fallback) - 1)]
     
     async def evaluate_answer(
         self, 
@@ -376,14 +1236,15 @@ class AIInterviewer:
             }
         
         try:
-            # RAG 컨텍스트 가져오기
+            # RAG 컨텍스트 가져오기 - 비동기
             session = state.get_session(session_id)
             resume_context = ""
             if session:
                 session_retriever = session.get("retriever") or self.retriever
                 if session_retriever:
                     try:
-                        docs = session_retriever.invoke(answer)
+                        # ThreadPoolExecutor로 블로킹 RAG 검색을 비동기로 실행
+                        docs = await run_rag_async(session_retriever, answer)
                         if docs:
                             resume_context = "\n".join([d.page_content for d in docs[:2]])
                     except Exception:
@@ -405,7 +1266,8 @@ class AIInterviewer:
 """)
             ]
             
-            response = self.llm.invoke(messages)
+            # ThreadPoolExecutor로 블로킹 LLM 호출을 비동기로 실행
+            response = await run_llm_async(self.llm, messages)
             response_text = response.content
             
             # JSON 파싱 시도
@@ -440,27 +1302,70 @@ class AIInterviewer:
         user_input: str,
         use_rag: bool = True
     ) -> str:
-        """사용자 답변을 저장하고 다음 질문 반환 (질문 은행 기반)"""
+        """사용자 답변을 저장하고 LLM으로 다음 질문 생성"""
         session = state.get_session(session_id)
         if not session:
             return "세션을 찾을 수 없습니다."
         
         # 대화 기록 업데이트
         chat_history = session.get("chat_history", [])
-        evaluations = session.get("evaluations", [])
         
-        # 현재 질문 저장 (마지막 AI 메시지)
-        last_question = ""
-        for msg in reversed(chat_history):
-            if msg["role"] == "assistant":
-                last_question = msg["content"]
-                break
+        # 특수 메시지 처리: [START] - 첫 번째 질문 반환 (자기소개)
+        if user_input == "[START]":
+            first_question = self.get_initial_greeting()
+            chat_history.append({"role": "assistant", "content": first_question})
+            state.update_session(session_id, {
+                "chat_history": chat_history,
+                "question_count": 1  # 첫 번째 질문
+            })
+            return first_question
         
+        # 특수 메시지 처리: [NEXT] - 다음 질문만 요청
+        if user_input == "[NEXT]":
+            next_question = await self.generate_llm_question(session_id, "")
+            chat_history.append({"role": "assistant", "content": next_question})
+            state.update_session(session_id, {"chat_history": chat_history})
+            return next_question
+        
+        # 일반 답변 처리
         # 사용자 답변 저장
         chat_history.append({"role": "user", "content": user_input})
+        state.update_session(session_id, {"chat_history": chat_history})
         
-        # 다음 질문 가져오기
-        next_question = self.get_next_question(session_id)
+        # LLM으로 다음 질문 생성과 백그라운드 평가를 처리
+        # 이전 질문 가져오기 (평가용)
+        previous_question = None
+        for msg in reversed(chat_history[:-1]):  # 현재 답변 제외
+            if msg["role"] == "assistant":
+                previous_question = msg["content"]
+                break
+        
+        # ========== Celery를 활용한 백그라운드 평가 ==========
+        if CELERY_AVAILABLE and previous_question:
+            # 평가를 Celery Worker로 오프로드 (비동기, 논블로킹)
+            try:
+                task = evaluate_answer_task.delay(
+                    session_id,
+                    previous_question,
+                    user_input,
+                    ""  # RAG 컨텍스트는 Worker에서 가져옴
+                )
+                # 태스크 ID 저장 (나중에 결과 조회용)
+                pending_tasks = session.get("pending_eval_tasks", [])
+                pending_tasks.append({
+                    "task_id": task.id,
+                    "question": previous_question,
+                    "answer": user_input,
+                    "submitted_at": time.time()
+                })
+                state.update_session(session_id, {"pending_eval_tasks": pending_tasks})
+                print(f"🚀 [Celery] 평가 태스크 제출됨: {task.id[:8]}...")
+            except Exception as e:
+                print(f"⚠️ Celery 태스크 제출 실패, 로컬 평가로 폴백: {e}")
+        
+        # 다음 질문 생성 (메인 스레드에서 빠르게 처리)
+        next_question = await self.generate_llm_question(session_id, user_input)
+        
         chat_history.append({"role": "assistant", "content": next_question})
         
         state.update_session(session_id, {"chat_history": chat_history})
@@ -475,6 +1380,88 @@ class AIInterviewer:
             except Exception as e:
                 print(f"TTS 오류: {e}")
         return None
+    
+    async def collect_celery_evaluations(self, session_id: str) -> List[Dict]:
+        """
+        Celery에서 완료된 평가 결과를 수집하여 세션에 저장
+        """
+        session = state.get_session(session_id)
+        if not session or not CELERY_AVAILABLE:
+            return session.get("evaluations", []) if session else []
+        
+        pending_tasks = session.get("pending_eval_tasks", [])
+        evaluations = session.get("evaluations", [])
+        still_pending = []
+        
+        for task_info in pending_tasks:
+            try:
+                from celery.result import AsyncResult
+                result = AsyncResult(task_info["task_id"])
+                
+                if result.ready():
+                    if result.successful():
+                        eval_result = result.get(timeout=1)
+                        evaluations.append({
+                            "question": task_info["question"],
+                            "answer": task_info["answer"],
+                            **eval_result
+                        })
+                        print(f"✅ [Celery] 평가 완료 수집: {task_info['task_id'][:8]}...")
+                    else:
+                        print(f"❌ [Celery] 평가 실패: {task_info['task_id'][:8]}...")
+                else:
+                    # 5분 이상 지난 태스크는 제거
+                    if time.time() - task_info.get("submitted_at", 0) < 300:
+                        still_pending.append(task_info)
+            except Exception as e:
+                print(f"⚠️ [Celery] 결과 수집 오류: {e}")
+        
+        # 세션 업데이트
+        state.update_session(session_id, {
+            "evaluations": evaluations,
+            "pending_eval_tasks": still_pending
+        })
+        
+        return evaluations
+    
+    async def start_interview_completion_workflow(self, session_id: str) -> Optional[str]:
+        """
+        면접 완료 시 백그라운드 워크플로우 시작 (Celery)
+        리포트 생성, 통계 집계 등을 백그라운드에서 처리
+        """
+        if not CELERY_AVAILABLE:
+            return None
+        
+        session = state.get_session(session_id)
+        if not session:
+            return None
+        
+        # 먼저 대기 중인 평가 결과 수집
+        await self.collect_celery_evaluations(session_id)
+        session = state.get_session(session_id)  # 업데이트된 세션 가져오기
+        
+        chat_history = session.get("chat_history", [])
+        
+        try:
+            # 면접 완료 워크플로우를 백그라운드에서 실행
+            task = complete_interview_workflow_task.delay(
+                session_id,
+                chat_history,
+                session.get("emotion_images", [])
+            )
+            
+            # 워크플로우 태스크 ID 저장
+            state.update_session(session_id, {
+                "completion_workflow_task_id": task.id,
+                "completion_started_at": time.time()
+            })
+            
+            print(f"🎯 [Celery] 면접 완료 워크플로우 시작: {task.id[:8]}...")
+            return task.id
+            
+        except Exception as e:
+            print(f"⚠️ [Celery] 워크플로우 시작 실패: {e}")
+            return None
 
 
 # AI 면접관 인스턴스
@@ -651,12 +1638,14 @@ def push_timeseries(key: str, ts_ms: int, value: float, labels: Dict[str, str]):
         pass
 
 async def analyze_emotions(track, session_id: str):
-    """영상 프레임 감정 분석"""
+    """영상 프레임 감정 분석 + 배치 처리용 이미지 저장"""
     if not EMOTION_AVAILABLE:
         return
     
-    sample_period = 1.0
+    sample_period = 1.0  # 실시간 분석은 1초마다
+    batch_sample_period = 10.0  # 배치용 이미지는 10초마다 저장
     last_ts = 0.0
+    last_batch_ts = 0.0
     
     try:
         while True:
@@ -673,7 +1662,8 @@ async def analyze_emotions(track, session_id: str):
                 continue
             
             try:
-                res = DeepFace.analyze(img, actions=["emotion"], enforce_detection=False)
+                # ThreadPoolExecutor로 블로킹 DeepFace 분석을 비동기로 실행
+                res = await run_deepface_async(img, actions=["emotion"])
                 item = res[0] if isinstance(res, list) else res
                 scores = item.get("emotion", {})
                 
@@ -700,6 +1690,25 @@ async def analyze_emotions(track, session_id: str):
                 for emo, prob in probabilities.items():
                     key = f"emotion:{session_id}:{emo}"
                     push_timeseries(key, ts_ms, prob, {"session_id": session_id})
+                
+                # 배치 분석용 이미지 저장 (10초마다)
+                if now - last_batch_ts >= batch_sample_period:
+                    last_batch_ts = now
+                    try:
+                        import base64
+                        import cv2
+                        _, buffer = cv2.imencode('.jpg', img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        img_base64 = base64.b64encode(buffer).decode('utf-8')
+                        
+                        # 세션에 이미지 저장 (최대 30개)
+                        session = state.get_session(session_id)
+                        if session:
+                            emotion_images = session.get("emotion_images", [])
+                            if len(emotion_images) < 30:
+                                emotion_images.append(img_base64)
+                                state.update_session(session_id, {"emotion_images": emotion_images})
+                    except Exception:
+                        pass
                     
             except Exception:
                 pass
@@ -738,6 +1747,7 @@ class UserRegisterRequest(BaseModel):
     birth_date: str  # YYYY-MM-DD 형식
     address: str
     gender: str  # male, female, other
+    role: str = "candidate"  # candidate(지원자), recruiter(면접관)
 
 class UserRegisterResponse(BaseModel):
     success: bool
@@ -1005,9 +2015,46 @@ async def index():
                 padding: 12px 16px;
                 margin-bottom: 20px;
                 display: none;
+                justify-content: space-between;
+                align-items: center;
             }
-            .user-info.active { display: block; }
-            .user-info span { color: #00ff88; font-weight: 600; }
+            .user-info.active { display: flex; }
+            .user-info .welcome-text { color: #fff; }
+            .user-info span span { color: #00ff88; font-weight: 600; }
+            .logout-btn {
+                background: rgba(244,67,54,0.2);
+                border: 1px solid rgba(244,67,54,0.5);
+                color: #ff6b6b;
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: all 0.3s;
+            }
+            .logout-btn:hover {
+                background: rgba(244,67,54,0.4);
+                border-color: #ff6b6b;
+            }
+            .user-buttons {
+                display: flex;
+                gap: 10px;
+            }
+            .edit-btn {
+                background: rgba(0,217,255,0.2);
+                border: 1px solid rgba(0,217,255,0.5);
+                color: #00d9ff;
+                padding: 8px 16px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 14px;
+                font-weight: 600;
+                transition: all 0.3s;
+            }
+            .edit-btn:hover {
+                background: rgba(0,217,255,0.4);
+                border-color: #00d9ff;
+            }
             .error-msg {
                 color: #ff6b6b;
                 font-size: 14px;
@@ -1024,7 +2071,11 @@ async def index():
             
             <!-- 사용자 정보 표시 -->
             <div class="user-info" id="userInfo">
-                👋 환영합니다, <span id="userName"></span>님!
+                <span class="welcome-text">👋 환영합니다, <span id="userName"></span>님!</span>
+                <div class="user-buttons">
+                    <button class="edit-btn" onclick="showEditModal()">회원정보 수정</button>
+                    <button class="logout-btn" onclick="logout()">로그아웃</button>
+                </div>
             </div>
             
             <!-- 회원가입/로그인 버튼 -->
@@ -1058,6 +2109,11 @@ async def index():
                     <h4>감정 분석</h4>
                     <p>표정 기반 감정 측정</p>
                 </div>
+                <div class="feature">
+                    <div class="icon">💻</div>
+                    <h4>코딩 테스트</h4>
+                    <p>면접 후 자동 진행</p>
+                </div>
             </div>
             
             <div class="sub-links">
@@ -1070,7 +2126,8 @@ async def index():
                 <span>LLM """ + ("✅" if LLM_AVAILABLE else "❌") + """</span> | 
                 <span>TTS """ + ("✅" if TTS_AVAILABLE else "❌") + """</span> | 
                 <span>RAG """ + ("✅" if RAG_AVAILABLE else "❌") + """</span> | 
-                <span>감정분석 """ + ("✅" if EMOTION_AVAILABLE else "❌") + """</span>
+                <span>감정분석 """ + ("✅" if EMOTION_AVAILABLE else "❌") + """</span> |
+                <span>코딩테스트 """ + ("✅" if CODING_TEST_AVAILABLE else "❌") + """</span>
             </div>
         </div>
         
@@ -1109,7 +2166,14 @@ async def index():
                             <option value="">선택해주세요</option>
                             <option value="male">남성</option>
                             <option value="female">여성</option>
-                            <option value="other">기타</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>회원 유형 *</label>
+                        <select id="regRole" required>
+                            <option value="">선택해주세요</option>
+                            <option value="candidate">지원자</option>
+                            <option value="recruiter">면접관</option>
                         </select>
                     </div>
                     <div class="error-msg" id="registerError"></div>
@@ -1163,6 +2227,116 @@ async def index():
                 <p style="text-align: center; margin-top: 16px; color: #8892b0; font-size: 14px;">
                     계정이 없으신가요? <a href="#" onclick="showRegisterModal()" style="color: #00d9ff;">회원가입</a>
                 </p>
+                <p style="text-align: center; margin-top: 8px; color: #8892b0; font-size: 13px;">
+                    <a href="#" onclick="showFindPasswordModal()" style="color: #ffc107;">비밀번호를 잊으셨나요?</a>
+                </p>
+            </div>
+        </div>
+        
+        <!-- 비밀번호 찾기 모달 -->
+        <div class="modal-overlay" id="findPasswordModal">
+            <div class="modal">
+                <h2>🔑 비밀번호 찾기</h2>
+                
+                <!-- Step 1: 본인 확인 -->
+                <div id="findPwStep1">
+                    <p style="color: #8892b0; margin-bottom: 20px; font-size: 14px;">
+                        가입 시 등록한 정보를 입력해주세요.
+                    </p>
+                    <form id="findPasswordForm" onsubmit="handleVerifyIdentity(event)">
+                        <div class="form-group">
+                            <label>이메일</label>
+                            <input type="email" id="findPwEmail" placeholder="example@email.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label>이름</label>
+                            <input type="text" id="findPwName" placeholder="가입 시 등록한 이름" required>
+                        </div>
+                        <div class="form-group">
+                            <label>생년월일</label>
+                            <input type="date" id="findPwBirthDate" required>
+                        </div>
+                        <div class="error-msg" id="findPwError"></div>
+                        <div class="modal-buttons">
+                            <button type="button" class="modal-btn cancel" onclick="closeFindPasswordModal()">취소</button>
+                            <button type="submit" class="modal-btn submit">본인 확인</button>
+                        </div>
+                    </form>
+                </div>
+                
+                <!-- Step 2: 새 비밀번호 설정 -->
+                <div id="findPwStep2" style="display: none;">
+                    <p style="color: #00ff88; margin-bottom: 20px; font-size: 14px;">
+                        ✅ 본인 확인 완료! 새 비밀번호를 설정해주세요.
+                    </p>
+                    <form id="resetPasswordForm" onsubmit="handleResetPassword(event)">
+                        <div class="form-group">
+                            <label>새 비밀번호</label>
+                            <input type="password" id="newPassword" placeholder="8자 이상" required minlength="8">
+                        </div>
+                        <div class="form-group">
+                            <label>새 비밀번호 확인</label>
+                            <input type="password" id="newPasswordConfirm" placeholder="비밀번호 재입력" required>
+                        </div>
+                        <div class="error-msg" id="resetPwError"></div>
+                        <div class="modal-buttons">
+                            <button type="button" class="modal-btn cancel" onclick="closeFindPasswordModal()">취소</button>
+                            <button type="submit" class="modal-btn submit">비밀번호 변경</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 회원정보 수정 모달 -->
+        <div class="modal-overlay" id="editModal">
+            <div class="modal">
+                <h2>✏️ 회원정보 수정</h2>
+                <form id="editForm" onsubmit="handleEditProfile(event)">
+                    <div class="form-group">
+                        <label>이메일 (수정 불가)</label>
+                        <input type="email" id="editEmail" disabled style="background: rgba(255,255,255,0.05); color: #8892b0;">
+                    </div>
+                    <div class="form-group">
+                        <label>이름</label>
+                        <input type="text" id="editName" placeholder="이름" required>
+                    </div>
+                    <div class="form-group">
+                        <label>생년월일</label>
+                        <input type="date" id="editBirthDate">
+                    </div>
+                    <div class="form-group">
+                        <label>주소</label>
+                        <input type="text" id="editAddress" placeholder="주소">
+                    </div>
+                    <div class="form-group">
+                        <label>성별</label>
+                        <select id="editGender">
+                            <option value="">선택해주세요</option>
+                            <option value="male">남성</option>
+                            <option value="female">여성</option>
+                        </select>
+                    </div>
+                    <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+                    <p style="color: #8892b0; font-size: 14px; margin-bottom: 15px;">비밀번호 변경 (선택사항)</p>
+                    <div class="form-group">
+                        <label>현재 비밀번호</label>
+                        <input type="password" id="editCurrentPassword" placeholder="현재 비밀번호 입력">
+                    </div>
+                    <div class="form-group">
+                        <label>새 비밀번호</label>
+                        <input type="password" id="editNewPassword" placeholder="새 비밀번호 (8자 이상)" minlength="8">
+                    </div>
+                    <div class="form-group">
+                        <label>새 비밀번호 확인</label>
+                        <input type="password" id="editNewPasswordConfirm" placeholder="새 비밀번호 재입력">
+                    </div>
+                    <div class="error-msg" id="editError"></div>
+                    <div class="modal-buttons">
+                        <button type="button" class="modal-btn cancel" onclick="closeEditModal()">취소</button>
+                        <button type="submit" class="modal-btn submit">저장</button>
+                    </div>
+                </form>
             </div>
         </div>
         
@@ -1189,11 +2363,211 @@ async def index():
                 document.getElementById('loginModal').classList.add('active');
             }
             
+            function showEditModal() {
+                if (!currentUser) {
+                    alert('로그인이 필요합니다.');
+                    return;
+                }
+                // 현재 사용자 정보로 폼 채우기
+                document.getElementById('editEmail').value = currentUser.email || '';
+                document.getElementById('editName').value = currentUser.name || '';
+                document.getElementById('editBirthDate').value = currentUser.birth_date || '';
+                document.getElementById('editAddress').value = currentUser.address || '';
+                document.getElementById('editGender').value = currentUser.gender || '';
+                document.getElementById('editCurrentPassword').value = '';
+                document.getElementById('editNewPassword').value = '';
+                document.getElementById('editNewPasswordConfirm').value = '';
+                document.getElementById('editError').classList.remove('active');
+                document.getElementById('editModal').classList.add('active');
+            }
+            
+            function closeEditModal() {
+                document.getElementById('editModal').classList.remove('active');
+                document.getElementById('editError').classList.remove('active');
+            }
+            
+            async function handleEditProfile(e) {
+                e.preventDefault();
+                const errorEl = document.getElementById('editError');
+                errorEl.classList.remove('active');
+                
+                const newPassword = document.getElementById('editNewPassword').value;
+                const newPasswordConfirm = document.getElementById('editNewPasswordConfirm').value;
+                const currentPassword = document.getElementById('editCurrentPassword').value;
+                
+                // 비밀번호 변경 시 검증
+                if (newPassword || newPasswordConfirm || currentPassword) {
+                    if (!currentPassword) {
+                        errorEl.textContent = '비밀번호 변경 시 현재 비밀번호를 입력해주세요.';
+                        errorEl.classList.add('active');
+                        return;
+                    }
+                    if (newPassword !== newPasswordConfirm) {
+                        errorEl.textContent = '새 비밀번호가 일치하지 않습니다.';
+                        errorEl.classList.add('active');
+                        return;
+                    }
+                    if (newPassword.length < 8) {
+                        errorEl.textContent = '새 비밀번호는 8자 이상이어야 합니다.';
+                        errorEl.classList.add('active');
+                        return;
+                    }
+                }
+                
+                const data = {
+                    email: currentUser.email,
+                    name: document.getElementById('editName').value,
+                    birth_date: document.getElementById('editBirthDate').value,
+                    address: document.getElementById('editAddress').value,
+                    gender: document.getElementById('editGender').value
+                };
+                
+                if (newPassword && currentPassword) {
+                    data.current_password = currentPassword;
+                    data.new_password = newPassword;
+                }
+                
+                try {
+                    const response = await fetch('/api/auth/user/update', {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(data)
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // 로컬 스토리지 업데이트
+                        currentUser = { ...currentUser, ...data };
+                        delete currentUser.current_password;
+                        delete currentUser.new_password;
+                        localStorage.setItem('interview_user', JSON.stringify(currentUser));
+                        document.getElementById('userName').textContent = currentUser.name;
+                        alert('회원정보가 수정되었습니다.');
+                        closeEditModal();
+                    } else {
+                        errorEl.textContent = result.message;
+                        errorEl.classList.add('active');
+                    }
+                } catch (err) {
+                    errorEl.textContent = '서버 오류가 발생했습니다.';
+                    errorEl.classList.add('active');
+                }
+            }
+            
             function closeModals() {
                 document.getElementById('registerModal').classList.remove('active');
                 document.getElementById('loginModal').classList.remove('active');
+                document.getElementById('editModal').classList.remove('active');
+                document.getElementById('findPasswordModal').classList.remove('active');
                 document.getElementById('registerError').classList.remove('active');
                 document.getElementById('loginError').classList.remove('active');
+            }
+            
+            // ========== 비밀번호 찾기 ==========
+            let findPwVerifiedEmail = '';
+            let findPwVerifiedName = '';
+            let findPwVerifiedBirth = '';
+            
+            function showFindPasswordModal() {
+                closeModals();
+                // 초기화
+                document.getElementById('findPwStep1').style.display = 'block';
+                document.getElementById('findPwStep2').style.display = 'none';
+                document.getElementById('findPwEmail').value = '';
+                document.getElementById('findPwName').value = '';
+                document.getElementById('findPwBirthDate').value = '';
+                document.getElementById('findPwError').classList.remove('active');
+                document.getElementById('resetPwError').classList.remove('active');
+                findPwVerifiedEmail = '';
+                findPwVerifiedName = '';
+                findPwVerifiedBirth = '';
+                document.getElementById('findPasswordModal').classList.add('active');
+            }
+            
+            function closeFindPasswordModal() {
+                document.getElementById('findPasswordModal').classList.remove('active');
+            }
+            
+            async function handleVerifyIdentity(e) {
+                e.preventDefault();
+                const errorEl = document.getElementById('findPwError');
+                errorEl.classList.remove('active');
+                
+                const email = document.getElementById('findPwEmail').value;
+                const name = document.getElementById('findPwName').value;
+                const birthDate = document.getElementById('findPwBirthDate').value;
+                
+                try {
+                    const response = await fetch('/api/auth/verify-identity', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email, name, birth_date: birthDate })
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        // 본인 확인 성공 - Step 2로 이동
+                        findPwVerifiedEmail = email;
+                        findPwVerifiedName = name;
+                        findPwVerifiedBirth = birthDate;
+                        document.getElementById('findPwStep1').style.display = 'none';
+                        document.getElementById('findPwStep2').style.display = 'block';
+                    } else {
+                        errorEl.textContent = result.message;
+                        errorEl.classList.add('active');
+                    }
+                } catch (err) {
+                    errorEl.textContent = '서버 오류가 발생했습니다.';
+                    errorEl.classList.add('active');
+                }
+            }
+            
+            async function handleResetPassword(e) {
+                e.preventDefault();
+                const errorEl = document.getElementById('resetPwError');
+                errorEl.classList.remove('active');
+                
+                const newPassword = document.getElementById('newPassword').value;
+                const newPasswordConfirm = document.getElementById('newPasswordConfirm').value;
+                
+                if (newPassword !== newPasswordConfirm) {
+                    errorEl.textContent = '비밀번호가 일치하지 않습니다.';
+                    errorEl.classList.add('active');
+                    return;
+                }
+                
+                if (newPassword.length < 8) {
+                    errorEl.textContent = '비밀번호는 8자 이상이어야 합니다.';
+                    errorEl.classList.add('active');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch('/api/auth/reset-password', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ 
+                            email: findPwVerifiedEmail,
+                            new_password: newPassword,
+                            name: findPwVerifiedName,
+                            birth_date: findPwVerifiedBirth
+                        })
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        alert('비밀번호가 성공적으로 변경되었습니다. 새 비밀번호로 로그인해주세요.');
+                        closeFindPasswordModal();
+                        showLoginModal();
+                        document.getElementById('loginEmail').value = findPwVerifiedEmail;
+                    } else {
+                        errorEl.textContent = result.message;
+                        errorEl.classList.add('active');
+                    }
+                } catch (err) {
+                    errorEl.textContent = '서버 오류가 발생했습니다.';
+                    errorEl.classList.add('active');
+                }
             }
             
             async function handleRegister(e) {
@@ -1222,7 +2596,8 @@ async def index():
                     name: document.getElementById('regName').value,
                     birth_date: document.getElementById('regBirthDate').value,
                     address: document.getElementById('regAddress').value,
-                    gender: document.getElementById('regGender').value
+                    gender: document.getElementById('regGender').value,
+                    role: document.getElementById('regRole').value
                 };
                 
                 try {
@@ -1281,13 +2656,108 @@ async def index():
                 document.getElementById('authButtons').style.display = 'none';
                 document.getElementById('userInfo').classList.add('active');
                 document.getElementById('userName').textContent = currentUser.name;
+                
+                // 자동 로그아웃 타이머 시작
+                initAutoLogout();
             }
             
             function logout() {
                 currentUser = null;
                 localStorage.removeItem('interview_user');
+                localStorage.removeItem('login_time');
                 document.getElementById('authButtons').style.display = 'flex';
                 document.getElementById('userInfo').classList.remove('active');
+                stopAutoLogoutTimer();
+            }
+            
+            // ========== 자동 로그아웃 기능 ==========
+            const SESSION_TIMEOUT = 60 * 60 * 1000;  // 60분 (밀리초)
+            const IDLE_TIMEOUT = 30 * 60 * 1000;     // 30분 비활성 시 로그아웃
+            let idleTimer = null;
+            let sessionTimer = null;
+            
+            // 비활성 타이머 리셋
+            function resetIdleTimer() {
+                if (!currentUser) return;
+                
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => {
+                    if (currentUser) {
+                        alert('장시간 활동이 없어 자동 로그아웃됩니다.');
+                        logout();
+                    }
+                }, IDLE_TIMEOUT);
+            }
+            
+            // 세션 타이머 시작 (로그인 후 일정 시간 지나면 로그아웃)
+            function startSessionTimer() {
+                if (sessionTimer) clearTimeout(sessionTimer);
+                sessionTimer = setTimeout(() => {
+                    if (currentUser) {
+                        alert('세션이 만료되어 자동 로그아웃됩니다. 다시 로그인해주세요.');
+                        logout();
+                    }
+                }, SESSION_TIMEOUT);
+            }
+            
+            // 자동 로그아웃 타이머 중지
+            function stopAutoLogoutTimer() {
+                if (idleTimer) clearTimeout(idleTimer);
+                if (sessionTimer) clearTimeout(sessionTimer);
+                idleTimer = null;
+                sessionTimer = null;
+            }
+            
+            // 자동 로그아웃 초기화
+            function initAutoLogout() {
+                // 사용자 활동 이벤트 감지
+                const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
+                activityEvents.forEach(event => {
+                    document.addEventListener(event, resetIdleTimer, { passive: true });
+                });
+                
+                // 세션 타이머 시작
+                startSessionTimer();
+                resetIdleTimer();
+                
+                // 로그인 시간 저장
+                localStorage.setItem('login_time', Date.now().toString());
+            }
+            
+            // 페이지 떠날 때 로그아웃 (선택적)
+            window.addEventListener('beforeunload', () => {
+                // 브라우저 탭/창 닫을 때 세션 정보 유지 여부 결정
+                // 완전히 로그아웃하려면 아래 주석 해제
+                // logout();
+            });
+            
+            // 다른 탭에서 로그아웃했는지 감지
+            window.addEventListener('storage', (e) => {
+                if (e.key === 'interview_user' && e.newValue === null) {
+                    // 다른 탭에서 로그아웃됨
+                    currentUser = null;
+                    document.getElementById('authButtons').style.display = 'flex';
+                    document.getElementById('userInfo').classList.remove('active');
+                    stopAutoLogoutTimer();
+                }
+            });
+            
+            // 페이지 로드 시 로그인 상태면 자동 로그아웃 타이머 시작
+            if (currentUser) {
+                // 이전 로그인 시간 확인
+                const loginTime = localStorage.getItem('login_time');
+                if (loginTime) {
+                    const elapsed = Date.now() - parseInt(loginTime);
+                    if (elapsed > SESSION_TIMEOUT) {
+                        // 세션 만료됨
+                        alert('세션이 만료되었습니다. 다시 로그인해주세요.');
+                        logout();
+                    } else {
+                        initAutoLogout();
+                    }
+                } else {
+                    initAutoLogout();
+                }
             }
             
             // 소셜 로그인
@@ -1340,6 +2810,13 @@ async def index():
     </body>
     </html>
     """
+
+
+@app.get("/coding-test")
+async def coding_test_redirect():
+    """코딩 테스트는 면접 후 자동으로 진행됨 - 면접 페이지로 리다이렉트"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/static/integrated_interview.html")
 
 
 @app.get("/interview")
@@ -1505,24 +2982,25 @@ async def social_login_callback(provider: str, code: str = None, state: str = No
             else:
                 return RedirectResponse(url="/?error=invalid_provider")
             
-            # 사용자 등록 또는 조회
-            if email not in users_db:
-                user_id = uuid.uuid4().hex
-                users_db[email] = {
-                    "user_id": user_id,
+            # 사용자 등록 또는 조회 (DB 우선)
+            existing_user = get_user_by_email(email)
+            if not existing_user:
+                user_data = {
                     "email": email,
-                    "password_hash": None,  # 소셜 로그인은 비밀번호 없음
+                    "password_hash": "",  # 소셜 로그인은 비밀번호 없음
                     "name": name,
                     "birth_date": None,
                     "address": None,
                     "gender": None,
-                    "provider": provider,
-                    "created_at": datetime.now().isoformat(),
-                    "interview_history": []
+                    "role": "candidate"
                 }
+                create_user(user_data)
+                # 저장된 사용자 조회하여 ID 가져오기
+                saved_user = get_user_by_email(email)
+                user_id = saved_user["user_id"] if saved_user else None
                 print(f"✅ 소셜 회원 가입: {name} ({email}) via {provider}")
             else:
-                user_id = users_db[email]["user_id"]
+                user_id = existing_user["user_id"]
                 print(f"✅ 소셜 로그인: {name} ({email}) via {provider}")
             
             # 임시 토큰 생성
@@ -1550,7 +3028,8 @@ async def verify_social_token(token: str):
     if not token_data:
         return {"success": False, "message": "유효하지 않은 토큰입니다."}
     
-    user = users_db.get(token_data["email"])
+    # DB에서 사용자 조회
+    user = get_user_by_email(token_data["email"])
     if not user:
         return {"success": False, "message": "사용자를 찾을 수 없습니다."}
     
@@ -1581,8 +3060,9 @@ async def social_login_status():
 @app.post("/api/auth/register", response_model=UserRegisterResponse)
 async def register_user(request: UserRegisterRequest):
     """회원가입 API"""
-    # 이메일 중복 확인
-    if request.email in users_db:
+    # 이메일 중복 확인 (DB 우선, 폴백으로 메모리)
+    existing_user = get_user_by_email(request.email)
+    if existing_user:
         return UserRegisterResponse(
             success=False,
             message="이미 등록된 이메일입니다."
@@ -1612,10 +3092,17 @@ async def register_user(request: UserRegisterRequest):
         )
     
     # 성별 검증
-    if request.gender not in ["male", "female", "other"]:
+    if request.gender not in ["male", "female"]:
         return UserRegisterResponse(
             success=False,
             message="성별을 선택해주세요."
+        )
+    
+    # 역할 검증
+    if request.role not in ["candidate", "recruiter"]:
+        return UserRegisterResponse(
+            success=False,
+            message="회원 유형을 선택해주세요. (지원자 또는 면접관)"
         )
     
     # 비밀번호 검증
@@ -1629,21 +3116,26 @@ async def register_user(request: UserRegisterRequest):
     import hashlib
     password_hash = hashlib.sha256(request.password.encode()).hexdigest()
     
-    # 회원 정보 저장
-    user_id = uuid.uuid4().hex
-    users_db[request.email] = {
-        "user_id": user_id,
+    # 회원 정보 저장 (DB 우선)
+    user_data = {
         "email": request.email,
         "password_hash": password_hash,
         "name": request.name,
         "birth_date": request.birth_date,
         "address": request.address,
         "gender": request.gender,
-        "created_at": datetime.now().isoformat(),
-        "interview_history": []
+        "role": request.role  # 사용자가 선택한 역할
     }
     
-    print(f"✅ 새 회원 가입: {request.name} ({request.email})")
+    # DB에 저장
+    create_user(user_data)
+    
+    # 저장된 사용자 조회하여 ID 가져오기
+    saved_user = get_user_by_email(request.email)
+    user_id = saved_user["user_id"] if saved_user else None
+    
+    role_text = "지원자" if request.role == "candidate" else "면접관"
+    print(f"✅ 새 회원 가입: {request.name} ({request.email}) - {role_text}")
     
     return UserRegisterResponse(
         success=True,
@@ -1655,7 +3147,8 @@ async def register_user(request: UserRegisterRequest):
 @app.post("/api/auth/login", response_model=UserLoginResponse)
 async def login_user(request: UserLoginRequest):
     """로그인 API (이메일 + 비밀번호)"""
-    user = users_db.get(request.email)
+    # DB에서 사용자 조회
+    user = get_user_by_email(request.email)
     
     if not user:
         return UserLoginResponse(
@@ -1689,10 +3182,84 @@ async def login_user(request: UserLoginRequest):
     )
 
 
+# ========== 비밀번호 찾기 모델 ==========
+class PasswordVerifyRequest(BaseModel):
+    email: str
+    name: str
+    birth_date: str  # YYYY-MM-DD
+
+class PasswordResetRequest(BaseModel):
+    email: str
+    new_password: str
+    name: str
+    birth_date: str
+
+
+@app.post("/api/auth/verify-identity")
+async def verify_identity(request: PasswordVerifyRequest):
+    """비밀번호 찾기 - 본인 확인 (이메일 + 이름 + 생년월일)"""
+    user = get_user_by_email(request.email)
+    
+    if not user:
+        return {"success": False, "message": "등록되지 않은 이메일입니다."}
+    
+    # 본인 확인: 이름과 생년월일 매칭
+    if user.get("name") != request.name:
+        return {"success": False, "message": "이름이 일치하지 않습니다."}
+    
+    # 생년월일 비교 (형식 정규화)
+    user_birth = str(user.get("birth_date", "")).replace("-", "")
+    request_birth = request.birth_date.replace("-", "")
+    
+    if user_birth != request_birth:
+        return {"success": False, "message": "생년월일이 일치하지 않습니다."}
+    
+    print(f"✅ 본인 확인 성공: {request.email}")
+    return {"success": True, "message": "본인 확인 완료. 새 비밀번호를 설정해주세요."}
+
+
+@app.post("/api/auth/reset-password")
+async def reset_password(request: PasswordResetRequest):
+    """비밀번호 재설정"""
+    # 다시 한번 본인 확인
+    user = get_user_by_email(request.email)
+    
+    if not user:
+        return {"success": False, "message": "등록되지 않은 이메일입니다."}
+    
+    # 본인 확인 재검증
+    if user.get("name") != request.name:
+        return {"success": False, "message": "본인 확인에 실패했습니다."}
+    
+    user_birth = str(user.get("birth_date", "")).replace("-", "")
+    request_birth = request.birth_date.replace("-", "")
+    
+    if user_birth != request_birth:
+        return {"success": False, "message": "본인 확인에 실패했습니다."}
+    
+    # 비밀번호 유효성 검사
+    if len(request.new_password) < 8:
+        return {"success": False, "message": "비밀번호는 8자 이상이어야 합니다."}
+    
+    # 새 비밀번호 해시
+    import hashlib
+    new_password_hash = hashlib.sha256(request.new_password.encode()).hexdigest()
+    
+    # 비밀번호 업데이트
+    success = update_user(request.email, {"password_hash": new_password_hash})
+    
+    if success:
+        print(f"✅ 비밀번호 재설정 완료: {request.email}")
+        return {"success": True, "message": "비밀번호가 성공적으로 변경되었습니다."}
+    else:
+        return {"success": False, "message": "비밀번호 변경에 실패했습니다."}
+
+
 @app.get("/api/auth/user/{email}")
-async def get_user_info(email: str):
+async def get_user_info_api(email: str):
     """회원 정보 조회"""
-    user = users_db.get(email)
+    # DB에서 사용자 조회
+    user = get_user_by_email(email)
     
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
@@ -1707,6 +3274,96 @@ async def get_user_info(email: str):
         "gender": user["gender"],
         "created_at": user["created_at"]
     }
+
+
+# ========== 회원 정보 수정 모델 ==========
+class UserUpdateRequest(BaseModel):
+    email: str
+    name: Optional[str] = None
+    birth_date: Optional[str] = None
+    address: Optional[str] = None
+    gender: Optional[str] = None
+    current_password: Optional[str] = None
+    new_password: Optional[str] = None
+
+class UserUpdateResponse(BaseModel):
+    success: bool
+    message: str
+
+
+@app.put("/api/auth/user/update")
+async def update_user_info(request: UserUpdateRequest):
+    """회원 정보 수정 API"""
+    import hashlib
+    
+    # 사용자 존재 확인
+    user = get_user_by_email(request.email)
+    if not user:
+        return UserUpdateResponse(
+            success=False,
+            message="사용자를 찾을 수 없습니다."
+        )
+    
+    # 업데이트할 데이터 준비
+    update_data = {}
+    
+    if request.name:
+        update_data["name"] = request.name
+    if request.birth_date:
+        update_data["birth_date"] = request.birth_date
+    if request.address is not None:
+        update_data["address"] = request.address
+    if request.gender:
+        if request.gender not in ["male", "female"]:
+            return UserUpdateResponse(
+                success=False,
+                message="올바른 성별을 선택해주세요."
+            )
+        update_data["gender"] = request.gender
+    
+    # 비밀번호 변경
+    if request.new_password:
+        if not request.current_password:
+            return UserUpdateResponse(
+                success=False,
+                message="현재 비밀번호를 입력해주세요."
+            )
+        
+        # 현재 비밀번호 확인
+        current_hash = hashlib.sha256(request.current_password.encode()).hexdigest()
+        if current_hash != user.get("password_hash"):
+            return UserUpdateResponse(
+                success=False,
+                message="현재 비밀번호가 일치하지 않습니다."
+            )
+        
+        if len(request.new_password) < 8:
+            return UserUpdateResponse(
+                success=False,
+                message="새 비밀번호는 8자 이상이어야 합니다."
+            )
+        
+        update_data["password_hash"] = hashlib.sha256(request.new_password.encode()).hexdigest()
+    
+    # 업데이트 실행
+    if update_data:
+        success = update_user(request.email, update_data)
+        if success:
+            print(f"✅ 회원 정보 수정: {request.email}")
+            return UserUpdateResponse(
+                success=True,
+                message="회원정보가 수정되었습니다."
+            )
+        else:
+            return UserUpdateResponse(
+                success=False,
+                message="회원정보 수정에 실패했습니다."
+            )
+    
+    return UserUpdateResponse(
+        success=True,
+        message="변경된 정보가 없습니다."
+    )
 
 
 # ========== Resume Upload API ==========
@@ -1859,19 +3516,45 @@ async def delete_resume(session_id: str):
     return {"success": True, "message": "이력서가 삭제되었습니다."}
 
 
+# ========== 세션 생성 요청 모델 ==========
+class SessionCreateRequest(BaseModel):
+    user_email: Optional[str] = None
+    user_id: Optional[str] = None
+
+
 # ========== Session API ==========
 
 @app.post("/api/session")
-async def create_session():
-    """새 면접 세션 생성"""
+async def create_session(request: SessionCreateRequest = None):
+    """새 면접 세션 생성 (로그인 사용자만 가능)"""
+    # 사용자 인증 확인
+    if not request or not request.user_email:
+        raise HTTPException(
+            status_code=401, 
+            detail="면접을 시작하려면 로그인이 필요합니다."
+        )
+    
+    # 사용자 존재 여부 확인
+    user = get_user_by_email(request.user_email)
+    if not user:
+        raise HTTPException(
+            status_code=401, 
+            detail="유효하지 않은 사용자입니다. 다시 로그인해주세요."
+        )
+    
     session_id = state.create_session()
     greeting = interviewer.get_initial_greeting()
     
-    # 초기 인사 저장
+    # 초기 인사 저장 (사용자 정보 포함)
     state.update_session(session_id, {
         "status": "active",
+        "user_email": request.user_email,
+        "user_id": request.user_id,
+        "user_name": user.get("name", ""),
         "chat_history": [{"role": "assistant", "content": greeting}]
     })
+    
+    print(f"✅ 면접 세션 생성: {session_id} (사용자: {request.user_email})")
     
     return {
         "session_id": session_id,
@@ -1895,7 +3578,185 @@ async def get_session(session_id: str):
     )
 
 
+# ========== 실시간 개입 API (VAD + Turn-taking) ==========
+
+class VADSignalRequest(BaseModel):
+    session_id: str
+    is_speech: bool
+    audio_level: float = 0.0
+    timestamp: Optional[str] = None
+
+class InterventionCheckRequest(BaseModel):
+    session_id: str
+    current_answer: Optional[str] = None
+
+class StartUserTurnRequest(BaseModel):
+    session_id: str
+    question: str
+
+@app.post("/api/intervention/start-turn")
+async def start_user_turn(request: StartUserTurnRequest):
+    """사용자 발화 시작 - 질문 후 호출"""
+    session = state.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    # 질문에서 키워드 추출
+    keywords = intervention_manager.extract_question_keywords(request.question)
+    
+    # 사용자 턴 시작
+    intervention_manager.start_user_turn(request.session_id, keywords)
+    
+    return {
+        "success": True,
+        "message": "사용자 발화 시작됨",
+        "question_keywords": keywords,
+        "max_time_seconds": intervention_manager.MAX_ANSWER_TIME_SECONDS,
+        "warning_time_seconds": intervention_manager.SOFT_WARNING_TIME
+    }
+
+
+@app.post("/api/intervention/vad-signal")
+async def update_vad_signal(request: VADSignalRequest):
+    """VAD 신호 업데이트 (실시간 스트리밍)"""
+    session = state.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    # VAD 신호 업데이트
+    turn_state = intervention_manager.update_vad_signal(
+        request.session_id,
+        request.is_speech,
+        request.audio_level
+    )
+    
+    # Turn-taking 신호 확인
+    turn_signal = intervention_manager.get_turn_taking_signal(request.session_id)
+    
+    return {
+        "turn_state": turn_state,
+        "can_interrupt": turn_signal["can_interrupt"],
+        "interrupt_reason": turn_signal.get("interrupt_reason", ""),
+        "silence_duration_ms": turn_signal.get("silence_duration_ms", 0)
+    }
+
+
+@app.post("/api/intervention/check")
+async def check_intervention(request: InterventionCheckRequest):
+    """개입 필요 여부 확인"""
+    session = state.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    # 개입 체크
+    intervention = intervention_manager.check_intervention_needed(
+        request.session_id,
+        request.current_answer
+    )
+    
+    # Turn-taking 신호
+    turn_signal = intervention_manager.get_turn_taking_signal(request.session_id)
+    
+    if intervention:
+        return {
+            "needs_intervention": True,
+            "intervention": intervention,
+            "turn_signal": turn_signal
+        }
+    
+    return {
+        "needs_intervention": False,
+        "intervention": None,
+        "turn_signal": turn_signal
+    }
+
+
+@app.post("/api/intervention/end-turn")
+async def end_user_turn(session_id: str):
+    """사용자 발화 종료"""
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    stats = intervention_manager.end_user_turn(session_id)
+    
+    return {
+        "success": True,
+        "stats": stats
+    }
+
+
+@app.get("/api/intervention/stats/{session_id}")
+async def get_intervention_stats(session_id: str):
+    """세션의 개입 통계 조회"""
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    stats = intervention_manager.get_session_stats(session_id)
+    
+    return {
+        "session_id": session_id,
+        "total_interventions": stats["total_interventions"],
+        "intervention_history": stats["intervention_history"],
+        "current_state": {
+            "turn_state": stats["state"].get("turn_state", "unknown"),
+            "is_speaking": stats["state"].get("is_speaking", False),
+            "intervention_count": stats["state"].get("intervention_count", 0)
+        }
+    }
+
+
+class InterventionSettingsRequest(BaseModel):
+    max_answer_time: Optional[int] = None
+    max_answer_length: Optional[int] = None
+    soft_warning_time: Optional[int] = None
+    topic_relevance_threshold: Optional[float] = None
+
+@app.post("/api/intervention/settings")
+async def update_intervention_settings(request: InterventionSettingsRequest):
+    """개입 설정 업데이트"""
+    if request.max_answer_time:
+        intervention_manager.MAX_ANSWER_TIME_SECONDS = request.max_answer_time
+    if request.max_answer_length:
+        intervention_manager.MAX_ANSWER_LENGTH = request.max_answer_length
+    if request.soft_warning_time:
+        intervention_manager.SOFT_WARNING_TIME = request.soft_warning_time
+    if request.topic_relevance_threshold:
+        intervention_manager.TOPIC_RELEVANCE_THRESHOLD = request.topic_relevance_threshold
+    
+    return {
+        "success": True,
+        "current_settings": {
+            "max_answer_time_seconds": intervention_manager.MAX_ANSWER_TIME_SECONDS,
+            "max_answer_length": intervention_manager.MAX_ANSWER_LENGTH,
+            "soft_warning_time_seconds": intervention_manager.SOFT_WARNING_TIME,
+            "topic_relevance_threshold": intervention_manager.TOPIC_RELEVANCE_THRESHOLD
+        }
+    }
+
+
+@app.get("/api/intervention/settings")
+async def get_intervention_settings():
+    """현재 개입 설정 조회"""
+    return {
+        "max_answer_time_seconds": intervention_manager.MAX_ANSWER_TIME_SECONDS,
+        "max_answer_length": intervention_manager.MAX_ANSWER_LENGTH,
+        "soft_warning_time_seconds": intervention_manager.SOFT_WARNING_TIME,
+        "soft_warning_length": intervention_manager.SOFT_WARNING_LENGTH,
+        "silence_threshold_ms": intervention_manager.SILENCE_THRESHOLD_MS,
+        "topic_relevance_threshold": intervention_manager.TOPIC_RELEVANCE_THRESHOLD
+    }
+
+
 # ========== Chat API ==========
+
+class ChatRequestWithIntervention(BaseModel):
+    session_id: str
+    message: str
+    use_rag: bool = True
+    was_interrupted: bool = False  # 개입으로 인한 강제 종료 여부
+    intervention_type: Optional[str] = None  # 개입 유형
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -1904,12 +3765,20 @@ async def chat(request: ChatRequest):
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
     
+    # 사용자 턴 종료 처리 (개입 시스템)
+    turn_stats = intervention_manager.end_user_turn(request.session_id)
+    
     # AI 응답 생성
     response = await interviewer.generate_response(
         request.session_id,
         request.message,
         request.use_rag
     )
+    
+    # 다음 질문을 위한 사용자 턴 시작 (개입 시스템)
+    if not response.startswith("면접이 종료"):
+        keywords = intervention_manager.extract_question_keywords(response)
+        intervention_manager.start_user_turn(request.session_id, keywords)
     
     # TTS 생성 (선택적)
     audio_url = None
@@ -1926,6 +3795,53 @@ async def chat(request: ChatRequest):
         response=response,
         audio_url=audio_url
     )
+
+
+@app.post("/api/chat/with-intervention")
+async def chat_with_intervention(request: ChatRequestWithIntervention):
+    """개입 정보를 포함한 채팅 메시지 전송"""
+    session = state.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    # 사용자 턴 종료 처리
+    turn_stats = intervention_manager.end_user_turn(request.session_id)
+    
+    # 개입으로 인한 강제 종료인 경우 로깅
+    if request.was_interrupted:
+        print(f"⚡ [Chat] 세션 {request.session_id[:8]}... 개입으로 인한 답변 종료 ({request.intervention_type})")
+    
+    # AI 응답 생성
+    response = await interviewer.generate_response(
+        request.session_id,
+        request.message,
+        request.use_rag
+    )
+    
+    # 다음 질문을 위한 사용자 턴 시작
+    question_keywords = []
+    if not response.startswith("면접이 종료"):
+        question_keywords = intervention_manager.extract_question_keywords(response)
+        intervention_manager.start_user_turn(request.session_id, question_keywords)
+    
+    # TTS 생성
+    audio_url = None
+    if TTS_AVAILABLE and interviewer.tts_service:
+        try:
+            audio_file = await interviewer.generate_speech(response)
+            if audio_file:
+                audio_url = f"/audio/{os.path.basename(audio_file)}"
+        except Exception as e:
+            print(f"TTS 생성 오류: {e}")
+    
+    return {
+        "session_id": request.session_id,
+        "response": response,
+        "audio_url": audio_url,
+        "turn_stats": turn_stats,
+        "was_interrupted": request.was_interrupted,
+        "next_question_keywords": question_keywords
+    }
 
 
 # ========== Report API ==========
@@ -2082,8 +3998,13 @@ async def webrtc_offer(offer: Offer):
                 pc.addTrack(track)
                 asyncio.create_task(analyze_emotions(track, session_id))
             else:
-                bh = MediaBlackhole()
-                asyncio.create_task(_consume_audio(track, bh))
+                # 오디오 트랙을 Deepgram STT로 라우팅
+                if DEEPGRAM_AVAILABLE:
+                    asyncio.create_task(_process_audio_with_stt(track, session_id))
+                else:
+                    # Deepgram 없으면 MediaBlackhole로 소비
+                    bh = MediaBlackhole()
+                    asyncio.create_task(_consume_audio(track, bh))
         
         await pc.setRemoteDescription(RTCSessionDescription(sdp=offer.sdp, type=offer.type))
         answer = await pc.createAnswer()
@@ -2101,13 +4022,161 @@ async def webrtc_offer(offer: Offer):
 
 
 async def _consume_audio(track, sink: MediaBlackhole):
-    """오디오 트랙 소비"""
+    """오디오 트랙 소비 (Deepgram 비활성화 시 폴백)"""
     try:
         while True:
             frame = await track.recv()
             sink.write(frame)
     except Exception:
         pass
+
+
+async def _process_audio_with_stt(track, session_id: str):
+    """오디오 트랙을 Deepgram STT로 처리하여 실시간 텍스트 변환"""
+    if not DEEPGRAM_AVAILABLE or not deepgram_client:
+        return
+    
+    try:
+        import numpy as np
+        
+        # Deepgram WebSocket 연결 (SDK v5.3.2 스타일)
+        with deepgram_client.listen.v1.connect(
+            model="nova-3",
+            language="ko",
+            smart_format=True,
+            encoding="linear16",
+            sample_rate=16000,
+            punctuate=True,
+            interim_results=True,
+            vad_events=True,
+            endpointing=300,
+        ) as dg_connection:
+            
+            # 이벤트 핸들러 정의
+            def on_message(message) -> None:
+                """STT 결과 처리 및 WebSocket으로 클라이언트에 전송"""
+                try:
+                    transcript = None
+                    is_final = False
+                    
+                    if hasattr(message, 'results') and getattr(message.results, 'channels', None):
+                        is_final = getattr(message.results, 'is_final', False)
+                        alts = message.results.channels[0].alternatives
+                        if alts:
+                            transcript = alts[0].transcript
+                    elif hasattr(message, 'channel') and getattr(message.channel, 'alternatives', None):
+                        is_final = getattr(message, 'is_final', True)
+                        alts = message.channel.alternatives
+                        if alts:
+                            transcript = alts[0].transcript
+                    
+                    if transcript:
+                        # 비동기 브로드캐스트를 위해 이벤트 루프에 태스크 추가
+                        asyncio.create_task(broadcast_stt_result(session_id, {
+                            "type": "stt_result",
+                            "transcript": transcript,
+                            "is_final": is_final,
+                            "timestamp": time.time()
+                        }))
+                        
+                except Exception as e:
+                    print(f"[STT] 메시지 처리 오류: {e}")
+            
+            def on_error(error) -> None:
+                print(f"[STT] Deepgram 오류: {error}")
+            
+            dg_connection.on(EventType.OPEN, lambda _: print(f"[STT] 세션 {session_id} Deepgram 연결됨"))
+            dg_connection.on(EventType.MESSAGE, on_message)
+            dg_connection.on(EventType.CLOSE, lambda _: print(f"[STT] 세션 {session_id} Deepgram 연결 종료"))
+            dg_connection.on(EventType.ERROR, on_error)
+            
+            state.stt_connections[session_id] = dg_connection
+            print(f"[STT] 세션 {session_id} 오디오 처리 시작")
+            
+            try:
+                while True:
+                    frame = await track.recv()
+                    # aiortc 오디오 프레임을 raw PCM으로 변환
+                    try:
+                        audio_data = frame.to_ndarray()
+                        # 16bit PCM으로 변환
+                        if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
+                            audio_bytes = (audio_data * 32767).astype(np.int16).tobytes()
+                        else:
+                            audio_bytes = audio_data.astype(np.int16).tobytes()
+                        
+                        # Deepgram에 오디오 전송
+                        from deepgram.extensions.types.sockets import ListenV1MediaMessage
+                        dg_connection.send_media(ListenV1MediaMessage(audio_bytes))
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[STT] 오디오 처리 종료: {e}")
+            finally:
+                state.stt_connections.pop(session_id, None)
+                
+    except Exception as e:
+        print(f"[STT] Deepgram 연결 실패: {e}")
+
+
+async def broadcast_stt_result(session_id: str, data: dict):
+    """세션의 모든 WebSocket 클라이언트에 STT 결과 브로드캐스트"""
+    if session_id not in state.websocket_connections:
+        return
+    
+    dead_connections = []
+    for ws in state.websocket_connections[session_id]:
+        try:
+            await ws.send_json(data)
+        except Exception:
+            dead_connections.append(ws)
+    
+    # 끊어진 연결 제거
+    for ws in dead_connections:
+        state.websocket_connections[session_id].remove(ws)
+
+
+# ========== WebSocket API (실시간 STT/이벤트) ==========
+
+@app.websocket("/ws/interview/{session_id}")
+async def websocket_interview(websocket: WebSocket, session_id: str):
+    """실시간 면접 WebSocket - STT 결과 및 이벤트 수신"""
+    await websocket.accept()
+    
+    # 세션에 WebSocket 연결 추가
+    if session_id not in state.websocket_connections:
+        state.websocket_connections[session_id] = []
+    state.websocket_connections[session_id].append(websocket)
+    
+    print(f"[WS] 세션 {session_id} WebSocket 연결됨")
+    
+    try:
+        # 연결 성공 메시지
+        await websocket.send_json({
+            "type": "connected",
+            "session_id": session_id,
+            "stt_available": DEEPGRAM_AVAILABLE
+        })
+        
+        while True:
+            # 클라이언트로부터 메시지 수신 (ping/pong 등)
+            data = await websocket.receive_json()
+            
+            if data.get("type") == "ping":
+                await websocket.send_json({"type": "pong"})
+            elif data.get("type") == "vad_signal":
+                # VAD 신호 처리 (기존 intervention 시스템과 연동)
+                pass
+                
+    except WebSocketDisconnect:
+        print(f"[WS] 세션 {session_id} WebSocket 연결 해제")
+    except Exception as e:
+        print(f"[WS] 세션 {session_id} 오류: {e}")
+    finally:
+        # 연결 제거
+        if session_id in state.websocket_connections:
+            if websocket in state.websocket_connections[session_id]:
+                state.websocket_connections[session_id].remove(websocket)
 
 
 # ========== Emotion API ==========
@@ -2550,14 +4619,140 @@ async def get_celery_queues():
         return {"error": str(e)}
 
 
+# ========== 면접 완료 워크플로우 API ==========
+
+@app.get("/api/interview/{session_id}/workflow-status")
+async def get_interview_workflow_status(session_id: str):
+    """
+    면접 완료 워크플로우 상태 조회
+    
+    - 백그라운드에서 실행 중인 리포트 생성 상태 확인
+    - 완료 시 최종 리포트 반환
+    """
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    workflow_task_id = session.get("completion_workflow_task_id")
+    
+    if not workflow_task_id:
+        return {
+            "session_id": session_id,
+            "workflow_status": "not_started",
+            "message": "면접 완료 워크플로우가 시작되지 않았습니다."
+        }
+    
+    if not CELERY_AVAILABLE:
+        return {
+            "session_id": session_id,
+            "workflow_status": "celery_unavailable",
+            "message": "Celery 서비스를 사용할 수 없습니다."
+        }
+    
+    try:
+        from celery.result import AsyncResult
+        result = AsyncResult(workflow_task_id, app=celery_app)
+        
+        response = {
+            "session_id": session_id,
+            "workflow_task_id": workflow_task_id,
+            "workflow_status": result.status,
+            "started_at": session.get("completion_started_at")
+        }
+        
+        if result.ready():
+            if result.successful():
+                workflow_result = result.get(timeout=5)
+                response["report"] = workflow_result.get("report")
+                response["evaluations"] = workflow_result.get("evaluations")
+                response["emotion_stats"] = workflow_result.get("emotion_stats")
+            else:
+                response["error"] = str(result.result)
+        
+        return response
+        
+    except Exception as e:
+        return {
+            "session_id": session_id,
+            "workflow_status": "error",
+            "error": str(e)
+        }
+
+
+@app.post("/api/interview/{session_id}/collect-evaluations")
+async def collect_pending_evaluations(session_id: str):
+    """
+    대기 중인 Celery 평가 결과 수집
+    
+    - 백그라운드에서 완료된 평가들을 세션에 저장
+    - 수집된 평가 개수 반환
+    """
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    before_count = len(session.get("evaluations", []))
+    evaluations = await interviewer.collect_celery_evaluations(session_id)
+    after_count = len(evaluations)
+    
+    return {
+        "session_id": session_id,
+        "collected_count": after_count - before_count,
+        "total_evaluations": after_count,
+        "pending_tasks": len(state.get_session(session_id).get("pending_eval_tasks", []))
+    }
+
+
+@app.post("/api/interview/{session_id}/start-workflow")
+async def start_interview_workflow(session_id: str):
+    """
+    면접 완료 워크플로우 수동 시작
+    
+    - 면접이 정상 종료되지 않은 경우 수동으로 워크플로우 시작
+    """
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    if session.get("completion_workflow_task_id"):
+        return {
+            "session_id": session_id,
+            "status": "already_started",
+            "task_id": session.get("completion_workflow_task_id")
+        }
+    
+    task_id = await interviewer.start_interview_completion_workflow(session_id)
+    
+    if task_id:
+        return {
+            "session_id": session_id,
+            "status": "started",
+            "task_id": task_id
+        }
+    else:
+        return {
+            "session_id": session_id,
+            "status": "failed",
+            "message": "워크플로우 시작에 실패했습니다."
+        }
+
+
 # ========== 서버 종료 처리 ==========
 
 @app.on_event("shutdown")
 async def on_shutdown():
     """서버 종료 시 정리"""
+    # WebRTC 연결 정리
     coros = [pc.close() for pc in state.pcs]
     await asyncio.gather(*coros, return_exceptions=True)
     state.pcs.clear()
+    
+    # ThreadPoolExecutor 정리
+    print("🔄 [Shutdown] ThreadPoolExecutor 종료 중...")
+    LLM_EXECUTOR.shutdown(wait=False)
+    RAG_EXECUTOR.shutdown(wait=False)
+    VISION_EXECUTOR.shutdown(wait=False)
+    print("✅ [Shutdown] 모든 Executor 종료 완료")
 
 
 # ========== 메인 실행 ==========
@@ -2565,10 +4760,20 @@ async def on_shutdown():
 if __name__ == "__main__":
     import uvicorn
     
-    print("\n" + "=" * 60)
-    print("🎯 AI 모의면접 통합 시스템")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("🎯 AI 모의면접 통합 시스템 (비동기 + Celery 백그라운드 처리)")
+    print("=" * 70)
     print(f"  • LLM 모델: {DEFAULT_LLM_MODEL}")
+    print(f"  • 비동기 처리 (ThreadPoolExecutor):")
+    print(f"    - LLM Executor: 4 workers (질문 생성, 평가)")
+    print(f"    - RAG Executor: 2 workers (이력서 검색)")
+    print(f"    - Vision Executor: 2 workers (감정 분석)")
+    print(f"  • Celery 백그라운드 작업:")
+    print(f"    - llm_evaluation: 답변 평가 (배치)")
+    print(f"    - emotion_analysis: 감정 분석 (배치)")
+    print(f"    - report_generation: 리포트 생성")
+    print(f"    - tts_generation: TTS 프리페칭")
+    print(f"    - rag_processing: 이력서 인덱싱")
     print(f"  • 서비스 상태:")
     print(f"    - LLM: {'✅ 활성화' if LLM_AVAILABLE else '❌ 비활성화'}")
     print(f"    - TTS: {'✅ 활성화' if TTS_AVAILABLE else '❌ 비활성화'}")
@@ -2576,11 +4781,16 @@ if __name__ == "__main__":
     print(f"    - 감정분석: {'✅ 활성화' if EMOTION_AVAILABLE else '❌ 비활성화'}")
     print(f"    - Redis: {'✅ 활성화' if REDIS_AVAILABLE else '❌ 비활성화'}")
     print(f"    - Celery: {'✅ 활성화' if CELERY_AVAILABLE else '❌ 비활성화'}")
-    print("=" * 60)
-    print("  📋 Celery Worker 시작 명령어:")
+    print("=" * 70)
+    print("  📋 Celery Worker 시작 명령어 (별도 터미널에서 실행):")
+    print("     # 모든 큐 처리")
     print("     celery -A celery_app worker --pool=solo --loglevel=info")
-    print("=" * 60)
+    print("")
+    print("     # 특정 큐만 처리 (권장: 여러 터미널에서 분산)")
+    print("     celery -A celery_app worker -Q llm_evaluation --pool=solo")
+    print("     celery -A celery_app worker -Q report_generation --pool=solo")
+    print("=" * 70)
     print("  🌐 http://localhost:8000 에서 접속하세요")
-    print("=" * 60 + "\n")
+    print("=" * 70 + "\n")
     
     uvicorn.run(app, host="0.0.0.0", port=8000)

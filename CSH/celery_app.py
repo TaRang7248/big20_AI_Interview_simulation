@@ -74,6 +74,7 @@ celery_app.conf.update(
         Queue("report_generation", Exchange("report"), routing_key="report.#"),
         Queue("tts_generation", Exchange("tts"), routing_key="tts.#"),
         Queue("rag_processing", Exchange("rag"), routing_key="rag.#"),
+        Queue("question_generation", Exchange("question"), routing_key="question.#"),
     ),
     
     # 라우팅 설정
@@ -84,6 +85,11 @@ celery_app.conf.update(
         "celery_tasks.generate_tts_task": {"queue": "tts_generation"},
         "celery_tasks.process_resume_task": {"queue": "rag_processing"},
         "celery_tasks.batch_evaluate_task": {"queue": "llm_evaluation"},
+        "celery_tasks.prefetch_tts_task": {"queue": "tts_generation"},
+        "celery_tasks.generate_question_task": {"queue": "question_generation"},
+        "celery_tasks.save_session_to_redis_task": {"queue": "default"},
+        "celery_tasks.batch_emotion_analysis_task": {"queue": "emotion_analysis"},
+        "celery_tasks.complete_interview_workflow_task": {"queue": "report_generation"},
     },
     
     # 로깅 설정
