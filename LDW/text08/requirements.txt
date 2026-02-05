@@ -3,6 +3,7 @@ uvicorn
 openai
 sqlalchemy
 psycopg2-binary
+asyncpg
 pgvector
 python-dotenv
 jinja2

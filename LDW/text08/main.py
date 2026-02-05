@@ -1,59 +1,41 @@
-import uvicorn
-import webbrowser
-import threading
-import time
-import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
-from fastapi import Request
-from api.interview import router as interview_router
-from db.postgres import init_db
-from db.sqlite import init_sqlite
-
 from contextlib import asynccontextmanager
+from db.database import engine
+from api import auth, interview, feedback
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🚀 Initializing databases...")
-    try:
-        init_db()
-        print("✅ PostgreSQL (pgvector) initialized.")
-    except Exception as e:
-        print(f"❌ Postgres init error: {e}")
-    
-    try:
-        init_sqlite()
-        print("✅ SQLite (interview_save.db) initialized.")
-    except Exception as e:
-        print(f"❌ SQLite init error: {e}")
+    # Startup: could check DB connection here
     yield
+    # Shutdown: close DB connection
+    await engine.dispose()
 
-app = FastAPI(title="AI Interview Simulation", lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, title="AI Interview Simulation")
 
-# Routes
-app.include_router(interview_router, prefix="/api")
-
-# Static files & Templates
-os.makedirs("static/js", exist_ok=True)
-os.makedirs("templates", exist_ok=True)
+# Static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Templates
 templates = Jinja2Templates(directory="templates")
+
+# Routers
+app.include_router(auth.router, prefix="/api/auth", tags=["Auth"])
+app.include_router(interview.router, prefix="/api/interview", tags=["Interview"])
+app.include_router(feedback.router, prefix="/api/feedback", tags=["Feedback"])
+
+from fastapi import Request
+from fastapi.responses import HTMLResponse
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-def open_browser():
-    """Automatically opens matching URL in default browser after server starts."""
-    time.sleep(2)  # Wait for uvicorn to bind
-    print("🌐 Opening browser at http://127.0.0.1:8000...")
-    webbrowser.open("http://127.0.0.1:8000")
+@app.get("/interview.html", response_class=HTMLResponse)
+async def read_interview(request: Request):
+    return templates.TemplateResponse("interview.html", {"request": request})
 
-if __name__ == "__main__":
-    # Start browser auto-open in a daemon thread
-    threading.Thread(target=open_browser, daemon=True).start()
-    
-    # Run FastAPI server
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+@app.get("/feedback.html", response_class=HTMLResponse)
+async def read_feedback(request: Request):
+    return templates.TemplateResponse("feedback.html", {"request": request})
