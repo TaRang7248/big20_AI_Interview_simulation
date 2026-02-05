@@ -2345,8 +2345,9 @@ async def index():
             let currentUser = null;
             
             // 페이지 로드 시 세션 확인
+            // sessionStorage 사용 - 브라우저/탭 종료 시 자동 로그아웃
             window.onload = function() {
-                const savedUser = localStorage.getItem('interview_user');
+                const savedUser = sessionStorage.getItem('interview_user');
                 if (savedUser) {
                     currentUser = JSON.parse(savedUser);
                     updateUIForLoggedInUser();
@@ -2436,11 +2437,11 @@ async def index():
                     const result = await response.json();
                     
                     if (result.success) {
-                        // 로컬 스토리지 업데이트
+                        // 세션 스토리지 업데이트 (브라우저 종료 시 자동 삭제)
                         currentUser = { ...currentUser, ...data };
                         delete currentUser.current_password;
                         delete currentUser.new_password;
-                        localStorage.setItem('interview_user', JSON.stringify(currentUser));
+                        sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
                         document.getElementById('userName').textContent = currentUser.name;
                         alert('회원정보가 수정되었습니다.');
                         closeEditModal();
@@ -2639,7 +2640,7 @@ async def index():
                     
                     if (result.success) {
                         currentUser = result.user;
-                        localStorage.setItem('interview_user', JSON.stringify(currentUser));
+                        sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
                         closeModals();
                         updateUIForLoggedInUser();
                     } else {
@@ -2663,8 +2664,8 @@ async def index():
             
             function logout() {
                 currentUser = null;
-                localStorage.removeItem('interview_user');
-                localStorage.removeItem('login_time');
+                sessionStorage.removeItem('interview_user');
+                sessionStorage.removeItem('login_time');
                 document.getElementById('authButtons').style.display = 'flex';
                 document.getElementById('userInfo').classList.remove('active');
                 stopAutoLogoutTimer();
@@ -2720,32 +2721,31 @@ async def index():
                 startSessionTimer();
                 resetIdleTimer();
                 
-                // 로그인 시간 저장
-                localStorage.setItem('login_time', Date.now().toString());
+                // 로그인 시간 저장 (sessionStorage - 브라우저 종료 시 자동 삭제)
+                sessionStorage.setItem('login_time', Date.now().toString());
             }
             
-            // 페이지 떠날 때 로그아웃 (선택적)
-            window.addEventListener('beforeunload', () => {
-                // 브라우저 탭/창 닫을 때 세션 정보 유지 여부 결정
-                // 완전히 로그아웃하려면 아래 주석 해제
-                // logout();
-            });
-            
-            // 다른 탭에서 로그아웃했는지 감지
-            window.addEventListener('storage', (e) => {
-                if (e.key === 'interview_user' && e.newValue === null) {
-                    // 다른 탭에서 로그아웃됨
-                    currentUser = null;
-                    document.getElementById('authButtons').style.display = 'flex';
-                    document.getElementById('userInfo').classList.remove('active');
-                    stopAutoLogoutTimer();
+            // 브라우저/탭 종료 시 자동 로그아웃
+            // sessionStorage 사용으로 브라우저 종료 시 자동으로 세션 데이터 삭제됨
+            // 추가 보안: visibilitychange 이벤트로 탭 전환 감지
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'visible' && currentUser) {
+                    // 탭이 다시 활성화되면 세션 유효성 확인
+                    const savedUser = sessionStorage.getItem('interview_user');
+                    if (!savedUser) {
+                        // 세션이 만료됨 (다른 탭에서 로그아웃되었거나 세션 스토리지가 클리어됨)
+                        currentUser = null;
+                        document.getElementById('authButtons').style.display = 'flex';
+                        document.getElementById('userInfo').classList.remove('active');
+                        stopAutoLogoutTimer();
+                    }
                 }
             });
             
             // 페이지 로드 시 로그인 상태면 자동 로그아웃 타이머 시작
             if (currentUser) {
-                // 이전 로그인 시간 확인
-                const loginTime = localStorage.getItem('login_time');
+                // 이전 로그인 시간 확인 (sessionStorage 사용)
+                const loginTime = sessionStorage.getItem('login_time');
                 if (loginTime) {
                     const elapsed = Date.now() - parseInt(loginTime);
                     if (elapsed > SESSION_TIMEOUT) {
@@ -2785,7 +2785,7 @@ async def index():
                         .then(result => {
                             if (result.success) {
                                 currentUser = result.user;
-                                localStorage.setItem('interview_user', JSON.stringify(currentUser));
+                                sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
                                 updateUIForLoggedInUser();
                             }
                             window.history.replaceState({}, '', '/');
