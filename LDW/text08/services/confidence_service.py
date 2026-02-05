@@ -5,13 +5,19 @@ import time
 
 class ConfidenceService:
     def __init__(self):
-        self.mp_face_mesh = mp.solutions.face_mesh
-        self.face_mesh = self.mp_face_mesh.FaceMesh(
-            max_num_faces=1,
-            refine_landmarks=True,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5
-        )
+        try:
+            self.mp_face_mesh = mp.solutions.face_mesh
+            self.face_mesh = self.mp_face_mesh.FaceMesh(
+                max_num_faces=1,
+                refine_landmarks=True,
+                min_detection_confidence=0.5,
+                min_tracking_confidence=0.5
+            )
+            self.available = True
+        except Exception as e:
+            print(f"Warning: MediaPipe initialization failed: {e}")
+            self.available = False
+            self.face_mesh = None
         
         # 분석 상태 저장
         self.total_frames = 0
@@ -90,6 +96,9 @@ class ConfidenceService:
         """
         프레임 데이터를 받아 분석하고 내부 상태를 업데이트함
         """
+        if not getattr(self, "available", False):
+            return
+
         try:
             if self.start_time is None:
                 self.start_time = time.time()
