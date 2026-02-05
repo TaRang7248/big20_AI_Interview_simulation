@@ -18,7 +18,7 @@ def get_embedding(text):
 def migrate():
     init_db()
     
-    sqlite_path = r'C:\big20\big20_AI_Interview_simulation\LDW\text07\db\interview.db'
+    sqlite_path = r'C:\big20\big20_AI_Interview_simulation\LDW\text08\db\interview.db'
     if not os.path.exists(sqlite_path):
         print(f"SQLite DB not found at {sqlite_path}")
         return

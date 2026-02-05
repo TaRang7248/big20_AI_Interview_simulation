@@ -51,7 +51,7 @@
             padding: 3rem;
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
             transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-            
+
             /* 고정 사이즈 및 스크롤 추가 */
             height: 85vh;
             max-height: 800px;
@@ -64,9 +64,11 @@
         .card::-webkit-scrollbar {
             width: 6px;
         }
+
         .card::-webkit-scrollbar-track {
             background: transparent;
         }
+
         .card::-webkit-scrollbar-thumb {
             background-color: var(--primary);
             border-radius: 10px;
@@ -416,6 +418,14 @@
 
             <div id="interview-area">
                 <div class="interview-header">
+                    <div id="camera-container"
+                        style="position: relative; width: 120px; height: 90px; border-radius: 12px; overflow: hidden; border: 1px solid var(--glass-border); background: #000;">
+                        <video id="camera-preview" autoplay playsinline muted
+                            style="width: 100%; height: 100%; object-fit: cover;"></video>
+                        <div id="emotion-badge"
+                            style="position: absolute; bottom: 4px; right: 4px; background: rgba(0,0,0,0.6); color: white; padding: 2px 6px; border-radius: 4px; font-size: 0.7rem;">
+                            Neutral</div>
+                    </div>
                     <div id="progress-container">
                         <div id="progress-bar" style="width: 10%;"></div>
                     </div>
@@ -448,10 +458,14 @@
 
             <div id="result-area" style="display:none;">
                 <h1 id="result-title">면접 결과</h1>
-                <div id="final-stats">
-                    <div class="stat-card" id="pass-fail-card">
+                <div id="final-stats" style="display: flex; gap: 1rem; justify-content: center;">
+                    <div class="stat-card" id="pass-fail-card" style="flex: 1;">
                         <span class="label">최종 결과</span>
                         <span class="value" id="pass-fail-value">-</span>
+                    </div>
+                    <div class="stat-card" id="confidence-card" style="flex: 1;">
+                        <span class="label">자신감 점수 (AI 분석)</span>
+                        <span class="value" id="confidence-value">-</span>
                     </div>
                 </div>
                 <div id="feedback-list">

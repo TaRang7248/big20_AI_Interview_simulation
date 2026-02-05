@@ -40,6 +40,7 @@ async function startInterview() {
             interviewArea.style.display = 'block';
             setTimeout(() => interviewArea.style.opacity = '1', 50);
             updateUIForQuestion();
+            startCamera(); // Start camera for vision AI
         }, 300);
 
     } catch (error) {
@@ -203,7 +204,7 @@ async function processFinalAnswer(answerText) {
         });
 
         if (result.is_completed) {
-            showResults(result.evaluation.pass_fail);
+            showResults(result.evaluation.pass_fail, result.evaluation.confidence_score);
         } else {
             currentQuestion = result.next_question;
             currentStep = result.step;
@@ -232,12 +233,16 @@ function enableRecordButton() {
     btnRecord.innerText = "답변 시작";
 }
 
-function showResults(passFail) {
+function showResults(passFail, confidenceScore) {
     document.getElementById('interview-area').style.display = 'none';
     const resultArea = document.getElementById('result-area');
     resultArea.style.display = 'block';
 
     document.getElementById('pass-fail-value').innerText = passFail || "평가 완료";
+    if (confidenceScore !== undefined) {
+        document.getElementById('confidence-value').innerText = confidenceScore + "점";
+    }
+
     if (passFail === "불합격") {
         document.getElementById('pass-fail-value').style.color = '#fb7185';
     }
@@ -255,4 +260,64 @@ function showResults(passFail) {
         `;
         feedbackList.appendChild(div);
     });
+}
+// --- Vision AI Logic ---
+let visionInterval = null;
+
+async function startCamera() {
+    try {
+        const video = document.getElementById('camera-preview');
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        video.srcObject = stream;
+
+        // Start analyzing every 3 seconds
+        visionInterval = setInterval(analyzeFrame, 3000);
+    } catch (err) {
+        console.error("Camera Error:", err);
+        document.getElementById('emotion-badge').innerText = "No Camera";
+    }
+}
+
+async function analyzeFrame() {
+    const video = document.getElementById('camera-preview');
+    if (!video || !video.srcObject) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(async (blob) => {
+        if (!blob) return;
+        const formData = new FormData();
+        formData.append('file', blob, 'frame.jpg');
+        if (currentSession) {
+            formData.append('session_id', currentSession);
+        }
+
+        try {
+            const response = await fetch('/api/analyze_face', {
+                method: 'POST',
+                body: formData
+            });
+            const data = await response.json();
+            if (data.dominant_emotion) {
+                const badge = document.getElementById('emotion-badge');
+                // Translate emotion to Korean if desired, or keep English
+                const emotionMap = {
+                    "angry": "분노",
+                    "disgust": "혐오",
+                    "fear": "공포",
+                    "happy": "행복",
+                    "sad": "슬픔",
+                    "surprise": "놀람",
+                    "neutral": "평온"
+                };
+                badge.innerText = emotionMap[data.dominant_emotion] || data.dominant_emotion;
+            }
+        } catch (err) {
+            console.error("Frame Analysis Error:", err);
+        }
+    }, 'image/jpeg');
 }
