@@ -204,7 +204,7 @@ async function processFinalAnswer(answerText) {
         });
 
         if (result.is_completed) {
-            showResults(result.evaluation.pass_fail);
+            showResults(result.evaluation.pass_fail, result.evaluation.confidence_score);
         } else {
             currentQuestion = result.next_question;
             currentStep = result.step;
@@ -233,12 +233,16 @@ function enableRecordButton() {
     btnRecord.innerText = "답변 시작";
 }
 
-function showResults(passFail) {
+function showResults(passFail, confidenceScore) {
     document.getElementById('interview-area').style.display = 'none';
     const resultArea = document.getElementById('result-area');
     resultArea.style.display = 'block';
 
     document.getElementById('pass-fail-value').innerText = passFail || "평가 완료";
+    if (confidenceScore !== undefined) {
+        document.getElementById('confidence-value').innerText = confidenceScore + "점";
+    }
+
     if (passFail === "불합격") {
         document.getElementById('pass-fail-value').style.color = '#fb7185';
     }
@@ -265,7 +269,7 @@ async function startCamera() {
         const video = document.getElementById('camera-preview');
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = stream;
-        
+
         // Start analyzing every 3 seconds
         visionInterval = setInterval(analyzeFrame, 3000);
     } catch (err) {
@@ -288,6 +292,9 @@ async function analyzeFrame() {
         if (!blob) return;
         const formData = new FormData();
         formData.append('file', blob, 'frame.jpg');
+        if (currentSession) {
+            formData.append('session_id', currentSession);
+        }
 
         try {
             const response = await fetch('/api/analyze_face', {

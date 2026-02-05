@@ -64,11 +64,20 @@ from services.vision_service import VisionService
 vision_service = VisionService()
 
 @router.post("/analyze_face")
-async def analyze_face(file: UploadFile = File(...)):
-    """Analyzes a video frame for emotion."""
+async def analyze_face(file: UploadFile = File(...), session_id: str = Form(None)):
+    """Analyzes a video frame for emotion and processes confidence."""
     try:
         image_content = await file.read()
+        
+        # 1. Vision Analysis (Emotion) - for UI feedback
+        # We need to run this concurrently effectively or just await it
         result = await vision_service.analyze_frame(image_content)
+        
+        # 2. Confidence Analysis (Background process)
+        if session_id:
+            # Run directly since it's fast media pipe calculation
+            interview_service.process_frame(session_id, image_content)
+            
         return result
     except Exception as e:
         print(f"Face Analysis Error: {e}")
