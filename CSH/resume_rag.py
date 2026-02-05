@@ -23,21 +23,21 @@ class ResumeRAG:
         DEFAULT_CONNECTION = "POSTGRES_CONNECTION_STRING"
         conn_str = connection_string or os.getenv("POSTGRES_CONNECTION_STRING") or DEFAULT_CONNECTION
         
-        # SQLAlchemy/PGVector는 'postgresql+psycopg2://' 형식이 필요하므로 변환
+        # langchain-postgres는 psycopg3를 사용하므로 'postgresql+psycopg://' 형식 필요
         if conn_str and conn_str.startswith("postgresql://"):
-            conn_str = conn_str.replace("postgresql://", "postgresql+psycopg2://", 1)
+            conn_str = conn_str.replace("postgresql://", "postgresql+psycopg://", 1)
         
         self.connection = conn_str
         self.collection_name = collection_name
 
-        # 임베딩 모델: Llama 3 (Ollama)
-        # 주의: 'ollama pull llama3' 및 'ollama pull nomic-embed-text' (혹은 llama3 자체) 필요
+        # 임베딩 모델: Llama 3 8B 4-bit (Ollama)
+        # 주의: 'ollama pull llama3:8b-instruct-q4_0' 및 'ollama pull nomic-embed-text' 필요
         # 검색 품질을 위해 전용 임베딩 모델(nomic-embed-text)을 권장하지만, 
-        # 여기서는 편의상 llama3를 그대로 쓰거나, mxbai-embed-large 등을 쓸 수 있습니다.
-        # 이번 예제에서는 'llama3'를 임베딩 모델로도 사용해 봅니다. (가능하다면 'nomic-embed-text' 추천)
+        # 여기서는 편의상 llama3:8b-instruct-q4_0를 그대로 쓰거나, mxbai-embed-large 등을 쓸 수 있습니다.
+        # 이번 예제에서는 'llama3:8b-instruct-q4_0'를 임베딩 모델로도 사용해 봅니다. (가능하다면 'nomic-embed-text' 추천)
         
-        # llama3라는 AI 모델을 사용하여 텍스트를 숫자로 변환하는 임베딩 엔진을 생성
-        self.embeddings = OllamaEmbeddings(model="llama3") 
+        # llama3:8b-instruct-q4_0 모델을 사용하여 텍스트를 숫자로 변환하는 임베딩 엔진을 생성
+        self.embeddings = OllamaEmbeddings(model="llama3:8b-instruct-q4_0") 
 
         # PGVector 인스턴스 초기화 (연결 자체는 나중에 이루어짐)
         # 데이터베이스와 어떻게 통신할지에 대한 설정 정보를 담은 객체를 만든다

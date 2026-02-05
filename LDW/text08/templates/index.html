@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>AI 면접 시뮬레이션 - 로그인</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>AI 면접 시뮬레이션</header>
+        <main>
+            <div class="login-form">
+                <h2>지원자 정보 입력</h2>
+                <input type="text" id="username" placeholder="이름을 입력하세요" required>
+                <input type="text" id="job_role" placeholder="지원 직무 (예: AI 개발자)" required>
+                <button onclick="startInterview()">면접 시작</button>
+            </div>
+        </main>
+    </div>
+    <script>
+        async function startInterview() {
+            const username = document.getElementById('username').value;
+            const job_role = document.getElementById('job_role').value;
+
+            if (!username || !job_role) {
+                alert("모든 정보를 입력해주세요.");
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('user_id', 1); // Mock ID or create user first
+            formData.append('candidate_name', username); // Use actual endpoint to create user properly if needed.
+            // For simplicity in this vertical slice, we'll hit start endpoint directly with mock user_id if we skipped auth logic in JS.
+            // Actually let's do it properly:
+
+            // 1. Login/Register
+            const loginData = new FormData();
+            loginData.append('username', username);
+            loginData.append('job_role', job_role);
+
+            try {
+                const res = await fetch('/api/auth/login', { method: 'POST', body: loginData });
+                const user = await res.json();
+
+                // 2. Start Interview
+                const startData = new FormData();
+                startData.append('user_id', user.user_id);
+                startData.append('job_role', job_role);
+                startData.append('candidate_name', username);
+
+                const startRes = await fetch('/api/interview/start', { method: 'POST', body: startData });
+                const session = await startRes.json();
+
+                if (session.session_id) {
+                    window.location.href = `/interview.html?session_id=${session.session_id}`;
+                }
+            } catch (e) {
+                alert("Error starting interview: " + e);
+            }
+        }
+    </script>
+</body>
+
+</html>

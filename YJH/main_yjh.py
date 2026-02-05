@@ -1,184 +1,301 @@
-# YJH 개인 작업용 FastAPI 엔트리포인트 (임시)
-
-
 import sys
 import os
+import uuid
+import traceback
+import shutil # 파일 저장용
 
-# 프로젝트 루트 경로를 sys.path에 추가하여 모듈 import 에러 방지
+# 프로젝트 루트 경로 설정
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware # <--- 이거 추가!
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
-from YJH.agents.interview_graph import app as interview_graph
-from fastapi import UploadFile, File
-from YJH.services.voice_service import transcribe_audio
-from fastapi.responses import FileResponse
-from YJH.services.tts_service import generate_audio
-import uuid
 
+# 프로젝트 모듈 임포트
+from YJH.agents.interview_graph import app as interview_graph
+from YJH.services.voice_service import transcribe_audio
+from YJH.services.tts_service import generate_audio
+from YJH.database import get_db, SessionLocal
+# [수정] EvaluationReport 모델 추가 임포트
+from YJH.models import InterviewSession, Transcript, EvaluationReport
+# [수정] 리포트 생성 서비스 추가 임포트
+from YJH.services.report_service import generate_interview_report
+# [추가] 비디오 면접(Video Interview)
+from YJH.services.vision_service import analyze_face_emotion
+# [추가] 업로드 API 추가 및 RAG 연동 임포트
+from YJH.services.rag_service import process_resume_pdf, get_relevant_context
 
 # 1. FastAPI 앱 초기화
 app = FastAPI(
     title="AI Interview Agent (YJH)",
-    description="LangGraph와 RAG가 적용된 모의면접 에이전트 API",
+    description="LangGraph + RAG + DB + Voice + Report (Full Version)",
     version="1.0.0"
 )
 
-# 2. 요청/응답 데이터 모델 정의 (Pydantic)
+# CORS 미들웨어 설정 (app 생성 바로 아래에 추가)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 모든 주소 허용 (보안상 로컬 개발용)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 2. 데이터 모델 정의
 class ChatRequest(BaseModel):
     user_input: str
-    thread_id: str = "session_1"  # 대화 맥락 유지를 위한 세션 ID
+    thread_id: str = "session_1"
 
 class ChatResponse(BaseModel):
     response: str
     current_phase: str
     question_count: int
 
-# 3. 헬스 체크 엔드포인트
+# --- [Helper] DB 저장 함수 ---
+def save_transcript(db, thread_id: str, sender: str, content: str):
+    """대화 내용을 DB에 저장하고 로그를 출력합니다."""
+    try:
+        # 1. 세션 찾기 (없으면 생성)
+        session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
+        if not session:
+            print(f"🆕 [DB] 새 세션 생성: {thread_id}")
+            session = InterviewSession(thread_id=thread_id, candidate_name="Unknown")
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+        
+        # 2. 대화 기록 저장
+        transcript = Transcript(session_id=session.id, sender=sender, content=content)
+        db.add(transcript)
+        db.commit()
+        print(f"💾 [DB 저장] {sender}: {content[:30]}...") # 로그 출력
+    except Exception as e:
+        print(f"❌ [DB 저장 실패] {e}")
+        db.rollback()
+
+# 3. 헬스 체크
 @app.get("/")
 async def health_check():
-    return {"status": "ok", "message": "AI 면접관이 준비되었습니다."}
+    return {"status": "ok", "message": "AI 면접관(Voice+DB+Report) 준비 완료."}
 
-# 4. 면접 대화 엔드포인트 (핵심)
+# 4. 텍스트 대화 엔드포인트
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(request: ChatRequest):
-    """
-    사용자의 답변을 받아 에이전트(LangGraph)를 실행하고,
-    다음 질문이나 반응을 반환합니다.
-    """
+    """텍스트로 대화하고 DB에 저장합니다."""
+    db = SessionLocal() # DB 세션 열기
     try:
-        # LangGraph에 전달할 초기 상태 구성
-        # thread_id를 통해 이전 대화 기억(Memory)을 로드합니다.
+        # [저장] 사용자 입력
+        save_transcript(db, request.thread_id, "human", request.user_input)
+
+        # LangGraph 실행
         config = {"configurable": {"thread_id": request.thread_id}}
+        inputs = {"messages": [HumanMessage(content=request.user_input)]}
         
-        # 그래프 실행 (invoke)
-        # messages 키에 사용자의 입력을 HumanMessage로 포장해서 넣습니다.
-        # 주의: interview_graph.py의 State 정의에 따라 필요한 초기값을 넣어줍니다.
-        inputs = {
-            "messages": [HumanMessage(content=request.user_input)],
-            # phase나 question_count는 그래프 내부 메모리에 있다면 생략 가능하지만,
-            # 첫 시작일 경우를 대비해 기본값을 설정할 수도 있습니다.
-            "phase": "technical_interview", 
-            "question_count": 0
-        }
-
-        # 그래프 실행!
-        # stream=False로 하여 결과를 한 번에 받습니다. (실제 서비스는 stream 권장)
         result = interview_graph.invoke(inputs, config=config)
-        
-        # 결과 파싱
-        # LangGraph의 결과인 result['messages']의 마지막 메시지가 AI의 응답입니다.
         last_message = result["messages"][-1]
         
+        # [저장] AI 응답
+        save_transcript(db, request.thread_id, "ai", last_message.content)
+
         return ChatResponse(
             response=last_message.content,
             current_phase=result.get("phase", "unknown"),
             question_count=result.get("question_count", 0)
         )
-
     except Exception as e:
-        # 에러 발생 시 상세 로그 출력 (개발용)
-        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close() # DB 세션 닫기
 
-if __name__ == "__main__":
-    import uvicorn
-    # 로컬 개발용 서버 실행
-    uvicorn.run("YJH.main_yjh:app", host="0.0.0.0", port=8000, reload=True)
-
-
-
-# [신규 추가 26.02.02] 음성 대화 엔드포인트
-@app.post("/chat/voice", response_model=ChatResponse)
-async def chat_voice_endpoint(
-    file: UploadFile = File(...), 
-    thread_id: str = "voice_session_1"
-):
-    """
-    사용자의 음성 파일(.wav, .m4a, .mp3, .webm 등)을 받아
-    STT -> LangGraph(Agent) -> 텍스트 응답을 반환합니다.
-    """
-    try:
-        # 1. 업로드된 오디오 파일 읽기
-        audio_bytes = await file.read()
-        
-        # 2. STT 변환 (Deepgram)
-        # 파일의 content_type(예: audio/mpeg)을 그대로 전달
-        user_text = await transcribe_audio(audio_bytes, mimetype=file.content_type)
-        
-        if not user_text.strip():
-            return ChatResponse(
-                response="음성이 명확하지 않습니다. 다시 말씀해 주시겠어요?",
-                current_phase="error",
-                question_count=0
-            )
-
-        print(f"🎤 [STT 인식 결과]: {user_text}") # 로그 확인용
-
-        # 3. LangGraph 실행 (기존 로직 재사용)
-        config = {"configurable": {"thread_id": thread_id}}
-        inputs = {
-            "messages": [HumanMessage(content=user_text)],
-            "phase": "technical_interview",
-            "question_count": 0 # 실제로는 DB에서 불러와야 함
-        }
-        
-        result = interview_graph.invoke(inputs, config=config)
-        last_message = result["messages"][-1]
-        
-        return ChatResponse(
-            response=last_message.content,
-            current_phase=result.get("phase", "unknown"),
-            question_count=result.get("question_count", 0)
-        )
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-# [신규 추가 26.02.02] 생성된 오디오 파일 자체를 반환
-@app.post("/chat/voice/audio") # 기존 /chat/voice 와 구분하기 위해 경로 변경 가능
+# 5. 음성 대화 (Audio -> Audio) 엔드포인트
+@app.post("/chat/voice/audio")
 async def chat_voice_audio_endpoint(
     file: UploadFile = File(...), 
-    thread_id: str = "voice_session_1"
+    thread_id: str = "voice_session_final_test" # # 기본값 통일
 ):
     """
-    [NEW] 음성 -> STT -> LLM -> TTS -> 음성 파일 반환 (Full Duplex)
+    [Full Duplex] 음성 파일 업로드 -> STT -> LangGraph -> TTS -> 음성 파일 반환
     """
+    db = SessionLocal()
     try:
-        # 1. STT 변환
+        # 1. STT 변환 (Deepgram)
         audio_bytes = await file.read()
         user_text = await transcribe_audio(audio_bytes, mimetype=file.content_type)
-        print(f"🎤 User: {user_text}")
+        print(f"🎤 User(STT): {user_text}")
 
         if not user_text.strip():
             raise HTTPException(status_code=400, detail="음성이 인식되지 않았습니다.")
 
-        # 2. LangGraph 추론
+        # [저장] 사용자 입력
+        save_transcript(db, thread_id, "human", user_text)
+
+        # ---------------------------------------------------------
+        # [RAG 핵심 로직] 이력서에서 관련 내용 검색
+        # 사용자의 발언(user_text)과 관련된 이력서 내용을 찾아옵니다.
+        # 예: 사용자가 "프로젝트 경험 말해볼게" -> 프로젝트 관련 이력서 내용 검색
+        retrieved_context = get_relevant_context(thread_id, user_text)
+        
+        final_input_text = user_text
+        if retrieved_context:
+            print(f"📚 [RAG 검색 성공] 이력서 내용 참고함 (길이: {len(retrieved_context)})")
+            # 프롬프트 엔지니어링: 사용자 몰래 컨텍스트를 주입
+            final_input_text = f"""
+            [System Note: The following is relevant information retrieved from the candidate's resume. Use it to formulate your response or next question.]
+            --- Resume Context ---
+            {retrieved_context}
+            ----------------------
+            
+            User's Input: {user_text}
+            """
+        # ---------------------------------------------------------
+
+        # 2. LangGraph 실행 (주입된 텍스트 전달)
         config = {"configurable": {"thread_id": thread_id}}
         inputs = {
-            "messages": [HumanMessage(content=user_text)],
-            # 계속 동일한 자기소개 질문이 반복되어 주석처리
-            # "phase": "intro", # 수정, intro 자연스러운 라포(26.02.02) [압박 면접 모드, 코딩 테스트 모드, 피드백 모드] 에이전트 인격 교체 가능
-            # "question_count": 0 
+            "messages": [HumanMessage(content=final_input_text)] # 수정된 입력 사용
         }
         
         result = interview_graph.invoke(inputs, config=config)
         ai_text = result["messages"][-1].content
-        print(f"🤖 AI: {ai_text}")
+        print(f"🤖 AI(Logic): {ai_text}")
 
-        # 3. TTS 변환 (텍스트 -> 오디오)
-        # 파일명이 겹치지 않게 UUID 사용
+        # [저장] AI 응답
+        save_transcript(db, thread_id, "ai", ai_text)
+
+        # 3. TTS 변환 (OpenAI)
         output_filename = f"response_{uuid.uuid4()}.mp3"
         audio_path = await generate_audio(ai_text, output_file=output_filename)
 
-        # 4. 오디오 파일 반환 (브라우저에서 바로 재생 가능)
+        # 4. 파일 반환
         return FileResponse(audio_path, media_type="audio/mpeg", filename="ai_response.mp3")
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+# 6. [신규 추가] 면접 결과 리포트 생성 API
+@app.post("/report/{thread_id}")
+async def create_report_endpoint(thread_id: str):
+    """
+    특정 세션(thread_id)의 대화 기록을 분석하여 상세 평가 리포트를 생성합니다.
+    """
+    db = SessionLocal()
+    try:
+        # 1. 세션 조회
+        session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
+        if not session:
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+        # 2. 대화 기록 조회
+        transcripts = db.query(Transcript).filter(Transcript.session_id == session.id).order_by(Transcript.timestamp).all()
+        
+        if not transcripts:
+            raise HTTPException(status_code=400, detail="대화 기록이 없습니다.")
+
+        print(f"📊 [리포트 생성 시작] 세션: {thread_id}, 대화 수: {len(transcripts)}건")
+
+        # 3. LLM 분석 실행 (Rubric 기반)
+        report_data = await generate_interview_report(transcripts)
+        
+        if not report_data:
+            raise HTTPException(status_code=500, detail="리포트 생성 실패")
+
+        # 4. 결과 DB 저장
+        # Pydantic 모델의 필드들을 DB 테이블 컬럼에 매핑
+        report = db.query(EvaluationReport).filter(EvaluationReport.session_id == session.id).first()
+        
+        # 점수 형변환 (float -> int)
+        total_score_int = int(report_data.get("total_weighted_score", 0))
+        
+        if not report:
+            report = EvaluationReport(
+                session_id=session.id,
+                total_score=total_score_int,
+                technical_score=report_data["hard_skill"]["score"],
+                communication_score=report_data["communication"]["score"],
+                summary=report_data["overall_summary"],
+                details=report_data # 전체 상세 데이터(JSON) 저장
+            )
+            db.add(report)
+        else:
+            # 기존 리포트 갱신
+            report.total_score = total_score_int
+            report.technical_score = report_data["hard_skill"]["score"]
+            report.communication_score = report_data["communication"]["score"]
+            report.summary = report_data["overall_summary"]
+            report.details = report_data
+        
+        db.commit()
+        db.refresh(report)
+
+        print(f"✅ [리포트 저장 완료] ID: {report.id}, 점수: {total_score_int}점")
+        return {"status": "success", "report": report_data}
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+if __name__ == "__main__":
+    import uvicorn
+    # 모든 IP 허용, 포트 8001
+    uvicorn.run("YJH.main_yjh:app", host="0.0.0.0", port=8001, reload=True)
+
+
+
+# [신규] 비전(얼굴) 분석 엔드포인트
+@app.post("/analyze/face")
+async def analyze_face_endpoint(file: UploadFile = File(...)):
+    """
+    면접자의 스냅샷(이미지)을 받아 감정을 분석합니다. (DeepFace)
+    """
+    try:
+        image_bytes = await file.read()
+        result = analyze_face_emotion(image_bytes)
+        
+        print(f"👁️ [Vision 분석 결과]: {result.get('dominant_emotion')}")
+        
+        return {
+            "status": "success", 
+            "analysis": result
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+
+# [신규] 이력서 PDF 업로드 API
+@app.post("/upload/resume")
+async def upload_resume(
+    file: UploadFile = File(...), 
+    thread_id: str = "voice_session_final_test"
+):
+    """
+    PDF 이력서를 업로드하고 RAG용 벡터 DB를 생성합니다.
+    """
+    try:
+        # 1. 파일 임시 저장
+        upload_dir = "uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        file_path = os.path.join(upload_dir, f"{thread_id}_{file.filename}")
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        # 2. RAG 처리 (텍스트 추출 및 임베딩)
+        success = process_resume_pdf(thread_id, file_path)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="이력서 처리 중 오류 발생")
+            
+        return {"status": "success", "message": "이력서 분석 완료! 이제 맞춤형 질문이 가능합니다."}
 
     except Exception as e:
         import traceback
