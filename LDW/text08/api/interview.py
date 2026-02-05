@@ -73,7 +73,7 @@ async def submit_answer(
             # Or assume stt_service has a transcribe method that takes a path.
             # Looking at original code, stt_service.transcribe_audio(file_path) was used.
             try:
-                text_content = await stt_service.transcribe(file_path) # Assuming valid method
+                text_content = await stt_service.transcribe_audio(file_path) # Corrected function name
             except AttributeError:
                 # Fallback if stt_service signature is different
                 text_content = "(Audio transcription unavailable)"
@@ -133,7 +133,9 @@ async def submit_answer(
             "next_question": result["next_question"],
             "evaluation": result["evaluation"],
             "step": result["step"],
-            "is_completed": result["is_completed"]
+            "is_completed": result["is_completed"],
+            "stt": text_content,
+            "score": result["evaluation"].get("score", 0)
         }
 
     except Exception as e:
