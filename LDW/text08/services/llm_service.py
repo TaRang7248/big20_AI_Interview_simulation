@@ -1,84 +1,118 @@
+from openai import AsyncOpenAI
 import os
 import json
-from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
 
 class LLMService:
     def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
-        self.client = OpenAI(api_key=self.api_key)
-        self.model = "gpt-4o" # or gpt-3.5-turbo
+        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-    async def get_embedding(self, text):
-        """Generates embedding for vector search or storage."""
-        response = self.client.embeddings.create(
-            input=text,
-            model="text-embedding-3-small"
-        )
-        return response.data[0].embedding
+    async def get_embedding(self, text: str):
+        """Generates embedding for the given text."""
+        try:
+            response = await self.client.embeddings.create(
+                input=text,
+                model="text-embedding-3-small"
+            )
+            return response.data[0].embedding
+        except Exception as e:
+            print(f"Error generating embedding: {e}")
+            return []
 
-    async def generate_question(self, job_title, stage, context_questions=None):
-        """Generates an interview question based on stage and job title."""
+    async def generate_question(self, job_title: str, stage: str, context: list = None):
+        """
+        Generates the next interview question based on the stage and context.
+        Persona: Expert Interviewer in the specific field.
+        """
         context_str = ""
-        if context_questions:
-            context_str = "\n참고할 질문들:\n" + "\n".join([f"- {q}" for q in context_questions])
+        if context:
+            context_str = "\n".join([f"- {q}" for q in context])
 
-        stage_prompts = {
-            "intro": "면접의 시작으로 지원자에게 정중하게 자기소개를 부탁하는 질문을 생성해 주세요.",
-            "personality": "지원자의 인성과 가치관을 파악할 수 있는 질문을 생성해 주세요.",
-            "technical": f"지원자가 지원한 '{job_title}' 직무 지식을 심도 있게 묻는 질문을 생성해 주세요."
-        }
+        system_prompt = f"""
+        당신은 '{job_title}' 분야의 20년차 베테랑 전문가이자 면접관입니다.
+        지원자의 역량을 깊이 있게 파악하기 위해 날카롭고 핵심적인 질문을 던집니다.
         
-        prompt = f"""
-당신은 전문 면접관입니다. 지원자가 지원한 직무는 '{job_title}'입니다.
-현재 면접 단계: {stage_prompts.get(stage, stage)}
-{context_str}
+        당신의 역할:
+        1. '{job_title}' 직무에 가장 중요하고 실무적인 질문을 던지십시오.
+        2. 말투는 정중하면서도 전문적인 무게감이 있어야 합니다.
+        3. 반드시 '한국어'로 질문하십시오.
+        """
 
-위 내용을 바탕으로 면접 질문을 하나만 생성해 주세요.
-질문은 자연스럽고 전문적인 한국어 공대(합쇼체)를 사용하세요.
-추가적인 설명 없이 오직 질문 내용만 반환하세요.
-"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "당신은 노련한 채용 전문가이자 전문 면접관입니다. 모든 응답은 한글로 작성하세요."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
+        user_prompt = f"""
+        현재 면접 단계: {stage}
+        
+        참고 가능한 질문 리스트 (이 질문들과 유사하지만 다르게 변형하여 질문하세요):
+        {context_str}
+        
+        요구사항:
+        - 현재 단계({stage})에 맞는 질문을 1개만 생성하세요.
+        - 'intro' 단계라면 자기소개를 요청하세요.
+        - 질문 내용만 평문 텍스트로 출력하세요 (따옴표나 설명 없이).
+        """
 
-    async def evaluate_and_next_action(self, job_title, question, answer, is_last_question=False):
-        """Evaluates the candidate's answer and decides on a follow-up or next action."""
-        prompt = f"""
-면접 직무: {job_title}
-질문: {question}
-답변: {answer}
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Error generating question: {e}")
+            return f"{job_title} 직무에 대한 자기소개를 부탁드립니다."
 
-위 답변을 면접관의 관점에서 심층 분석하여 다음을 수행하세요:
-1. 답변의 충실도, 전문성, 구체성, 그리고 질문에 대한 적절성을 평가하여 0~100점 사이의 점수를 부여하세요 (score).
-2. 답변에 대한 구체적이고 건설적인 피드백을 한국어로 작성하세요 (feedback).
-3. 답변 내용 중 추가 확인이나 보완이 필요한 부분이 있다면 관련하여 '꼬리 질문(follow-up)'을 생성하세요. 
-4. 만약 답변이 충분히 완결되었다고 판단되면, 'is_follow_up'을 false로 설정하세요.
-5. 마지막 질문인 경우('{is_last_question}'), 전체적인 면접 태도와 답변을 종합하여 'pass_fail'(합격/불합격) 여부를 결정하세요.
+    async def evaluate_and_next_action(self, job_title: str, question: str, answer: str, is_last_question: bool):
+        """
+        Evaluates the answer and decides the next step.
+        """
+        system_prompt = f"""
+        당신은 '{job_title}' 분야의 최고 전문가 면접관입니다.
+        지원자의 답변을 평가하고 피드백을 제공해야 합니다.
+        
+        평가 기준:
+        1. 직무 이해도 및 전문성
+        2. 논리적 사고 및 문제 해결 능력
+        3. 답변의 구체성 및 진실성
+        
+        출력 형식 (JSON Only):
+        {{
+            "score": 0~100 사이의 점수 (정수),
+            "feedback": "지원자의 답변에 대한 구체적이고 전문적인 피드백 (반드시 한국어로 작성, 전문가의 조언 포함)",
+            "is_follow_up": true/false (답변이 부족하거나 흥미로워서 꼬리 질문이 필요한지 여부),
+            "next_step_question": "꼬리 질문 내용 (is_follow_up이 true일 때만 작성, 아니면 null)"
+        }}
+        
+        주의사항:
+        - 피드백은 지원자에게 직접 말하듯이 "~~한 점은 좋았습니다. 다만 ~~ 부분은 보완이 필요합니다." 형태로 작성하세요.
+        - is_follow_up은 답변이 모호하거나 더 깊이 파고들 가치가 있을 때만 true로 설정하세요.
+        """
 
-반드시 아래의 JSON 형식을 엄격히 유지하여 응답하세요:
-{{
-    "score": 85,
-    "feedback": "답변이 매우 구체적이고 기술적인 이해도가 높습니다.",
-    "is_follow_up": true,
-    "next_step_question": "꼬리 질문 내용 (is_follow_up이 true인 경우에만 생성)",
-    "pass_fail": "합격" // 마지막 질문인 경우 전체 평균 점수가 70점 이상이면 '합격', 아니면 '불합격'
-}}
-"""
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "당신은 면접 답변을 전문적으로 평가하고 꼬리 질문을 생성하는 전문 면접관입니다. 모든 응답은 한글이며 반드시 JSON 형식이어야 합니다."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
-        return json.loads(response.choices[0].message.content)
+        user_prompt = f"""
+        질문: {question}
+        지원자 답변: {answer}
+        마지막 질문 여부: {is_last_question}
+        """
+
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            content = response.choices[0].message.content
+            return json.loads(content)
+        except Exception as e:
+            print(f"Error evaluating answer: {e}")
+            return {
+                "score": 50,
+                "feedback": "시스템 오류로 인해 평가를 완료할 수 없습니다. 다시 시도해 주세요.",
+                "is_follow_up": False,
+                "next_step_question": None
+            }

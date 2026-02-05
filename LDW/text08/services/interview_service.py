@@ -1,6 +1,5 @@
 from .llm_service import LLMService
 from .stt_service import STTService
-from .confidence_service import ConfidenceService
 from db.sqlite import log_interview_step, get_questions_by_job
 from db.postgres import SessionLocal, InterviewResult, QuestionPool
 import uuid
@@ -10,7 +9,7 @@ class InterviewService:
     def __init__(self):
         self.llm = LLMService()
         self.stt = STTService()
-        self.sessions = {} # session_id -> { "current_step": 1, "is_follow_up": False, "history": [], "confidence_service": ... }
+        self.sessions = {} # session_id -> { "current_step": 1, "is_follow_up": False, "history": [] }
 
     async def get_rag_context(self, job_title: str, limit: int = 3):
         """Fetches similar questions from PostgreSQL (pgvector) for RAG context."""
@@ -23,18 +22,22 @@ class InterviewService:
             ).limit(limit).all()
             return [r.question for r in results]
         except Exception as e:
-            print(f"RAG Error: {e}")
+            # print(f"RAG Error: {e}") # Suppress RAG error if table likely empty/missing
             return []
         finally:
             db.close()
 
     def _get_stage(self, step: int):
         if step == 1:
-            return "intro"
+            return "intro" # 1번째: 자기소개
         elif 2 <= step <= 4:
-            return "personality"
+            return "personality" # 2~4번째: 인성 질문
+        elif 5 <= step <= 9:
+            return "technical" # 5~9번째: 직무 지식 질문
+        elif step == 10:
+            return "closing" # 10번째: 마무리 질문
         else:
-            return "technical"
+            return "finished"
 
     async def start_interview(self, name: str, job_title: str):
         """Initializes the interview session and generates the first question."""
@@ -60,7 +63,8 @@ class InterviewService:
             "is_follow_up": False,
             "history": [],
             "combined_context": combined_context,
-            "confidence_service": ConfidenceService()
+            "current_question": first_question, # 현재 질문 저장
+            "is_follow_up_active": False # 현재 꼬리 질문 진행 중인지 여부
         }
         
         return {
@@ -80,7 +84,7 @@ class InterviewService:
         """Starts the PyAudio recording."""
         self.stt.start_recording()
 
-    async def process_answer(self, session_id: str, question: str, answer: str):
+    async def process_answer(self, session_id: str, question_text_from_client: str, answer: str):
         """Evaluates an answer, logs result, and decides on the next question or completion."""
         if session_id not in self.sessions:
             raise Exception("Invalid session ID")
@@ -90,10 +94,13 @@ class InterviewService:
         job_title = session["job_title"]
         current_step = session["current_step"]
         
-        is_last_question = (current_step == 10)
+        # Use stored question if available (more reliable than client side)
+        question_to_evaluate = session.get("current_question", question_text_from_client)
+        
+        is_last_question = (current_step == 10 and not session.get("is_follow_up_active"))
         
         # 1. Evaluate answer
-        evaluation = await self.llm.evaluate_and_next_action(job_title, question, answer, is_last_question)
+        evaluation = await self.llm.evaluate_and_next_action(job_title, question_to_evaluate, answer, is_last_question)
         
         # Track scores for average calculation
         if "scores" not in session:
@@ -101,7 +108,7 @@ class InterviewService:
         session["scores"].append(evaluation.get("score", 0))
         
         # 2. Log to SQLite (interview_save.db)
-        log_interview_step(name, job_title, question, answer, evaluation)
+        log_interview_step(name, job_title, question_to_evaluate, answer, evaluation)
         
         # 3. Save to PostgreSQL for vector search
         try:
@@ -110,7 +117,7 @@ class InterviewService:
             result = InterviewResult(
                 candidate_name=name,
                 job_title=job_title,
-                question=question,
+                question=question_to_evaluate,
                 answer=answer,
                 evaluation=evaluation,
                 embedding=embedding
@@ -119,34 +126,47 @@ class InterviewService:
             db.commit()
             db.close()
         except Exception as e:
-            print(f"Error saving to Postgres: {e}")
+            # print(f"Error saving to Postgres: {e}")
+            pass
 
-        # Decide on next step
-        # Rule: One tail question max per main question
-        if evaluation.get("is_follow_up") and not session.get("is_follow_up_active"):
-            session["is_follow_up_active"] = True
-            next_question = evaluation["next_step_question"]
-            is_completed = False
-        else:
-            # Advance to next main question
+        # Decide on next step logic
+        next_question = ""
+        is_completed = False
+
+        # If currently in follow-up, finish follow-up and move to next main step
+        if session.get("is_follow_up_active"):
             session["is_follow_up_active"] = False
             session["current_step"] += 1
-            
-            if session["current_step"] > 10:
-                avg_score = sum(session["scores"]) / len(session["scores"]) if session["scores"] else 0
-                pass_fail = "합격" if avg_score >= 70 else "불합격"
-                next_question = f"면접이 종료되었습니다. 평균 점수는 {avg_score:.1f}점이며, 결과는 '{pass_fail}'입니다. 수고하셨습니다."
-                is_completed = True
-                evaluation["avg_score"] = avg_score
-                evaluation["result_status"] = pass_fail
-                
-                # Confidence Score
-                conf_score = self.get_final_confidence_score(session_id)
-                evaluation["confidence_score"] = conf_score
-            else:
-                stage = self._get_stage(session["current_step"])
-                next_question = await self.llm.generate_question(job_title, stage, session["combined_context"])
-                is_completed = False
+            # Next question generation below
+        
+        # If not in follow-up, check if we SHOULD do a follow-up
+        elif evaluation.get("is_follow_up") and session["current_step"] < 10: # Don't do follow up after step 10
+            session["is_follow_up_active"] = True
+            next_question = evaluation["next_step_question"]
+            # Don't increment step yet
+        
+        else:
+            # Regular progression
+            session["is_follow_up_active"] = False
+            session["current_step"] += 1
+
+        # Check for completion
+        if session["current_step"] > 10:
+             avg_score = sum(session["scores"]) / len(session["scores"]) if session["scores"] else 0
+             pass_fail = "합격" if avg_score >= 70 else "불합격"
+             next_question = f"면접이 종료되었습니다. 평균 점수는 {avg_score:.1f}점이며, 결과는 '{pass_fail}'입니다. 수고하셨습니다."
+             is_completed = True
+             evaluation["avg_score"] = avg_score
+             evaluation["result_status"] = pass_fail
+             # Clear session or mark finished
+        elif not next_question: # If not already set by follow-up logic
+            stage = self._get_stage(session["current_step"])
+            # Generate appropriate question for the stage
+            next_question = await self.llm.generate_question(job_title, stage, session["combined_context"])
+            is_completed = False
+
+        # Update current question for next turn
+        session["current_question"] = next_question
 
         return {
             "evaluation": evaluation,
@@ -155,15 +175,3 @@ class InterviewService:
             "is_completed": is_completed,
             "is_follow_up": session.get("is_follow_up_active", False)
         }
-
-    def process_frame(self, session_id: str, image_data: bytes):
-        if session_id in self.sessions:
-            service = self.sessions[session_id]["confidence_service"]
-            service.process_frame(image_data)
-
-    def get_final_confidence_score(self, session_id: str):
-        if session_id in self.sessions:
-            service = self.sessions[session_id]["confidence_service"]
-            return service.get_confidence_score()
-        return 0
-

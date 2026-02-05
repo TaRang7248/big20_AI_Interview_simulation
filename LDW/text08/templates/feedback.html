@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <title>면접 결과 피드백</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+
+<body>
+    <div class="container">
+        <header>면접 결과 리포트</header>
+        <main>
+            <div id="loading">결과 분석 중...</div>
+            <div id="result-content" style="display:none;">
+                <h2 id="final-status"></h2>
+                <h3>총점: <span id="total-score"></span>점</h3>
+                <hr>
+                <div id="feedback-list"></div>
+                <button onclick="location.href='/'">처음으로</button>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session_id');
+
+        window.onload = async () => {
+            if (!sessionId) {
+                alert("잘못된 접근입니다.");
+                location.href = '/';
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/feedback/${sessionId}`);
+                const data = await res.json();
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('result-content').style.display = 'block';
+
+                const statusElem = document.getElementById('final-status');
+                if (data.passed) {
+                    statusElem.innerText = "합격 (PASS)";
+                    statusElem.style.color = "blue";
+                } else {
+                    statusElem.innerText = "불합격 (FAIL)";
+                    statusElem.style.color = "red";
+                }
+
+                document.getElementById('total-score').innerText = data.average_score.toFixed(1);
+
+                const list = document.getElementById('feedback-list');
+                data.details.forEach((item, idx) => {
+                    const card = document.createElement('div');
+                    card.className = 'feedback-card';
+                    card.innerHTML = `
+                        <h4>Q${idx + 1}. ${item.question}</h4>
+                        <p><strong>답변:</strong> ${item.answer || '(답변 없음)'}</p>
+                        <p><strong>점수:</strong> ${item.score}</p>
+                        <p><strong>피드백:</strong> ${item.feedback}</p>
+                    `;
+                    list.appendChild(card);
+                });
+
+            } catch (e) {
+                alert("피드백 로딩 실패");
+            }
+        };
+    </script>
+</body>
+
+</html>
