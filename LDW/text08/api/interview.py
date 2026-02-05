@@ -58,3 +58,19 @@ async def websocket_stt(websocket: WebSocket):
         print("WebSocket disconnected")
     except Exception as e:
         print(f"WebSocket Error: {e}")
+
+# --- Vision AI (DeepFace) ---
+from services.vision_service import VisionService
+vision_service = VisionService()
+
+@router.post("/analyze_face")
+async def analyze_face(file: UploadFile = File(...)):
+    """Analyzes a video frame for emotion."""
+    try:
+        image_content = await file.read()
+        result = await vision_service.analyze_frame(image_content)
+        return result
+    except Exception as e:
+        print(f"Face Analysis Error: {e}")
+        # Return neutral fallback rather than 500 to keep UI alive
+        return {"dominant_emotion": "neutral", "error": str(e)}

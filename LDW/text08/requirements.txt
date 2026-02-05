@@ -9,3 +9,6 @@ jinja2
 pyaudio
 websockets
 python-multipart
+deepface
+opencv-python
+tf-keras
