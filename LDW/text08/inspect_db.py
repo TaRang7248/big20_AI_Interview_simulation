@@ -1,7 +1,7 @@
 import sqlite3
 import os
 
-db_path = r'C:\big20\big20_AI_Interview_simulation\LDW\text07\db\interview.db'
+db_path = r'C:\big20\big20_AI_Interview_simulation\LDW\text08\db\interview.db'
 
 if not os.path.exists(db_path):
     print(f"File not found: {db_path}")
