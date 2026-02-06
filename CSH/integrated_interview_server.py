@@ -227,6 +227,22 @@ except ImportError:
     except ImportError:
         print("⚠️ LangChain Memory 모듈 비활성화 (수동 대화 기록 사용)")
 
+# 한국어 띄어쓰기 보정기 (STT 후처리용) — deepface보다 먼저 import해야 함
+# deepface가 tf_keras를 활성화하면 tensorflow.keras.layers.TFSMLayer를 찾지 못함
+print(f"🐍 현재 Python: {sys.executable}")
+try:
+    from stt_engine import KoreanSpacingCorrector
+    _spacing_corrector = KoreanSpacingCorrector()
+    SPACING_CORRECTION_AVAILABLE = _spacing_corrector.is_available
+    if SPACING_CORRECTION_AVAILABLE:
+        print("✅ 한국어 띄어쓰기 보정 (pykospacing) 활성화됨")
+    else:
+        print("⚠️ pykospacing 미설치 - 띄어쓰기 보정 비활성화")
+except ImportError as e:
+    _spacing_corrector = None
+    SPACING_CORRECTION_AVAILABLE = False
+    print(f"⚠️ 한국어 띄어쓰기 보정 비활성화 (stt_engine 모듈 없음): {e}")
+
 # 감정 분석
 try:
     from deepface import DeepFace
@@ -323,20 +339,6 @@ except ImportError as e:
     deepgram_client = None
     EventType = None
     print(f"⚠️ Deepgram STT 서비스 비활성화: {e}")
-
-# 한국어 띄어쓰기 보정기 (STT 후처리용)
-try:
-    from stt_engine import KoreanSpacingCorrector
-    _spacing_corrector = KoreanSpacingCorrector()
-    SPACING_CORRECTION_AVAILABLE = _spacing_corrector.is_available
-    if SPACING_CORRECTION_AVAILABLE:
-        print("✅ 한국어 띄어쓰기 보정 (pykospacing) 활성화됨")
-    else:
-        print("⚠️ pykospacing 미설치 - 띄어쓰기 보정 비활성화")
-except ImportError:
-    _spacing_corrector = None
-    SPACING_CORRECTION_AVAILABLE = False
-    print("⚠️ 한국어 띄어쓰기 보정 비활성화 (stt_engine 모듈 없음)")
 
 
 # ========== 전역 상태 관리 ==========
