@@ -22,7 +22,9 @@ def run_interview():
         current_step = start_data.get("step")
         
         # Loop through a few steps
-        for i in range(1, 12): # Try to go past 10
+        # Increased limit to handle follow-up questions
+        for i in range(1, 35): 
+
             print(f"\n--- Step {current_step} ---")
             
             # Simulated answer
@@ -43,6 +45,23 @@ def run_interview():
             
             if is_completed:
                 print("\nInterview Completed!")
+                
+                # Check Feedback API
+                print(f"\n--- Checking Feedback for Session {session_id} ---")
+                try:
+                    feedback_res = requests.get(f"http://127.0.0.1:8000/api/feedback/{session_id}")
+                    if feedback_res.status_code == 200:
+                        feedback_data = feedback_res.json()
+                        print(f"Feedback Response: {feedback_data}")
+                        if "average_score" in feedback_data and "passed" in feedback_data:
+                            print("✅ Feedback API Verified Successfully")
+                        else:
+                            print("❌ Feedback API returned incomplete data")
+                    else:
+                         print(f"❌ Feedback API Failed: {feedback_res.status_code}")
+                except Exception as fe:
+                    print(f"❌ Feedback API Error: {fe}")
+                
                 break
                 
             time.sleep(1)

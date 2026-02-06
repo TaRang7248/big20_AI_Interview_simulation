@@ -9,7 +9,7 @@ current_question_id = None
 media_recorder = None
 audio_chunks = []
 timer_interval = None
-TIME_LIMIT = 90
+TIME_LIMIT = 5
 is_recording = False
 
 # Speech Recognition Global Variables

@@ -153,6 +153,11 @@ async def get_current_question(session_id: str):
          return {"finished": True}
     
     # Return the actual current question stored in session
+    is_completed = session.get("current_step", 1) > 10
+    
+    if is_completed:
+        return {"finished": True}
+
     return {
         "question": session.get("current_question", "진행 중인 면접입니다."),
         "index": session.get("current_step", 1),
