@@ -1,20 +1,18 @@
-# AI 모의면접 통합 시스템 - CSH 모듈
+# AI 모의면접 통합 시스템
 
 ## 📋 개요
 
-TTS, STT, LLM 기반 답변 평가, 화상 면접, 감정 분석, Celery 비동기 작업 처리를 통합한 AI 모의면접 시스템입니다.
+Text-to-Speech(TTS), Speech-to-Text(STT), LLM 기반 질문생성 및 답변 평가, 화상 면접, 감정 분석, Celery 비동기 작업 처리 등의 기능을 통합한 AI 모의면접 시스템입니다.
 
 ### ✨ 주요 특징
 
-- **화상 면접 중심**: 채팅 면접과 화상 면접을 하나로 통합
-- **LLM 답변 평가**: 질문 생성이 아닌 **답변 분석/평가**에 LLM 활용
-- **질문 은행 시스템**: 체계적인 카테고리별 질문 순서 (9개 카테고리)
+- **화상 면접 중심**
+- **LLM**: AI 면접의 두뇌 역할. 질문을 생성하고 답변을 평가
 - **이력서 RAG**: PDF 이력서 업로드 → 맞춤형 면접 평가
-- **실시간 평가 시각화**: 5가지 평가 항목 실시간 점수 표시
 - **Celery 비동기 처리**: 무거운 작업(LLM 평가, 감정 분석, 리포트 생성)을 백그라운드에서 처리
 - **회원가입/로그인**: 이메일 기반 회원가입 및 소셜 로그인 (카카오, 구글, 네이버) 지원
 - **종합 리포트**: STAR 기법 분석, 키워드 추출, 등급 산정 포함
-- **코딩 테스트**: Python, JavaScript, Java, C/C++ 지원 샌드박스 코드 실행
+- **코딩 테스트**: Python, JavaScript, Java, C/C++ 지원하는 웹 IDE 통합
 - **화이트보드 면접**: Claude Vision을 활용한 시스템 아키텍처 다이어그램 분석
 - **AI 아바타**: D-ID WebRTC 스트리밍으로 실시간 AI 면접관 영상 생성
 - **원클릭 시작**: 배치/PowerShell 스크립트로 전체 시스템 한 번에 실행
@@ -34,19 +32,19 @@ pip install -r requirements_integrated.txt
 프로젝트 루트에 `.env` 파일을 생성하고 다음 값들을 설정하세요:
 
 ```env
-# LLM 설정 (Ollama) - 답변 평가용
+# LLM 설정 (Ollama)
 LLM_MODEL=llama3
 LLM_TEMPERATURE=0.3
 
-# Hume AI TTS (선택사항)
+# Hume AI TTS
 HUME_API_KEY=your_hume_api_key
 HUME_SECRET_KEY=your_hume_secret_key
 HUME_CONFIG_ID=your_config_id
 
-# Deepgram STT (선택사항)
+# Deepgram STT 
 DEEPGRAM_API_KEY=your_deepgram_api_key
 
-# PostgreSQL RAG (선택사항)
+# PostgreSQL RAG
 POSTGRES_CONNECTION_STRING=postgresql://user:password@localhost:5432/interview_db
 
 # Redis (Celery 브로커 및 감정 데이터 저장)
@@ -54,7 +52,7 @@ REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/0
 
-# 소셜 로그인 (선택사항)
+# 소셜 로그인
 KAKAO_CLIENT_ID=your_kakao_client_id
 KAKAO_CLIENT_SECRET=your_kakao_client_secret
 GOOGLE_CLIENT_ID=your_google_client_id
@@ -73,7 +71,7 @@ DID_API_KEY=your_did_api_key
 ### 3. 외부 서비스 실행
 
 ```bash
-# Ollama 실행 (LLM - 답변 평가용)
+# Ollama 실행
 ollama serve
 ollama pull llama3
 
@@ -136,16 +134,16 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 ├─────────────────────────────────────────────────────────────┤
 │  3. 화상 면접 시작                                           │
 │     ├─ WebRTC 카메라/마이크 연결                              │
-│     ├─ D-ID AI 아바타 면접관 영상 (선택)                      │
-│     ├─ 질문 은행 기반 순차 질문                               │
-│     │   (intro → motivation → strength → project → ...)     │
+│     ├─ D-ID AI 아바타 면접관 영상                             │
+│     ├─                                                      │
+│                                                             │
 │     ├─ 답변 입력 → Celery 백그라운드 LLM 평가                 │
-│     ├─ 실시간 평가 점수 표시 (5가지 항목)                     │
+│     ├─                                                      │
 │     ├─ 실시간 감정 분석 (7가지 감정 - DeepFace)               │
 │     └─ TTS 음성 출력 (Hume AI)                               │
 ├─────────────────────────────────────────────────────────────┤
 │  4. 코딩 테스트 (선택)                                       │
-│     ├─ 문제 은행에서 알고리즘 문제 선택                       │
+│     ├─                                                      │
 │     ├─ 샌드박스 코드 실행 (Python/JS/Java/C/C++)             │
 │     └─ AI 코드 분석 (복잡도, 스타일, 베스트 프랙티스)         │
 ├─────────────────────────────────────────────────────────────┤
@@ -171,9 +169,9 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 
 ```
 CSH/
-├── integrated_interview_server.py  # 통합 FastAPI 서버 (메인, 4700+ lines)
+├── integrated_interview_server.py  # 통합 FastAPI 서버 (메인)
 ├── celery_app.py                   # Celery 애플리케이션 설정 (큐, 라우팅)
-├── celery_tasks.py                 # Celery 비동기 태스크 정의 (1000+ lines)
+├── celery_tasks.py                 # Celery 비동기 태스크 정의
 ├── text_interview.py               # 텍스트 면접 모듈 (STAR 분석, 리포트)
 ├── hume_tts_service.py             # Hume AI TTS 서비스 (OAuth2 토큰 인증)
 ├── stt_engine.py                   # Deepgram STT 서비스 (Nova-3 모델)
@@ -211,25 +209,7 @@ LLM은 **질문 생성이 아닌 답변 평가**에 사용됩니다. Ollama의 L
 
 **총점: 25점 만점**
 
-### 2. 질문 은행 시스템
 
-체계적인 카테고리별 질문 순서 (9개 카테고리):
-
-```python
-INTERVIEW_FLOW = [
-    "intro",           # 자기소개
-    "motivation",      # 지원 동기
-    "strength",        # 강점
-    "project",         # 프로젝트 경험
-    "teamwork",        # 팀워크
-    "technical",       # 기술 스택
-    "problem_solving", # 문제 해결
-    "growth",          # 성장 목표
-    "closing"          # 마무리
-]
-```
-
-각 카테고리별로 다양한 질문이 준비되어 있으며, 순차적으로 진행됩니다.
 
 ### 3. 이력서 RAG 시스템
 
@@ -257,7 +237,7 @@ INTERVIEW_FLOW = [
 - **Nova-3 모델**: 고정밀 한국어 음성 인식
 - **실시간 스트리밍**: WebSocket 기반 실시간 변환
 - **VAD 지원**: 음성 활동 감지로 자연스러운 구간 분리
-- **한국어 띄어쓰기 보정**: pykospacing 연동 (선택사항)
+- **한국어 띄어쓰기 보정**: pykospacing 연동
 
 ### 7. Celery 비동기 작업 처리
 
@@ -402,59 +382,17 @@ D-ID API를 활용한 실시간 AI 면접관 영상 생성 서비스입니다.
 
 ---
 
-## � UI 구성
+## UI 구성
 
-### 평가 패널 (실시간)
-
-화면 우측에 평가 패널이 표시됩니다:
-
-```
-┌─────────────────────────────────────┐
-│     📊 LLM 답변 평가                │
-├─────────────────────────────────────┤
-│  구체성    ████████░░ 4/5           │
-│  논리성    ██████████ 5/5           │
-│  기술이해  ██████░░░░ 3/5           │
-│  STAR기법  ████████░░ 4/5           │
-│  전달력    ██████████ 5/5           │
-├─────────────────────────────────────┤
-│  총점: 21/25 (84%)                  │
-├─────────────────────────────────────┤
-│  💬 피드백                          │
-│  "구체적인 프로젝트 사례를 잘..."     │
-└─────────────────────────────────────┘
-```
 
 ### 면접 화면 구성
 
-```
-┌───────────────────────────────────────────────────────────────────┐
-│  ┌─────────────────────────────┐  ┌─────────────────────────────┐ │
-│  │                             │  │   📊 LLM 답변 평가          │ │
-│  │        📹 비디오            │  │   ─────────────────────     │ │
-│  │        미리보기             │  │   구체성  ████████░░ 4     │ │
-│  │                             │  │   논리성  ██████████ 5     │ │
-│  │                             │  │   기술    ██████░░░░ 3     │ │
-│  └─────────────────────────────┘  │   ...                       │ │
-│                                    │                             │ │
-│  ┌─────────────────────────────┐  │   😊 감정 분석              │ │
-│  │  💬 채팅 영역               │  │   행복 60% 중립 30%        │ │
-│  │  AI: 자기소개 해주세요      │  │                             │ │
-│  │  나: 안녕하세요, 저는...    │  └─────────────────────────────┘ │
-│  │  평가: 구체성 4점...        │                                  │
-│  └─────────────────────────────┘                                  │
-│                                                                    │
-│  [메시지 입력...]                              [전송] [리포트]    │
-└───────────────────────────────────────────────────────────────────┘
-```
-
----
 
 ## 🔌 서비스 활성화 조건
 
 | 서비스 | 필수 조건 | 역할 |
 |--------|----------|------|
-| LLM | Ollama 실행 + llama3 모델 | **답변 평가** (질문 생성 X) |
+| LLM | Ollama 실행 + llama3 모델 |
 | TTS | HUME_API_KEY + HUME_SECRET_KEY 설정 | 음성 출력 |
 | STT | DEEPGRAM_API_KEY 설정 + pyaudio | 음성 인식 |
 | RAG | POSTGRES_CONNECTION_STRING 설정 + pgvector | 이력서 맞춤 평가 |
@@ -593,8 +531,8 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 | 파일 | 설명 |
 |------|------|
 | `integrated_interview_server.py` | **통합 FastAPI 서버** (4700+ lines) - 질문 은행, LLM 평가, 회원 인증, 소셜 로그인, WebRTC, 감정 분석, ThreadPoolExecutor 비동기 처리 |
-| `celery_app.py` | **Celery 애플리케이션 설정** - Redis 브로커, 7개 큐 라우팅, Beat 스케줄 정의 |
-| `celery_tasks.py` | **Celery 비동기 태스크** (1000+ lines) - LLM 평가, 감정 분석, 리포트 생성, TTS, RAG, 워크플로우 처리 |
+| `celery_app.py` | **Celery 애플리케이션 설정(설계도)** - Celery 앱 생성, Redis 브로커 연결, 큐 정의 & 라우팅, Beat 스케줄 정의 |
+| `celery_tasks.py` | **Celery 비동기 태스크** - 실제 수행할 비동기 작업 정의: LLM 평가, 감정 분석, 리포트 생성, TTS, RAG, 워크플로우 처리 |
 | `text_interview.py` | **텍스트 면접 모듈** - STAR 기법 분석, 키워드 추출, 리포트 생성 클래스 |
 | `hume_tts_service.py` | **Hume AI TTS 클라이언트** (440+ lines) - OAuth2 토큰 인증, EVI 음성 생성, 스트리밍 지원 |
 | `stt_engine.py` | **Deepgram STT 클라이언트** - Nova-3 모델, 실시간 마이크 입력, VAD 지원 |
@@ -615,68 +553,6 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 
 ---
 
-## 📝 변경 이력
-
-### v3.1 (2026-02-05)
-- ✅ **코딩 테스트 시스템 추가** (`code_execution_service.py`)
-  - Python, JavaScript, Java, C, C++ 다국어 지원
-  - 샌드박스 환경에서 안전한 코드 실행 (subprocess + 타임아웃)
-  - AI 기반 코드 품질 분석 (시간/공간 복잡도, 코드 스타일)
-  - 코딩 문제 은행 (난이도별 알고리즘 문제)
-- ✅ **화이트보드 다이어그램 분석 추가** (`whiteboard_service.py`)
-  - Claude 3.5 Sonnet Vision API 연동
-  - 시스템 아키텍처 평가 (구조, 확장성, 보안, 데이터 흐름)
-  - AI 동적 문제 생성 (카테고리별 맞춤 아키텍처 문제)
-  - 컴포넌트 분석 및 피드백 자동 생성
-- ✅ **D-ID AI 아바타 서비스 추가** (`did_avatar_service.py`)
-  - Talks API: 텍스트 → 아바타 영상 생성
-  - Streams API: WebRTC 실시간 스트리밍 (1-3초 지연)
-  - 한국어 TTS 지원 (Microsoft Neural Voice)
-- ✅ **원클릭 시작 스크립트 추가**
-  - `start_interview.bat`: Windows Batch 스크립트
-  - `start_all.ps1`: PowerShell 스크립트 (컬러 출력)
-  - `start_prerequisites.bat`: 사전 서비스(Redis, Ollama) 실행
-- ✅ **비동기 처리 최적화**
-  - ThreadPoolExecutor로 LLM, RAG, DeepFace 비블로킹 처리
-  - `run_llm_async()`, `run_rag_async()`, `run_deepface_async()` 헬퍼 함수
-- ✅ **Celery 큐 확장**
-  - 7개 전용 큐: llm_evaluation, emotion_analysis, report_generation, tts_generation, rag_processing, question_generation, default
-
-### v3.0 (2026-02-04)
-- ✅ **Celery 비동기 작업 처리 시스템 추가**
-  - 6개 전용 큐 (llm_evaluation, emotion_analysis, report_generation, tts_generation, rag_processing, default)
-  - 태스크별 타임아웃 및 재시도 설정
-  - Beat 스케줄러로 주기적 작업 (세션 정리, 통계 집계)
-  - 복합 워크플로우 태스크 (면접 완료 후 전체 처리)
-- ✅ **회원가입/로그인 시스템 추가**
-  - 이메일 기반 회원가입 (이메일, 비밀번호, 이름, 생년월일, 주소, 성별)
-  - 비밀번호 유효성 검증 (8자 이상)
-- ✅ **소셜 로그인 지원**
-  - 카카오 로그인
-  - 구글 로그인
-  - 네이버 로그인
-  - OAuth2 콜백 처리 및 토큰 검증
-- ✅ **Hume TTS 개선**
-  - OAuth2 토큰 인증 방식 추가 (API Key + Secret Key)
-  - 토큰 캐싱 및 자동 갱신
-- ✅ **리포트 시스템 강화**
-  - 등급 산정 (S/A/B/C/D)
-  - 맞춤형 권장사항 생성
-  - 강점/개선점 빈도 분석
-
-### v2.0 (2025-01-XX)
-- ✅ 채팅 면접 제거, 화상 면접으로 통합
-- ✅ LLM 역할 변경: 질문 생성 → **답변 평가**
-- ✅ 질문 은행 시스템 도입 (9개 카테고리)
-- ✅ 5가지 평가 항목 실시간 표시
-- ✅ 이력서 PDF 업로드 + RAG 연동
-- ✅ 종합 리포트에 LLM 평가 결과 포함
-- ✅ 홈페이지 UI 개선
-
-### v1.0
-- 초기 통합 버전 (TTS, STT, LLM, 화상면접, 감정분석)
-
----
 
 ## 🛠️ 개발 가이드
 
@@ -745,7 +621,6 @@ async def get_my_result(task_id: str):
 - [Anthropic Claude 문서](https://docs.anthropic.com/)
 - [D-ID API 문서](https://docs.d-id.com/)
 - [aiortc WebRTC 문서](https://github.com/aiortc/aiortc)
-- [core_architecture.md](../docs/Architecture_Diagram/core_architecture.md) - 시스템 아키텍처
 
 ---
 

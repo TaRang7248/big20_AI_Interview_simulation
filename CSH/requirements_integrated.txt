@@ -28,6 +28,7 @@ httpx>=0.25.0
 # ========== STT (Deepgram) ==========
 deepgram-sdk>=3.0.0
 pyaudio>=0.2.14
+pykospacing # 한국어 띄어쓰기 보정 (STT 후처리)
 
 # ========== RAG (PostgreSQL + PGVector) ==========
 langchain-postgres>=0.0.1
@@ -54,6 +55,5 @@ requests>=2.31.0
 websockets>=12.0
 
 # ========== 선택사항 (Optional) ==========
-# pykospacing>=0.4  # 한국어 띄어쓰기 보정 (STT 후처리용)
 # langgraph>=0.0.1  # LangGraph 워크플로우
 # tqdm>=4.66.0      # 진행률 표시

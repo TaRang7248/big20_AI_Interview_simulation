@@ -324,6 +324,20 @@ except ImportError as e:
     EventType = None
     print(f"⚠️ Deepgram STT 서비스 비활성화: {e}")
 
+# 한국어 띄어쓰기 보정기 (STT 후처리용)
+try:
+    from stt_engine import KoreanSpacingCorrector
+    _spacing_corrector = KoreanSpacingCorrector()
+    SPACING_CORRECTION_AVAILABLE = _spacing_corrector.is_available
+    if SPACING_CORRECTION_AVAILABLE:
+        print("✅ 한국어 띄어쓰기 보정 (pykospacing) 활성화됨")
+    else:
+        print("⚠️ pykospacing 미설치 - 띄어쓰기 보정 비활성화")
+except ImportError:
+    _spacing_corrector = None
+    SPACING_CORRECTION_AVAILABLE = False
+    print("⚠️ 한국어 띄어쓰기 보정 비활성화 (stt_engine 모듈 없음)")
+
 
 # ========== 전역 상태 관리 ==========
 
@@ -4071,6 +4085,12 @@ async def _process_audio_with_stt(track, session_id: str):
                             transcript = alts[0].transcript
                     
                     if transcript:
+                        # 최종 결과에 한국어 띄어쓰기 보정 적용
+                        if is_final and SPACING_CORRECTION_AVAILABLE and _spacing_corrector:
+                            corrected = _spacing_corrector.correct(transcript)
+                            if corrected and corrected.strip():
+                                transcript = corrected
+                        
                         # 비동기 브로드캐스트를 위해 이벤트 루프에 태스크 추가
                         asyncio.create_task(broadcast_stt_result(session_id, {
                             "type": "stt_result",
@@ -4267,6 +4287,8 @@ async def get_status():
         "services": {
             "llm": LLM_AVAILABLE,
             "tts": TTS_AVAILABLE,
+            "stt": DEEPGRAM_AVAILABLE,
+            "stt_spacing_correction": SPACING_CORRECTION_AVAILABLE,
             "rag": RAG_AVAILABLE,
             "emotion": EMOTION_AVAILABLE,
             "redis": REDIS_AVAILABLE,
