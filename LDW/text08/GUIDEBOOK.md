@@ -41,6 +41,15 @@ python start_app.py
 **원인**: PyScript에서 `to_js`를 사용하여 카메라 제약 조건(constraints)을 전달할 때, JavaScript가 인식하지 못하는 Map 객체로 변환되어 발생.
 **해결**: `static/py/interview_flow.py`에서 제약 조건을 JSON 문자열로 변환 후 `JSON.parse`를 통해 순수 JS 객체로 전달하도록 수정됨.
 
+### 4.4 실시간 STT(음성 인식) 기능
+**기능**: 면접 답변 시 브라우저 내장(Web Speech API) 기능을 사용하여 음성을 실시간으로 텍스트로 변환해 화면에 표시합니다.
+**참고**: 이 기능은 브라우저(특히 Chrome)의 지원 여부에 따라 동작이 달라질 수 있습니다. `interview_flow.py`는 녹음과 동시에 음성 인식을 시작하며, 인식된 텍스트는 `stt-output` 요소에 실시간으로 청크 단위로 표시됩니다.
+
+### 4.5 Uncaught PythonError: TypeError: 'pyodide.ffi.JsProxy' object is not subscriptable
+**증상**: 음성 인식 중 "TypeError: 'pyodide.ffi.JsProxy' object is not subscriptable" 에러 발생.
+**원인**: Pyodide에서 JavaScript의 `SpeechRecognitionResultList`나 `SpeechRecognitionResult` 객체에 대괄호(`[]`) 인덱싱으로 접근하려 할 때 발생. `JsProxy` 객체는 리스트처럼 직접 인덱싱이 불가능할 수 있음.
+**해결**: `interview_flow.py`에서 `event.results[i]` 대신 `event.results.item(i)`를 사용하고, `transcript` 접근 시에도 `.item(0)`을 사용하도록 코드를 수정함.
+
 ## 5. 프로젝트 구조 (Project Structure)
 - `main.py` / `start_app.py`: 백엔드 서버 진입점
 - `db/`: 데이터베이스 관련 파일

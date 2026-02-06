@@ -12,13 +12,62 @@ timer_interval = None
 TIME_LIMIT = 90
 is_recording = False
 
+# Speech Recognition Global Variables
+recognition = None
+recognized_text_buffer = ""
+
 async def init():
-    global session_id
+    global session_id, recognition
     url_params = js.URLSearchParams.new(window.location.search)
     session_id = url_params.get('session_id')
     
+    # Initialize Speech Recognition
+    init_speech_recognition()
+    
     await init_webcam()
     await load_next_question()
+
+def init_speech_recognition():
+    global recognition
+    if hasattr(js.window, 'webkitSpeechRecognition'):
+        recognition = js.window.webkitSpeechRecognition.new()
+        recognition.continuous = True
+        recognition.interimResults = True
+        recognition.lang = 'ko-KR' # Set language to Korean
+
+        def on_result(event):
+            global recognized_text_buffer
+            interim_transcript = ""
+            final_transcript = ""
+
+            # Iterate through results
+            for i in range(event.resultIndex, event.results.length):
+                # Use .item() instead of [] for JsProxy objects
+                result = event.results.item(i)
+                transcript = result.item(0).transcript
+                if result.isFinal:
+                    final_transcript += transcript
+                else:
+                    interim_transcript += transcript
+            
+            # Combine stored final buffer with current interim
+            display_text = recognized_text_buffer + final_transcript + interim_transcript
+            
+            # Update UI
+            document.getElementById('stt-output').innerText = display_text
+            
+            # Update buffer if we have new final text
+            if final_transcript:
+                recognized_text_buffer += final_transcript + " "
+
+        def on_error(event):
+            js.console.error(f"Speech recognition error: {event.error}")
+
+        recognition.onresult = create_proxy(on_result)
+        recognition.onerror = create_proxy(on_error)
+        
+    else:
+        js.console.warn("Web Speech API not supported in this browser.")
 
 async def init_webcam():
     try:
@@ -37,7 +86,7 @@ async def init_webcam():
         js.alert(f"Webcam error: {e}")
 
 async def load_next_question():
-    global current_question_id, audio_chunks
+    global current_question_id, audio_chunks, recognized_text_buffer
     try:
         response = await pyfetch(f'/api/interview/{session_id}/current')
         data = await response.json()
@@ -54,6 +103,7 @@ async def load_next_question():
         
         # Reset state
         audio_chunks = []
+        recognized_text_buffer = "" # Reset text buffer for next question
         document.getElementById('start-btn').disabled = False
         document.getElementById('stop-btn').disabled = True
         document.getElementById('stt-output').innerText = "답변 준비 중..."
@@ -108,7 +158,7 @@ async def force_timeout_submit(event=None):
         window.setTimeout(create_proxy(load_next_question), 3000)
 
 async def start_recording(event=None):
-    global media_recorder, audio_chunks, is_recording
+    global media_recorder, audio_chunks, is_recording, recognition
     
     try:
         video_element = document.getElementById('webcam')
@@ -130,6 +180,13 @@ async def start_recording(event=None):
         media_recorder.start()
         is_recording = True
         
+        # Start Speech Recognition
+        if recognition:
+            try:
+                recognition.start()
+            except Exception as re:
+                js.console.log(f"Recognition start error (might be already started): {re}")
+        
         document.getElementById('start-btn').disabled = True
         document.getElementById('stop-btn').disabled = False
         document.getElementById('stt-output').innerText = "듣고 있습니다..."
@@ -139,16 +196,21 @@ async def start_recording(event=None):
         js.alert("녹음 시작 중 오류가 발생했습니다.")
 
 def stop_recording(event=None):
-    global media_recorder
+    global media_recorder, recognition
     if media_recorder and media_recorder.state != 'inactive':
         media_recorder.stop()
+        
+        # Stop Speech Recognition
+        if recognition:
+            recognition.stop()
+            
         document.getElementById('start-btn').disabled = False
         document.getElementById('stop-btn').disabled = True
         if timer_interval:
             window.clearInterval(timer_interval)
 
 async def submit_answer(event=None):
-    global audio_chunks, session_id, current_question_id
+    global audio_chunks, session_id, current_question_id, recognized_text_buffer
     
     try:
         # Create Blob from chunks
@@ -164,11 +226,10 @@ async def submit_answer(event=None):
             form_data.append('question_id', current_question_id)
         form_data.append('audio', audio_blob, 'answer.webm')
         
-        # Canvas Image
-        canvas = document.getElementById('archCanvas')
-        # canvas.toBlob requires a callback in JS.
-        # Simplification: We will skip canvas upload for now or use sync if possible (toDataURL then blob)
-        # Or just skip it as per interview.js "Convert canvas to blob if needed or just skip for now"
+        # Send the real-time recognized text as a fallback or hint if you wanted
+        # But user didn't ask to change backend submission logic to use this text specifically instead of STT, 
+        # but displaying it in the report might be good.
+        # For now, let's keep backend processing as primary but we could send `recognized_text_buffer`.
         
         document.getElementById('stt-output').innerText = "답변 제출 및 평가 중..."
         
