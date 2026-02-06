@@ -541,6 +541,7 @@
         const formData = new FormData();
         formData.append('file', file);
         if (currentSessionId) formData.append('session_id', currentSessionId);
+        if (currentUser && currentUser.email) formData.append('user_email', currentUser.email);
 
         try {
             const res = await fetch('/api/resume/upload', { method: 'POST', body: formData });
