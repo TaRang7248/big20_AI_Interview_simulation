@@ -227,6 +227,22 @@ except ImportError:
     except ImportError:
         print("⚠️ LangChain Memory 모듈 비활성화 (수동 대화 기록 사용)")
 
+# 한국어 띄어쓰기 보정기 (STT 후처리용) — deepface보다 먼저 import해야 함
+# deepface가 tf_keras를 활성화하면 tensorflow.keras.layers.TFSMLayer를 찾지 못함
+print(f"🐍 현재 Python: {sys.executable}")
+try:
+    from stt_engine import KoreanSpacingCorrector
+    _spacing_corrector = KoreanSpacingCorrector()
+    SPACING_CORRECTION_AVAILABLE = _spacing_corrector.is_available
+    if SPACING_CORRECTION_AVAILABLE:
+        print("✅ 한국어 띄어쓰기 보정 (pykospacing) 활성화됨")
+    else:
+        print("⚠️ pykospacing 미설치 - 띄어쓰기 보정 비활성화")
+except ImportError as e:
+    _spacing_corrector = None
+    SPACING_CORRECTION_AVAILABLE = False
+    print(f"⚠️ 한국어 띄어쓰기 보정 비활성화 (stt_engine 모듈 없음): {e}")
+
 # 감정 분석
 try:
     from deepface import DeepFace
@@ -323,20 +339,6 @@ except ImportError as e:
     deepgram_client = None
     EventType = None
     print(f"⚠️ Deepgram STT 서비스 비활성화: {e}")
-
-# 한국어 띄어쓰기 보정기 (STT 후처리용)
-try:
-    from stt_engine import KoreanSpacingCorrector
-    _spacing_corrector = KoreanSpacingCorrector()
-    SPACING_CORRECTION_AVAILABLE = _spacing_corrector.is_available
-    if SPACING_CORRECTION_AVAILABLE:
-        print("✅ 한국어 띄어쓰기 보정 (pykospacing) 활성화됨")
-    else:
-        print("⚠️ pykospacing 미설치 - 띄어쓰기 보정 비활성화")
-except ImportError:
-    _spacing_corrector = None
-    SPACING_CORRECTION_AVAILABLE = False
-    print("⚠️ 한국어 띄어쓰기 보정 비활성화 (stt_engine 모듈 없음)")
 
 
 # ========== 전역 상태 관리 ==========
@@ -2130,11 +2132,6 @@ async def index():
                 </div>
             </div>
             
-            <div class="sub-links">
-                <a href="/static/dashboard.html" class="sub-link">📊 감정 대시보드</a>
-                <a href="/docs" class="sub-link">📚 API 문서</a>
-            </div>
-            
             <div class="status">
                 서비스 상태: 
                 <span>LLM """ + ("✅" if LLM_AVAILABLE else "❌") + """</span> | 
@@ -2153,6 +2150,7 @@ async def index():
                     <div class="form-group">
                         <label>이메일 *</label>
                         <input type="email" id="regEmail" placeholder="example@email.com" required>
+                        <div id="emailCheckResult" style="margin-top:4px; font-size:0.85em; display:none;"></div>
                     </div>
                     <div class="form-group">
                         <label>비밀번호 *</label>
@@ -2364,7 +2362,9 @@ async def index():
                 const savedUser = sessionStorage.getItem('interview_user');
                 if (savedUser) {
                     currentUser = JSON.parse(savedUser);
-                    updateUIForLoggedInUser();
+                    // 이미 로그인된 상태면 대시보드로 이동
+                    window.location.href = '/dashboard';
+                    return;
                 }
             };
             
@@ -2585,9 +2585,66 @@ async def index():
                 }
             }
             
+            // 이메일 중복 확인 (실시간)
+            let _emailCheckTimer = null;
+            let _emailAvailable = false;
+
+            document.addEventListener('DOMContentLoaded', function() {
+                const regEmailInput = document.getElementById('regEmail');
+                if (regEmailInput) {
+                    regEmailInput.addEventListener('input', function() {
+                        clearTimeout(_emailCheckTimer);
+                        _emailAvailable = false;
+                        const resultEl = document.getElementById('emailCheckResult');
+                        const email = this.value.trim();
+                        if (!email) { resultEl.style.display = 'none'; return; }
+                        _emailCheckTimer = setTimeout(() => checkEmailDuplicate(email), 500);
+                    });
+                    regEmailInput.addEventListener('blur', function() {
+                        const email = this.value.trim();
+                        if (email) checkEmailDuplicate(email);
+                    });
+                }
+            });
+
+            async function checkEmailDuplicate(email) {
+                const resultEl = document.getElementById('emailCheckResult');
+                resultEl.style.display = 'block';
+                resultEl.style.color = '#aaa';
+                resultEl.textContent = '확인 중...';
+                try {
+                    const res = await fetch('/api/auth/check-email?email=' + encodeURIComponent(email));
+                    const data = await res.json();
+                    if (data.available) {
+                        resultEl.style.color = '#00e676';
+                        resultEl.textContent = '✅ ' + data.message;
+                        _emailAvailable = true;
+                    } else {
+                        resultEl.style.color = '#ff5252';
+                        resultEl.textContent = '❌ ' + data.message;
+                        _emailAvailable = false;
+                    }
+                } catch (err) {
+                    resultEl.style.color = '#ff5252';
+                    resultEl.textContent = '⚠️ 이메일 확인 중 오류가 발생했습니다.';
+                    _emailAvailable = false;
+                }
+            }
+
             async function handleRegister(e) {
                 e.preventDefault();
                 const errorEl = document.getElementById('registerError');
+
+                // 이메일 중복 확인 통과 여부 검사
+                if (!_emailAvailable) {
+                    const email = document.getElementById('regEmail').value.trim();
+                    if (email) await checkEmailDuplicate(email);
+                    if (!_emailAvailable) {
+                        errorEl.textContent = '사용 가능한 이메일인지 확인해주세요.';
+                        errorEl.classList.add('active');
+                        return;
+                    }
+                }
                 
                 const password = document.getElementById('regPassword').value;
                 const passwordConfirm = document.getElementById('regPasswordConfirm').value;
@@ -2656,7 +2713,8 @@ async def index():
                         currentUser = result.user;
                         sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
                         closeModals();
-                        updateUIForLoggedInUser();
+                        // 로그인 성공 시 대시보드로 이동
+                        window.location.href = '/dashboard';
                     } else {
                         errorEl.textContent = result.message;
                         errorEl.classList.add('active');
@@ -2800,7 +2858,7 @@ async def index():
                             if (result.success) {
                                 currentUser = result.user;
                                 sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
-                                updateUIForLoggedInUser();
+                                window.location.href = '/dashboard';
                             }
                             window.history.replaceState({}, '', '/');
                         })
@@ -3070,6 +3128,21 @@ async def social_login_status():
 
 
 # ========== 회원가입/로그인 API ==========
+
+@app.get("/api/auth/check-email")
+async def check_email_duplicate(email: str):
+    """이메일 중복 확인 API"""
+    import re
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        return {"available": False, "message": "올바른 이메일 형식이 아닙니다."}
+    
+    existing_user = get_user_by_email(email)
+    if existing_user:
+        return {"available": False, "message": "이미 등록된 이메일입니다."}
+    
+    return {"available": True, "message": "사용 가능한 이메일입니다."}
+
 
 @app.post("/api/auth/register", response_model=UserRegisterResponse)
 async def register_user(request: UserRegisterRequest):
@@ -3392,7 +3465,8 @@ class ResumeUploadResponse(BaseModel):
 @app.post("/api/resume/upload", response_model=ResumeUploadResponse)
 async def upload_resume(
     file: UploadFile = File(...),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    user_email: Optional[str] = Form(None)
 ):
     """
     이력서 PDF 파일 업로드 및 RAG 인덱싱
@@ -3413,6 +3487,10 @@ async def upload_resume(
         session = state.get_session(session_id)
         if not session:
             session_id = state.create_session(session_id)
+    
+    # 사용자 이메일을 세션에 저장 (대시보드에서 업로드 시 면접 세션과 연결하기 위해)
+    if user_email:
+        state.update_session(session_id, {"user_email": user_email})
     
     # 파일 저장
     safe_filename = f"{session_id}_{uuid.uuid4().hex[:8]}.pdf"
@@ -3530,6 +3608,55 @@ async def delete_resume(session_id: str):
     return {"success": True, "message": "이력서가 삭제되었습니다."}
 
 
+# ========== 대시보드 페이지 ==========
+
+@app.get("/dashboard")
+async def dashboard_page():
+    """로그인 후 대시보드 페이지"""
+    return FileResponse(os.path.join(static_dir, "my_dashboard.html"))
+
+
+# ========== 면접 이력 조회 API ==========
+
+@app.get("/api/interview/history")
+async def get_interview_history(email: str):
+    """사용자 이메일 기준 면접 이력 조회"""
+    user = get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    
+    history = []
+    for sid, session in state.sessions.items():
+        if session.get("user_email") == email and session.get("status") in ("completed", "active"):
+            chat_history = session.get("chat_history", [])
+            evaluations = session.get("evaluations", [])
+            
+            # 평균 점수 계산
+            avg_score = None
+            if evaluations:
+                total = sum(e.get("total_score", 0) for e in evaluations)
+                avg_score = round(total / len(evaluations), 1)
+            
+            # 요약 생성
+            q_count = sum(1 for m in chat_history if m.get("role") == "assistant")
+            a_count = sum(1 for m in chat_history if m.get("role") == "user")
+            summary = f"질문 {q_count}개 · 답변 {a_count}개"
+            
+            history.append({
+                "session_id": sid,
+                "date": session.get("created_at", ""),
+                "summary": summary,
+                "score": avg_score,
+                "status": session.get("status"),
+                "message_count": len(chat_history)
+            })
+    
+    # 최신순 정렬
+    history.sort(key=lambda x: x["date"], reverse=True)
+    
+    return {"history": history}
+
+
 # ========== 세션 생성 요청 모델 ==========
 class SessionCreateRequest(BaseModel):
     user_email: Optional[str] = None
@@ -3567,6 +3694,20 @@ async def create_session(request: SessionCreateRequest = None):
         "user_name": user.get("name", ""),
         "chat_history": [{"role": "assistant", "content": greeting}]
     })
+    
+    # 같은 사용자가 이전에 업로드한 이력서(RAG retriever)가 있으면 새 세션으로 복사
+    for sid, s in state.sessions.items():
+        if sid != session_id and s.get("user_email") == request.user_email and s.get("resume_uploaded"):
+            retriever = s.get("retriever")
+            if retriever:
+                state.update_session(session_id, {
+                    "resume_uploaded": True,
+                    "resume_path": s.get("resume_path"),
+                    "resume_filename": s.get("resume_filename"),
+                    "retriever": retriever
+                })
+                print(f"📚 이전 세션({sid[:8]})의 이력서 RAG를 새 세션에 연결함")
+                break
     
     print(f"✅ 면접 세션 생성: {session_id} (사용자: {request.user_email})")
     

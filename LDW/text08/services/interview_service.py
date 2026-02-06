@@ -114,9 +114,13 @@ class InterviewService:
         
         if video_scores:
             session["video_scores_list"].append(video_scores)
+            # Merge into evaluation for DB persistence
+            evaluation["video_analysis"] = video_scores
         else:
             # Add default/placeholder if no video analysis
-             session["video_scores_list"].append({"confidence": 50, "attitude": 50, "avg_video_score": 50})
+             default_scores = {"confidence": 50, "attitude": 50, "avg_video_score": 50}
+             session["video_scores_list"].append(default_scores)
+             evaluation["video_analysis"] = default_scores
 
         # 2. Log to SQLite (interview_save.db)
         log_interview_step(name, job_title, question_to_evaluate, answer, evaluation)

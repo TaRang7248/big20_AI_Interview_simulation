@@ -30,15 +30,25 @@ load_dotenv()
 
 
 # ========== pykospacing 사용 가능 여부 확인 ==========
+# NOTE: deepface가 먼저 import되면 tf_keras가 tensorflow.keras를 가로채서
+# pykospacing의 TFSMLayer import가 실패합니다.
+# 이를 해결하기 위해 TF_USE_LEGACY_KERAS 환경변수를 설정합니다.
 _PYKOSPACING_AVAILABLE = False
 try:
+    import os as _os
+    # tf_keras가 tensorflow.keras를 가로채지 않도록 설정
+    _os.environ.setdefault("TF_USE_LEGACY_KERAS", "0")
     from pykospacing import Spacing  # type: ignore
     _PYKOSPACING_AVAILABLE = True
     logger.info("✅ pykospacing 로드 성공 - 한국어 띄어쓰기 보정 활성화")
-except ImportError:
+except ImportError as e:
     logger.warning(
         "⚠️ pykospacing 미설치 - 한국어 띄어쓰기 보정 비활성화. "
-        "설치하려면: pip install pykospacing"
+        f"설치하려면: pip install pykospacing (에러: {e})"
+    )
+except Exception as e:
+    logger.warning(
+        f"⚠️ pykospacing 로드 중 오류 발생: {type(e).__name__}: {e}"
     )
 
 
