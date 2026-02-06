@@ -30,10 +30,30 @@ try {
     if ($redisCheck -eq "PONG") {
         Write-Host "✅ Redis 연결됨" -ForegroundColor Green
     } else {
-        Write-Host "⚠️  Redis 응답 없음. Redis를 시작하세요." -ForegroundColor Red
+        Write-Host "🚀 Redis 자동 시작 중..." -ForegroundColor Magenta
+        Start-Process "redis-server.exe" -WindowStyle Minimized
+        Start-Sleep -Seconds 2
+        $redisRecheck = redis-cli ping 2>$null
+        if ($redisRecheck -eq "PONG") {
+            Write-Host "✅ Redis 자동 시작 완료" -ForegroundColor Green
+        } else {
+            Write-Host "⚠️  Redis 자동 시작 실패. 수동으로 시작하세요." -ForegroundColor Red
+        }
     }
 } catch {
-    Write-Host "⚠️  Redis가 설치되지 않았거나 실행되지 않았습니다." -ForegroundColor Red
+    Write-Host "🚀 Redis 자동 시작 중..." -ForegroundColor Magenta
+    try {
+        Start-Process "redis-server.exe" -WindowStyle Minimized
+        Start-Sleep -Seconds 2
+        $redisRecheck = redis-cli ping 2>$null
+        if ($redisRecheck -eq "PONG") {
+            Write-Host "✅ Redis 자동 시작 완료" -ForegroundColor Green
+        } else {
+            Write-Host "⚠️  Redis 자동 시작 실패. 수동으로 시작하세요." -ForegroundColor Red
+        }
+    } catch {
+        Write-Host "⚠️  Redis가 설치되지 않았습니다. redis-server.exe를 PATH에 추가하세요." -ForegroundColor Red
+    }
 }
 
 # 2. Ollama 확인
