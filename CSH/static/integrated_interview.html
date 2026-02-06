@@ -776,7 +776,7 @@
         
         // ========== 로그인 확인 ==========
         function checkLoginStatus() {
-            const userData = localStorage.getItem('interview_user');
+            const userData = sessionStorage.getItem('interview_user');
             if (!userData) {
                 return null;
             }
@@ -788,8 +788,8 @@
         }
         
         function logoutAndRedirect() {
-            localStorage.removeItem('interview_user');
-            localStorage.removeItem('login_time');
+            sessionStorage.removeItem('interview_user');
+            sessionStorage.removeItem('login_time');
             alert('로그아웃 되었습니다.');
             window.location.href = '/';
         }
