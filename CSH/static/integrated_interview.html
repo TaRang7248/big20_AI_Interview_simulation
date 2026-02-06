@@ -683,26 +683,6 @@
     <!-- 사이드 패널 - 평가 정보 (비활성화됨) -->
     <!-- 실시간 평가 패널이 제거되었습니다. 면접 종료 후 리포트에서 결과를 확인할 수 있습니다. -->
     
-    <!-- 이력서 업로드 모달 -->
-    <div class="modal-overlay" id="resumeModal">
-        <div class="modal">
-            <h2>📄 이력서 업로드</h2>
-            <p style="color: #8892b0; margin-bottom: 20px;">
-                이력서를 업로드하면 맞춤형 면접 질문을 제공합니다.
-            </p>
-            <div class="upload-area" id="uploadArea" onclick="document.getElementById('resumeFile').click()">
-                <div class="upload-icon">📁</div>
-                <p>PDF 파일을 드래그하거나 클릭하여 업로드</p>
-                <p style="color: #8892b0; font-size: 14px; margin-top: 10px;" id="fileName"></p>
-            </div>
-            <input type="file" id="resumeFile" accept=".pdf" style="display: none;" onchange="handleFileSelect(event)">
-            <div class="modal-buttons">
-                <button class="btn" style="background: rgba(255,255,255,0.1); color: #8892b0;" onclick="skipResume()">건너뛰기</button>
-                <button class="btn btn-primary" id="uploadBtn" onclick="uploadResume()" disabled>업로드 후 시작</button>
-            </div>
-        </div>
-    </div>
-
     <script>
         // ========== 전역 상태 ==========
         let sessionId = null;
@@ -1692,12 +1672,6 @@
                 return;
             }
             
-            // 이력서 업로드 모달 표시
-            document.getElementById('resumeModal').classList.add('active');
-        }
-        
-        async function skipResume() {
-            document.getElementById('resumeModal').classList.remove('active');
             await beginInterview();
         }
         
@@ -3690,72 +3664,6 @@ int main() {
             document.body.appendChild(modal);
         }
         
-        // ========== 이력서 업로드 ==========
-        function handleFileSelect(event) {
-            const file = event.target.files[0];
-            if (file) {
-                document.getElementById('fileName').textContent = file.name;
-                document.getElementById('uploadBtn').disabled = false;
-            }
-        }
-        
-        async function uploadResume() {
-            const fileInput = document.getElementById('resumeFile');
-            const file = fileInput.files[0];
-            
-            if (!file) return;
-            
-            const formData = new FormData();
-            formData.append('file', file);
-            
-            try {
-                document.getElementById('uploadBtn').textContent = '업로드 중...';
-                document.getElementById('uploadBtn').disabled = true;
-                
-                const response = await fetch('/api/resume/upload', {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    sessionId = data.session_id;
-                    document.getElementById('resumeModal').classList.remove('active');
-                    await beginInterview();
-                } else {
-                    alert('업로드 실패: ' + data.message);
-                }
-                
-            } catch (err) {
-                console.error('업로드 실패:', err);
-                alert('업로드에 실패했습니다.');
-            }
-        }
-        
-        // 드래그 앤 드롭
-        const uploadArea = document.getElementById('uploadArea');
-        
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            
-            const files = e.dataTransfer.files;
-            if (files.length > 0 && files[0].type === 'application/pdf') {
-                document.getElementById('resumeFile').files = files;
-                document.getElementById('fileName').textContent = files[0].name;
-                document.getElementById('uploadBtn').disabled = false;
-            }
-        });
     </script>
 </body>
 </html>
