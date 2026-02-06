@@ -12,10 +12,12 @@ router = APIRouter()
 UPLOAD_DIR = "static/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Global Instance of InterviewService
-# In a production app with multiple workers, this memory-based session storage wouldn't work.
-# We would need Redis or DB storage. For this simulation/demo, a global instance is acceptable/assumed.
+from services.llm_service import LLMService
+
+# ... imports ...
+
 interview_service = InterviewService()
+llm_service_instance = LLMService()
 
 @router.post("/start")
 async def start_interview(
@@ -45,7 +47,6 @@ async def start_interview(
 @router.post("/submit")
 async def submit_answer(
     session_id: str = Form(...),
-    # question_id is used in the frontend but we rely on session state in InterviewService
     question_id: str = Form(None), 
     audio: UploadFile = File(None),
     image: UploadFile = File(None),
@@ -58,6 +59,12 @@ async def submit_answer(
     audio_path = None
     image_path = None
     
+    # Retrieve session state to get context (current question)
+    session = interview_service.sessions.get(session_id)
+    current_question_context = ""
+    if session:
+        current_question_context = session.get("current_question", "")
+
     # Process Audio
     if audio:
         file_path = f"{UPLOAD_DIR}/{session_id}_{datetime.utcnow().timestamp()}.webm"
@@ -65,18 +72,23 @@ async def submit_answer(
             shutil.copyfileobj(audio.file, file_object)
         audio_path = file_path
         
-        # STT
+        # STT with Context and Custom Vocabulary
         if not text_content:
-            # Note: InterviewService has transcribe_audio but calls stt.stop_recording.
-            # Here we have a file upload. We can use stt_service directly or add method to InterviewService.
-            # We'll use the imported stt_service directly for file transcription if available,
-            # Or assume stt_service has a transcribe method that takes a path.
-            # Looking at original code, stt_service.transcribe_audio(file_path) was used.
             try:
-                text_content = await stt_service.transcribe_audio(file_path) # Corrected function name
+                # 1. Transcribe with Contextual Bias
+                raw_transcript = await stt_service.transcribe_audio(file_path, context=current_question_context)
+                
+                # 2. Refine Transcript (ITN + NLP)
+                text_content = await llm_service_instance.refine_transcript(raw_transcript)
+                
+                print(f"Raw STT: {raw_transcript}")
+                print(f"Refined: {text_content}")
+
             except AttributeError:
-                # Fallback if stt_service signature is different
                 text_content = "(Audio transcription unavailable)"
+            except Exception as e:
+                print(f"STT/NLP Error: {e}")
+                text_content = ""
 
     # Process Image
     if image:
