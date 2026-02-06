@@ -48,12 +48,12 @@
         </main>
     </div>
 
-    <!-- Need to serve interview.html from FastAPI templates or static -->
-    <!-- Creating a pure HTML file in templates usually requires a route to render it. -->
-    <!-- Ideally, I should add a route in main.py to serve this. -->
+    <!-- PyScript -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
 
-    <script src="/static/js/interview.js"></script>
-    <script src="/static/js/canvas.js"></script>
+    <script type="py" src="/static/py/interview_flow.py"></script>
+    <script type="py" src="/static/py/canvas_handler.py"></script>
 </body>
 
 </html>

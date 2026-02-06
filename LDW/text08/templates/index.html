@@ -19,48 +19,11 @@
             </div>
         </main>
     </div>
-    <script>
-        async function startInterview() {
-            const username = document.getElementById('username').value;
-            const job_role = document.getElementById('job_role').value;
-
-            if (!username || !job_role) {
-                alert("모든 정보를 입력해주세요.");
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('user_id', 1); // Mock ID or create user first
-            formData.append('candidate_name', username); // Use actual endpoint to create user properly if needed.
-            // For simplicity in this vertical slice, we'll hit start endpoint directly with mock user_id if we skipped auth logic in JS.
-            // Actually let's do it properly:
-
-            // 1. Login/Register
-            const loginData = new FormData();
-            loginData.append('username', username);
-            loginData.append('job_role', job_role);
-
-            try {
-                const res = await fetch('/api/auth/login', { method: 'POST', body: loginData });
-                const user = await res.json();
-
-                // 2. Start Interview
-                const startData = new FormData();
-                startData.append('user_id', user.user_id);
-                startData.append('job_role', job_role);
-                startData.append('candidate_name', username);
-
-                const startRes = await fetch('/api/interview/start', { method: 'POST', body: startData });
-                const session = await startRes.json();
-
-                if (session.session_id) {
-                    window.location.href = `/interview.html?session_id=${session.session_id}`;
-                }
-            } catch (e) {
-                alert("Error starting interview: " + e);
-            }
-        }
-    </script>
+    <!-- PyScript -->
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+    
+    <script type="py" src="/static/py/login_handler.py"></script>
 </body>
 
 </html>

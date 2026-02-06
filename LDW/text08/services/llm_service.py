@@ -21,6 +21,39 @@ class LLMService:
             print(f"Error generating embedding: {e}")
             return []
 
+    async def refine_transcript(self, text: str):
+        """
+        Refines the transcript using LLM for ITN (Inverse Text Normalization) and correction.
+        """
+        if not text:
+            return ""
+
+        system_prompt = """
+        당신은 전문적인 교정 및 편집자입니다.
+        주어진 음성 인식(STT) 텍스트를 다듬어서 읽기 좋은 문장으로 변환하세요.
+        
+        작업 내용:
+        1. 오탈자 및 문맥에 맞지 않는 단어 수정.
+        2. 숫자 및 단위를 표준 표기법으로 변환 (예: '일만이천원' -> '12,000원').
+        3. IT 전문 용어를 올바른 대소문자로 표기 (예: 'python' -> 'Python').
+        4. 문장의 끝맺음을 명확하게 수정.
+        
+        결과물은 오직 수정된 텍스트만 출력하세요. 설명이나 부가적인 말은 하지 마세요.
+        """
+
+        try:
+            response = await self.client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text}
+                ]
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"Error refining transcript: {e}")
+            return text
+
     async def generate_question(self, job_title: str, stage: str, context: list = None):
         """
         Generates the next interview question based on the stage and context.
