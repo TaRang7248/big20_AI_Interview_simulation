@@ -36,6 +36,10 @@ async function loadNextQuestion() {
         document.getElementById('question-text').innerText = `Q${data.index}. ${data.question}`;
         document.getElementById('progress').innerText = `${data.index}/${data.total}`;
 
+        // Reset buttons for next question
+        document.getElementById('start-btn').disabled = false;
+        document.getElementById('stop-btn').disabled = true;
+
         resetTimer();
     } catch (e) {
         console.error("Error loading question:", e);
