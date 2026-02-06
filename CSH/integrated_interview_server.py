@@ -2132,11 +2132,6 @@ async def index():
                 </div>
             </div>
             
-            <div class="sub-links">
-                <a href="/static/dashboard.html" class="sub-link">📊 감정 대시보드</a>
-                <a href="/docs" class="sub-link">📚 API 문서</a>
-            </div>
-            
             <div class="status">
                 서비스 상태: 
                 <span>LLM """ + ("✅" if LLM_AVAILABLE else "❌") + """</span> | 
