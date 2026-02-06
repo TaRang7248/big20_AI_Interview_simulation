@@ -213,17 +213,35 @@ window.startInterviewSetup = (jobId) => {
     navigateTo('interview-setup-page');
 };
 
-$('#btn-test-devices').addEventListener('click', () => {
-    // Simulate Device Check
-    showToast('장치를 점검 중입니다...', 'info');
-    setTimeout(() => {
+$('#btn-test-devices').addEventListener('click', async () => {
+    // 1. Camera & Mic Permission
+    showToast('카메라/마이크 권한을 요청합니다...', 'info');
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+        // Connect to Video Element
+        const video = document.getElementById('user-video');
+        if (video) {
+            video.srcObject = stream;
+            document.getElementById('feed-label').textContent = '내 모습 (Camera On)';
+        }
+
         $('#cam-status').className = 'status ok';
-        $('#cam-status').textContent = '정상 (Mock Webcam)';
+        $('#cam-status').textContent = '정상 (연결됨)';
         $('#mic-status').className = 'status ok';
-        $('#mic-status').textContent = '정상 (Mock Mic)';
+        $('#mic-status').textContent = '정상 (연결됨)';
         $('#btn-start-interview').disabled = false;
-        showToast('장치 점검 완료!', 'success');
-    }, 1500);
+
+        showToast('장치가 정상적으로 연결되었습니다.', 'success');
+
+    } catch (err) {
+        console.error("Device Access Error:", err);
+        $('#cam-status').className = 'status error';
+        $('#cam-status').textContent = '오류 (권한 거부됨)';
+        $('#mic-status').className = 'status error';
+        $('#mic-status').textContent = '오류 (권한 거부됨)';
+        showToast('카메라/마이크 접근 권한이 필요합니다.', 'error');
+    }
 });
 
 $('#btn-cancel-interview').addEventListener('click', () => {
@@ -287,13 +305,22 @@ function runInterviewPhase() {
     $('#phase-label').textContent = phaseName;
     const currentQ = questions[AppState.interview.questionIndex];
 
-    // Simulate AI Speaking
+    // AI Speaking (TTS)
     $('#ai-message').textContent = '...';
+    stopListening(); // Stop STT while AI speaks
+
+    // Delay slightly then speak
     setTimeout(() => {
         $('#ai-message').textContent = currentQ;
         addChatLog('AI', currentQ);
-        startTimer(60); // Reset Timer
-    }, 1000);
+
+        // TTS Call
+        speakText(currentQ, () => {
+            // After speaking finishes:
+            startTimer(60); // Start Timer
+            startListening(); // Start STT
+        });
+    }, 500);
 }
 
 function startTimer(seconds) {
@@ -336,6 +363,7 @@ $('#btn-submit-answer').addEventListener('click', () => submitAnswer(false));
 
 function submitAnswer(forced) {
     if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+    stopListening(); // Stop STT on submit
 
     const answer = $('#user-answer').value.trim() || (forced ? '(시간 초과)' : '(답변 없음)');
     addChatLog('User', answer);
@@ -465,4 +493,77 @@ function showToast(msg, type = 'info') {
     setTimeout(() => {
         div.remove();
     }, 3000);
+}
+
+// --- Audio Utilities ---
+
+// TTS
+function speakText(text, callback) {
+    if (!('speechSynthesis' in window)) {
+        console.warn("TTS not supported.");
+        if (callback) callback();
+        return;
+    }
+
+    // Stop previous
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ko-KR';
+    utterance.rate = 1.0;
+
+    // Voices check (optional)
+    const voices = window.speechSynthesis.getVoices();
+    // Try to find a Korean voice
+    const korVoice = voices.find(v => v.lang.includes('ko'));
+    if (korVoice) utterance.voice = korVoice;
+
+    utterance.onend = () => {
+        if (callback) callback();
+    };
+
+    window.speechSynthesis.speak(utterance);
+}
+
+// STT
+let recognitionInst = null;
+
+function startListening() {
+    $('#user-answer').value = ''; // Reset input
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        $('#user-answer').placeholder = "이 브라우저는 음성 인식을 지원하지 않습니다.";
+        return;
+    }
+
+    recognitionInst = new SpeechRecognition();
+    recognitionInst.lang = 'ko-KR';
+    recognitionInst.interimResults = true;
+    recognitionInst.continuous = true;
+
+    recognitionInst.onstart = () => {
+        $('#user-answer').placeholder = "듣고 있습니다... 답변해주세요.";
+        showToast("답변을 말씀해주세요 (음성 인식 중)", "info");
+    };
+
+    recognitionInst.onresult = (event) => {
+        const transcript = Array.from(event.results)
+            .map(result => result[0].transcript)
+            .join('');
+        $('#user-answer').value = transcript;
+    };
+
+    recognitionInst.onerror = (event) => {
+        console.error("STT Error:", event.error);
+    };
+
+    recognitionInst.start();
+}
+
+function stopListening() {
+    if (recognitionInst) {
+        recognitionInst.stop();
+        recognitionInst = null;
+    }
 }
