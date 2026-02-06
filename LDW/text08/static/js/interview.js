@@ -36,9 +36,11 @@ async function loadNextQuestion() {
         document.getElementById('question-text').innerText = `Q${data.index}. ${data.question}`;
         document.getElementById('progress').innerText = `${data.index}/${data.total}`;
 
-        // Reset buttons for next question
+        // Reset state for next question
+        audioChunks = []; // Clear previous audio
         document.getElementById('start-btn').disabled = false;
         document.getElementById('stop-btn').disabled = true;
+        document.getElementById('stt-output').innerText = "답변 준비 중...";
 
         resetTimer();
     } catch (e) {
@@ -61,9 +63,12 @@ function resetTimer() {
 
             // Check if recording
             if (mediaRecorder && mediaRecorder.state === 'recording') {
-                stopRecording(); // Will trigger submitAnswer normally
+                // If recording, stop it. This will trigger onstop -> submitAnswer
+                // But we should ensure we don't treat it as a "forced timeout" with "no answer"
+                stopRecording();
             } else {
-                forceTimeOutSubmit(); // Not recording, force submit as timeout
+                // Not recording, thus no answer provided
+                forceTimeOutSubmit();
             }
         }
     }, 1000);
@@ -80,7 +85,7 @@ async function forceTimeOutSubmit() {
     formData.append('session_id', sessionId);
     formData.append('question_id', currentQuestionId);
     // answer_text triggers the fallback in backend
-    formData.append('answer_text', "시간 초과로 답변을 제출하지 못했습니다.");
+    formData.append('answer_text', "대답하지 않음.");
 
     try {
         const res = await fetch('/api/interview/submit', {
