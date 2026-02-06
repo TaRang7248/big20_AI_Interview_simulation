@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 면접 프로그램</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- Notification / Toast Container -->
+    <div id="toast-container"></div>
+
+    <!-- Main App Container -->
+    <div id="app">
+
+        <!-- Navigation (Conditional Rendering in JS) -->
+        <nav id="navbar" class="hidden">
+            <div class="logo">AI Interview</div>
+            <div class="nav-links">
+                <span id="user-display"></span>
+                <button id="btn-logout" class="btn-text">로그아웃</button>
+            </div>
+        </nav>
+
+        <!-- 1.1 Login Screen -->
+        <section id="login-page" class="page active">
+            <div class="auth-container">
+                <h1>AI 면접 프로그램</h1>
+                <form id="login-form">
+                    <div class="form-group">
+                        <label for="login-id">아이디</label>
+                        <input type="text" id="login-id" placeholder="ID를 입력하세요" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="login-pw">비밀번호</label>
+                        <input type="password" id="login-pw" placeholder="비밀번호를 입력하세요" required>
+                    </div>
+                    <button type="submit" class="btn-primary">로그인</button>
+                </form>
+                <div class="auth-links">
+                    <a href="#" id="link-signup">회원가입</a> | <a href="#">ID/PW 찾기</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- 1.2 Sign Up Screen -->
+        <section id="signup-page" class="page hidden">
+            <div class="auth-container">
+                <h2>회원가입</h2>
+                <form id="signup-form">
+                    <div class="form-group">
+                        <label for="reg-id">아이디</label>
+                        <input type="text" id="reg-id" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-pw">비밀번호</label>
+                        <input type="password" id="reg-pw" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="reg-name">이름</label>
+                        <input type="text" id="reg-name" required>
+                    </div>
+                    <div class="form-group">
+                        <label>회원 유형</label>
+                        <div class="radio-group">
+                            <label><input type="radio" name="reg-type" value="applicant" checked> 면접자</label>
+                            <label><input type="radio" name="reg-type" value="admin"> 관리자</label>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn-primary">가입하기</button>
+                    <button type="button" class="btn-secondary" id="btn-back-login">취소</button>
+                </form>
+            </div>
+        </section>
+
+        <!-- 1.3 My Info Screen -->
+        <section id="myinfo-page" class="page hidden">
+            <div class="container">
+                <h2>회원 정보 수정</h2>
+                <div class="profile-card">
+                    <form id="myinfo-form">
+                        <div class="form-group">
+                            <label>현재 비밀번호 확인</label>
+                            <input type="password" id="confirm-pw" required>
+                        </div>
+                        <div class="form-group">
+                            <label>이메일</label>
+                            <input type="email" id="edit-email">
+                        </div>
+                        <div class="form-group">
+                            <label>전화번호</label>
+                            <input type="tel" id="edit-phone">
+                        </div>
+                        <button type="submit" class="btn-primary">정보 수정</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2.1 Applicant Dashboard (Before Interview) -->
+        <section id="applicant-dashboard-page" class="page hidden">
+            <div class="container dashboard-layout">
+                <aside class="sidebar">
+                    <h3>메뉴</h3>
+                    <ul>
+                        <li><a href="#" class="active" onclick="return false;">지원 공고 목록</a></li>
+                        <li><a href="#" id="link-my-records">내 면접 기록</a></li>
+                        <li><a href="#" id="link-my-info">내 정보</a></li>
+                    </ul>
+                </aside>
+                <main class="content">
+                    <h2>지원 가능한 공고</h2>
+                    <ul id="job-list" class="card-list">
+                        <!-- Job Items rendered by JS -->
+                    </ul>
+                </main>
+            </div>
+        </section>
+
+        <!-- 2.1 Interview Setup (Detail & Resume & Test) -->
+        <section id="interview-setup-page" class="page hidden">
+            <div class="container setup-container">
+                <h2 id="setup-job-title">공고 제목</h2>
+                <div class="setup-steps">
+                    <div class="step-card">
+                        <h3>1. 이력서 업로드</h3>
+                        <p>면접에 사용할 이력서를 등록해주세요.</p>
+                        <input type="file" id="resume-upload">
+                    </div>
+                    <div class="step-card">
+                        <h3>2. 환경 테스트</h3>
+                        <div class="device-check">
+                            <div class="check-item"><span class="icon">📷</span> 카메라: <span id="cam-status"
+                                    class="status pending">확인 필요</span></div>
+                            <div class="check-item"><span class="icon">🎙️</span> 마이크: <span id="mic-status"
+                                    class="status pending">확인 필요</span></div>
+                        </div>
+                        <button id="btn-test-devices" class="btn-small">장치 테스트 실행</button>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button id="btn-start-interview" class="btn-primary" disabled>면접 시작</button>
+                    <button id="btn-cancel-interview" class="btn-secondary">뒤로가기</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2.2 Interview In-Progress -->
+        <section id="interview-page" class="page hidden">
+            <div class="interview-room">
+                <div class="interview-header">
+                    <div class="timer">남은 시간: <span id="timer-display">00:00</span></div>
+                    <div class="progress-bar-container">
+                        <div class="progress-label" id="phase-label">Phase 1: 자기소개</div>
+                        <div class="progress-track">
+                            <div id="progress-bar" class="progress-fill"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="interview-main">
+                    <!-- AI Interviewer Area -->
+                    <div class="interviewer-area">
+                        <div class="avatar-wrapper">
+                            <div class="ai-avatar">🤖</div> <!-- Placeholder for AI Face -->
+                        </div>
+                        <div class="chat-bubble ai" id="ai-message">안녕하세요. 면접을 시작하겠습니다.</div>
+                    </div>
+
+                    <!-- User Area -->
+                    <div class="user-area">
+                        <div class="camera-feed-placeholder">
+                            <span class="feed-label">내 모습 (Camera)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Interaction Area -->
+                <div class="interview-controls">
+                    <div class="chat-log" id="chat-log">
+                        <!-- History of Q&A -->
+                    </div>
+                    <div class="input-area">
+                        <div id="coding-board" class="hidden">
+                            <textarea placeholder="// 코드를 작성하거나 설계를 메모하세요 (Whiteboard/IDE Placeholder)"></textarea>
+                        </div>
+                        <textarea id="user-answer" placeholder="답변을 입력하세요... (음성 인식 시뮬레이션)" rows="3"></textarea>
+                        <button id="btn-submit-answer" class="btn-primary">답변 완료</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 2.3 Interview Result -->
+        <section id="result-page" class="page hidden">
+            <div class="container result-container">
+                <h2>면접 결과 통지</h2>
+                <div class="result-card">
+                    <div class="pass-fail-badge" id="pass-fail-badge">심사중</div>
+                    <div class="score-chart">
+                        <h3>영역별 점수</h3>
+                        <div class="score-item">
+                            <span>기술 역량</span>
+                            <div class="bar-bg">
+                                <div class="bar-fill" id="score-tech" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="score-item">
+                            <span>문제 해결</span>
+                            <div class="bar-bg">
+                                <div class="bar-fill" id="score-prob" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="score-item">
+                            <span>의사 소통</span>
+                            <div class="bar-bg">
+                                <div class="bar-fill" id="score-comm" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="score-item">
+                            <span>태도 (비언어)</span>
+                            <div class="bar-bg">
+                                <div class="bar-fill" id="score-atti" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="result-message" id="result-desc">
+                        수고하셨습니다. 상세 결과는 추후 이메일로 안내됩니다.
+                    </p>
+                </div>
+                <button id="btn-go-home" class="btn-primary">홈으로</button>
+            </div>
+        </section>
+
+        <!-- 3. Admin Dashboard -->
+        <section id="admin-dashboard-page" class="page hidden">
+            <div class="container dashboard-layout">
+                <aside class="sidebar">
+                    <h3>관리자 메뉴</h3>
+                    <ul>
+                        <li><a href="#" class="active" id="admin-menu-jobs">공고 관리</a></li>
+                        <li><a href="#" id="admin-menu-applicants">지원자 현황</a></li>
+                    </ul>
+                </aside>
+                <main class="content">
+                    <div id="admin-view-jobs">
+                        <div class="content-header">
+                            <h2>면접 공고 관리</h2>
+                            <button id="btn-add-job" class="btn-small">공고 등록</button>
+                        </div>
+                        <table class="table" id="admin-job-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>제목</th>
+                                    <th>마감일</th>
+                                    <th>관리</th>
+                                </tr>
+                            </thead>
+                            <tbody><!-- JS Render --></tbody>
+                        </table>
+                    </div>
+
+                    <div id="admin-view-applicants" class="hidden">
+                        <h2>지원자 합격/불합격 현황</h2>
+                        <div class="chart-placeholder">
+                            [지원자 통계 그래프 Placeholder]
+                        </div>
+                        <h3>상세 지원자 목록</h3>
+                        <table class="table" id="admin-app-table">
+                            <thead>
+                                <tr>
+                                    <th>이름</th>
+                                    <th>지원 공고</th>
+                                    <th>점수</th>
+                                    <th>결과</th>
+                                    <th>상세</th>
+                                </tr>
+                            </thead>
+                            <tbody><!-- JS Render --></tbody>
+                        </table>
+                    </div>
+                </main>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- Logic -->
+    <script src="app.js"></script>
+</body>
+
+</html>

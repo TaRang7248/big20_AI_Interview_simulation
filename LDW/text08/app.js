@@ -1,0 +1,468 @@
+/**
+ * AI Interview Program - Main Application Logic
+ * Stack: Vanilla JS (ES6+)
+ * Features: SPA Routing, Mock Data Management, Interview Simulation
+ */
+
+// --- 0. Mock Data (데이터 모델) ---
+const MOCK_DB = {
+    users: [
+        { id: 'test', pw: '1234', name: '홍길동', type: 'applicant', email: 'test@example.com', phone: '010-1234-5678' },
+        { id: 'admin', pw: 'admin', name: '관리자', type: 'admin', email: 'admin@company.com', phone: '010-0000-0000' }
+    ],
+    jobs: [
+        { id: 1, title: '2026년 상반기 신입 개발자 공채', deadline: '2026-06-30', content: '백엔드/프론트엔드 개발자 모집' },
+        { id: 2, title: 'AI 데이터 분석가 경력직 채용', deadline: '2026-05-15', content: 'Python, SQL 능통자' }
+    ],
+    applications: [
+        // { userId: 'test', jobId: 1, status: 'completed', score: { ... } }
+    ],
+    interviewQuestions: {
+        'phase1': ['자기소개를 간단히 부탁드립니다.', '지원 동기가 무엇인가요?'],
+        'phase2': ['가장 열정적으로 임했던 프로젝트 경험을 말씀해주세요.', '갈등 상황을 해결한 경험이 있나요?', '본인의 장단점은 무엇인가요?'],
+        'coding': ['문자열 뒤집기 알고리즘을 설명해주세요. (화이트보드 활성화)']
+    }
+};
+
+// --- 1. Global State (상태 관리) ---
+const AppState = {
+    currentUser: null, // Logged in user object
+    currentJobId: null, // Selected Job ID for interview
+    interview: {
+        inProgress: false,
+        phase: 0, // 0: setup, 1: intro, 2: competency, 3: coding
+        questionIndex: 0,
+        timer: null,
+        timeLeft: 0,
+        log: []
+    }
+};
+
+// --- 2. Code Implementation (로직) ---
+
+// DOM Elements shortcut
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => document.querySelectorAll(selector);
+
+// Initialization
+document.addEventListener('DOMContentLoaded', () => {
+    initRouter();
+    initAuth();
+    initDashboard();
+    initAdmin();
+    initInterview();
+});
+
+// --- Router Utility ---
+function initRouter() {
+    // Basic navigation handling logic
+    window.navigateTo = (pageId) => {
+        // Hide all pages
+        $$('.page').forEach(el => el.classList.add('hidden'));
+        $$('.page').forEach(el => el.classList.remove('active'));
+
+        // Show target page
+        const target = $(`#${pageId}`);
+        if (target) {
+            target.classList.remove('hidden');
+            target.classList.add('active');
+            console.log(`Navigated to: ${pageId}`);
+
+            // Run specific page init logic if needed
+            if (pageId === 'applicant-dashboard-page') renderJobList();
+            if (pageId === 'admin-dashboard-page') renderAdminJobList();
+        }
+    };
+
+    // Navigation Buttons
+    $('#link-signup').addEventListener('click', (e) => { e.preventDefault(); navigateTo('signup-page'); });
+    $('#btn-back-login').addEventListener('click', () => navigateTo('login-page'));
+    $('#btn-go-home').addEventListener('click', () => {
+        if (AppState.currentUser?.type === 'admin') navigateTo('admin-dashboard-page');
+        else navigateTo('applicant-dashboard-page');
+    });
+}
+
+// --- Authentication --
+function initAuth() {
+    // Login
+    $('#login-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const id = $('#login-id').value;
+        const pw = $('#login-pw').value;
+
+        const user = MOCK_DB.users.find(u => u.id === id && u.pw === pw);
+        if (user) {
+            loginUser(user);
+        } else {
+            showToast('아이디 또는 비밀번호가 일치하지 않습니다.', 'error');
+        }
+    });
+
+    // SignUp
+    $('#signup-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const id = $('#reg-id').value;
+        const exist = MOCK_DB.users.find(u => u.id === id);
+        if (exist) {
+            showToast('이미 존재하는 아이디입니다.', 'error');
+            return;
+        }
+
+        const newUser = {
+            id: id,
+            pw: $('#reg-pw').value,
+            name: $('#reg-name').value,
+            type: $('input[name="reg-type"]:checked').value
+        };
+        MOCK_DB.users.push(newUser);
+        showToast('회원가입 완료! 로그인해주세요.', 'success');
+        navigateTo('login-page');
+    });
+
+    // Logout
+    $('#btn-logout').addEventListener('click', () => {
+        AppState.currentUser = null;
+        $('#navbar').classList.add('hidden');
+        navigateTo('login-page');
+        showToast('로그아웃 되었습니다.');
+    });
+
+    // My Info Link
+    $('#link-my-info').addEventListener('click', () => {
+        if (AppState.currentUser) {
+            $('#edit-email').value = AppState.currentUser.email || '';
+            $('#edit-phone').value = AppState.currentUser.phone || '';
+            navigateTo('myinfo-page');
+        }
+    });
+
+    // My Info Update
+    $('#myinfo-form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const confirmPw = $('#confirm-pw').value;
+        if (confirmPw !== AppState.currentUser.pw) {
+            showToast('비밀번호가 일치하지 않습니다.', 'error');
+            return;
+        }
+        // Update
+        const target = MOCK_DB.users.find(u => u.id === AppState.currentUser.id);
+        target.email = $('#edit-email').value;
+        target.phone = $('#edit-phone').value;
+        AppState.currentUser = target; // sync
+        showToast('정보가 수정되었습니다.', 'success');
+    });
+}
+
+function loginUser(user) {
+    AppState.currentUser = user;
+    $('#user-display').textContent = `${user.name}님 (${user.type === 'admin' ? '관리자' : '지원자'})`;
+    $('#navbar').classList.remove('hidden');
+
+    // Clear inputs
+    $('#login-id').value = '';
+    $('#login-pw').value = '';
+
+    if (user.type === 'admin') {
+        navigateTo('admin-dashboard-page');
+    } else {
+        navigateTo('applicant-dashboard-page');
+    }
+    showToast(`${user.name}님 환영합니다!`, 'success');
+}
+
+// --- Applicant Dashboard ---
+function initDashboard() {
+    $('#link-my-records').addEventListener('click', () => {
+        showToast('아직 구현된 기록이 없습니다. (Mock Demo)', 'info');
+    });
+}
+
+function renderJobList() {
+    const list = $('#job-list');
+    list.innerHTML = '';
+    MOCK_DB.jobs.forEach(job => {
+        const li = document.createElement('li');
+        li.className = 'job-card';
+        li.innerHTML = `
+            <div class="job-info">
+                <h4>${job.title}</h4>
+                <p>마감일: ${job.deadline}</p>
+            </div>
+            <button class="btn-small" onclick="startInterviewSetup(${job.id})">지원하기</button>
+        `;
+        list.appendChild(li);
+    });
+}
+
+// --- Interview Flow ---
+// Step 1: Setup
+window.startInterviewSetup = (jobId) => {
+    AppState.currentJobId = jobId;
+    const job = MOCK_DB.jobs.find(j => j.id === jobId);
+    $('#setup-job-title').textContent = job.title;
+
+    // Reset Checks
+    $('#resume-upload').value = '';
+    $('#cam-status').className = 'status pending';
+    $('#cam-status').textContent = '확인 필요';
+    $('#mic-status').className = 'status pending';
+    $('#mic-status').textContent = '확인 필요';
+    $('#btn-start-interview').disabled = true;
+
+    navigateTo('interview-setup-page');
+};
+
+$('#btn-test-devices').addEventListener('click', () => {
+    // Simulate Device Check
+    showToast('장치를 점검 중입니다...', 'info');
+    setTimeout(() => {
+        $('#cam-status').className = 'status ok';
+        $('#cam-status').textContent = '정상 (Mock Webcam)';
+        $('#mic-status').className = 'status ok';
+        $('#mic-status').textContent = '정상 (Mock Mic)';
+        $('#btn-start-interview').disabled = false;
+        showToast('장치 점검 완료!', 'success');
+    }, 1500);
+});
+
+$('#btn-cancel-interview').addEventListener('click', () => {
+    navigateTo('applicant-dashboard-page');
+});
+
+// Step 2: Main Interview Logic
+$('#btn-start-interview').addEventListener('click', () => {
+    // Init Interview State
+    AppState.interview = {
+        inProgress: true,
+        phase: 1, // Start with Intro
+        questionIndex: 0,
+        logs: [],
+        timeLeft: 60 // 60s per question
+    };
+
+    // Clear UI
+    $('#chat-log').innerHTML = '';
+    $('#user-answer').value = '';
+    $('#coding-board').classList.add('hidden');
+
+    navigateTo('interview-page');
+    runInterviewPhase();
+});
+
+function runInterviewPhase() {
+    if (!AppState.interview.inProgress) return;
+
+    // Check Phase
+    let questions = [];
+    let phaseName = '';
+
+    if (AppState.interview.phase === 1) {
+        questions = MOCK_DB.interviewQuestions['phase1'];
+        phaseName = 'Phase 1: 자기소개';
+    } else if (AppState.interview.phase === 2) {
+        questions = MOCK_DB.interviewQuestions['phase2'];
+        phaseName = 'Phase 2: 역량 검증';
+    } else if (AppState.interview.phase === 3) {
+        questions = MOCK_DB.interviewQuestions['coding'];
+        phaseName = 'Phase 3: 기술 문제';
+        $('#coding-board').classList.remove('hidden');
+    } else {
+        // Finish
+        finishInterview();
+        return;
+    }
+
+    // Check Question Index
+    if (AppState.interview.questionIndex >= questions.length) {
+        // Next Phase
+        AppState.interview.phase++;
+        AppState.interview.questionIndex = 0;
+        // Recursive call for next phase
+        runInterviewPhase();
+        return;
+    }
+
+    // Update UI
+    $('#phase-label').textContent = phaseName;
+    const currentQ = questions[AppState.interview.questionIndex];
+
+    // Simulate AI Speaking
+    $('#ai-message').textContent = '...';
+    setTimeout(() => {
+        $('#ai-message').textContent = currentQ;
+        addChatLog('AI', currentQ);
+        startTimer(60); // Reset Timer
+    }, 1000);
+}
+
+function startTimer(seconds) {
+    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+
+    AppState.interview.timeLeft = seconds;
+    updateTimerDisplay();
+
+    AppState.interview.timer = setInterval(() => {
+        AppState.interview.timeLeft--;
+        updateTimerDisplay();
+
+        if (AppState.interview.timeLeft <= 0) {
+            clearInterval(AppState.interview.timer);
+            submitAnswer(true); // Force submit
+        }
+    }, 1000);
+}
+
+function updateTimerDisplay() {
+    const min = Math.floor(AppState.interview.timeLeft / 60);
+    const sec = AppState.interview.timeLeft % 60;
+    $('#timer-display').textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+    // Progress Bar simulation (just visual)
+    const totalTime = 60;
+    const pct = ((totalTime - AppState.interview.timeLeft) / totalTime) * 100;
+    $('#progress-bar').style.width = `${pct}%`;
+}
+
+function addChatLog(sender, text) {
+    const div = document.createElement('div');
+    div.className = `chat-msg ${sender.toLowerCase()}`;
+    div.innerHTML = `<strong>${sender}:</strong> ${text}`;
+    $('#chat-log').appendChild(div);
+    $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
+}
+
+$('#btn-submit-answer').addEventListener('click', () => submitAnswer(false));
+
+function submitAnswer(forced) {
+    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+
+    const answer = $('#user-answer').value.trim() || (forced ? '(시간 초과)' : '(답변 없음)');
+    addChatLog('User', answer);
+
+    // Save Log
+    AppState.interview.logs.push({
+        phase: AppState.interview.phase,
+        qIndex: AppState.interview.questionIndex,
+        answer: answer
+    });
+
+    $('#user-answer').value = '';
+
+    // Move next
+    AppState.interview.questionIndex++;
+    runInterviewPhase();
+}
+
+function finishInterview() {
+    AppState.interview.inProgress = false;
+    // Save to Mock DB
+    const result = {
+        userId: AppState.currentUser.id,
+        jobId: AppState.currentJobId,
+        date: new Date().toLocaleDateString(),
+        scores: {
+            tech: Math.floor(Math.random() * 30) + 70, // Mock Score
+            prob: Math.floor(Math.random() * 30) + 70,
+            comm: Math.floor(Math.random() * 30) + 70,
+            atti: Math.floor(Math.random() * 30) + 70
+        }
+    };
+    MOCK_DB.applications.push(result);
+
+    // Show Result Page
+    // Animate bars
+    navigateTo('result-page');
+    setTimeout(() => {
+        $('#score-tech').style.width = `${result.scores.tech}%`;
+        $('#score-prob').style.width = `${result.scores.prob}%`;
+        $('#score-comm').style.width = `${result.scores.comm}%`;
+        $('#score-atti').style.width = `${result.scores.atti}%`;
+
+        const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
+        $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
+        $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
+    }, 500);
+}
+
+// --- Admin Section ---
+function initAdmin() {
+    $('#admin-menu-jobs').addEventListener('click', () => {
+        $('#admin-view-jobs').classList.remove('hidden');
+        $('#admin-view-applicants').classList.add('hidden');
+    });
+    $('#admin-menu-applicants').addEventListener('click', () => {
+        $('#admin-view-jobs').classList.add('hidden');
+        $('#admin-view-applicants').classList.remove('hidden');
+        renderAdminAppList();
+    });
+
+    $('#btn-add-job').addEventListener('click', () => {
+        const title = prompt('공고 제목을 입력하세요:');
+        if (title) {
+            MOCK_DB.jobs.push({
+                id: Date.now(),
+                title: title,
+                deadline: '2026-12-31',
+                content: '추가된 공고'
+            });
+            renderAdminJobList();
+        }
+    });
+
+    initInterview(); // Ensure interview init is called if valid
+}
+
+function initInterview() {
+    // Placeholder if extra init needed
+}
+
+function renderAdminJobList() {
+    const tbody = $('#admin-job-table tbody');
+    tbody.innerHTML = '';
+    MOCK_DB.jobs.forEach(job => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${job.id}</td>
+            <td>${job.title}</td>
+            <td>${job.deadline}</td>
+            <td><button class="btn-small btn-secondary">수정</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function renderAdminAppList() {
+    const tbody = $('#admin-app-table tbody');
+    tbody.innerHTML = '';
+    MOCK_DB.applications.forEach(app => {
+        const user = MOCK_DB.users.find(u => u.id === app.userId);
+        const job = MOCK_DB.jobs.find(j => j.id === app.jobId);
+
+        const avg = (app.scores.tech + app.scores.prob + app.scores.comm + app.scores.atti) / 4;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${user ? user.name : 'Unknown'}</td>
+            <td>${job ? job.title : 'Deleted Job'}</td>
+            <td>${avg.toFixed(1)}</td>
+            <td>${avg >= 80 ? 'Pass' : 'Fail'}</td>
+            <td><button class="btn-small">상세보기</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// --- Utilities ---
+function showToast(msg, type = 'info') {
+    const container = $('#toast-container');
+    const div = document.createElement('div');
+    div.className = `toast ${type}`;
+    div.textContent = msg;
+    container.appendChild(div);
+
+    // Auto remove
+    setTimeout(() => {
+        div.remove();
+    }, 3000);
+}
