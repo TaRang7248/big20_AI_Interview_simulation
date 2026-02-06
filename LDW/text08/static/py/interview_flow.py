@@ -9,7 +9,7 @@ current_question_id = None
 media_recorder = None
 audio_chunks = []
 timer_interval = None
-TIME_LIMIT = 5
+TIME_LIMIT = 5 #타이머 설정.
 is_recording = False
 
 # Speech Recognition Global Variables
@@ -108,10 +108,27 @@ async def load_next_question():
         document.getElementById('stop-btn').disabled = True
         document.getElementById('stt-output').innerText = "답변 준비 중..."
         
-        reset_timer()
+        # TTS로 질문 읽기 및 종료 후 타이머 시작
+        speak_question(data.get('question'), create_proxy(reset_timer))
         
     except Exception as e:
         js.console.error(f"Error loading question: {e}")
+
+def speak_question(text, on_end_callback):
+    if not hasattr(js.window, 'speechSynthesis'):
+        js.console.warn("TTS not supported")
+        on_end_callback()
+        return
+
+    synth = js.window.speechSynthesis
+    utterance = js.SpeechSynthesisUtterance.new(text)
+    utterance.lang = 'ko-KR'
+    
+    def on_end(event):
+        on_end_callback()
+        
+    utterance.onend = create_proxy(on_end)
+    synth.speak(utterance)
 
 def reset_timer():
     global timer_interval, TIME_LIMIT
