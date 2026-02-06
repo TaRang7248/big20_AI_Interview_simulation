@@ -28,7 +28,7 @@ httpx>=0.25.0
 # ========== STT (Deepgram) ==========
 deepgram-sdk>=3.0.0
 pyaudio>=0.2.14
-pykospacing>=0.4  # 한국어 띄어쓰기 보정 (STT 후처리)
+pykospacing # 한국어 띄어쓰기 보정 (STT 후처리)
 
 # ========== RAG (PostgreSQL + PGVector) ==========
 langchain-postgres>=0.0.1
