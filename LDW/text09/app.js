@@ -7,8 +7,8 @@
 // --- 0. Mock Data (데이터 모델) ---
 const MOCK_DB = {
     users: [
-        { id: 'test', pw: '1234', name: '홍길동', type: 'applicant', email: 'test@example.com', phone: '010-1234-5678' },
-        { id: 'admin', pw: 'admin', name: '관리자', type: 'admin', email: 'admin@company.com', phone: '010-0000-0000' }
+        { id: 'test', pw: '1234', name: '홍길동', dob: '1995-01-01', gender: 'male', type: 'applicant', email: 'test@example.com', address: '서울시 강남구', phone: '010-1234-5678' },
+        { id: 'admin', pw: 'admin', name: '관리자', dob: '1990-05-05', gender: 'female', type: 'admin', email: 'admin@company.com', address: '서울시 서초구', phone: '010-0000-0000' }
     ],
     jobs: [
         { id: 1, title: '2026년 상반기 신입 개발자 공채', deadline: '2026-06-30', content: '백엔드/프론트엔드 개발자 모집' },
@@ -113,6 +113,11 @@ function initAuth() {
             id: id,
             pw: $('#reg-pw').value,
             name: $('#reg-name').value,
+            dob: $('#reg-dob').value,
+            gender: $('#reg-gender').value,
+            email: $('#reg-email').value,
+            address: $('#reg-addr').value,
+            phone: $('#reg-phone').value,
             type: $('input[name="reg-type"]:checked').value
         };
         MOCK_DB.users.push(newUser);
