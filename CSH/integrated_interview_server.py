@@ -2362,7 +2362,9 @@ async def index():
                 const savedUser = sessionStorage.getItem('interview_user');
                 if (savedUser) {
                     currentUser = JSON.parse(savedUser);
-                    updateUIForLoggedInUser();
+                    // 이미 로그인된 상태면 대시보드로 이동
+                    window.location.href = '/dashboard';
+                    return;
                 }
             };
             
@@ -2711,7 +2713,8 @@ async def index():
                         currentUser = result.user;
                         sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
                         closeModals();
-                        updateUIForLoggedInUser();
+                        // 로그인 성공 시 대시보드로 이동
+                        window.location.href = '/dashboard';
                     } else {
                         errorEl.textContent = result.message;
                         errorEl.classList.add('active');
@@ -2855,7 +2858,7 @@ async def index():
                             if (result.success) {
                                 currentUser = result.user;
                                 sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
-                                updateUIForLoggedInUser();
+                                window.location.href = '/dashboard';
                             }
                             window.history.replaceState({}, '', '/');
                         })
@@ -3598,6 +3601,55 @@ async def delete_resume(session_id: str):
     })
     
     return {"success": True, "message": "이력서가 삭제되었습니다."}
+
+
+# ========== 대시보드 페이지 ==========
+
+@app.get("/dashboard")
+async def dashboard_page():
+    """로그인 후 대시보드 페이지"""
+    return FileResponse(os.path.join(static_dir, "my_dashboard.html"))
+
+
+# ========== 면접 이력 조회 API ==========
+
+@app.get("/api/interview/history")
+async def get_interview_history(email: str):
+    """사용자 이메일 기준 면접 이력 조회"""
+    user = get_user_by_email(email)
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    
+    history = []
+    for sid, session in state.sessions.items():
+        if session.get("user_email") == email and session.get("status") in ("completed", "active"):
+            chat_history = session.get("chat_history", [])
+            evaluations = session.get("evaluations", [])
+            
+            # 평균 점수 계산
+            avg_score = None
+            if evaluations:
+                total = sum(e.get("total_score", 0) for e in evaluations)
+                avg_score = round(total / len(evaluations), 1)
+            
+            # 요약 생성
+            q_count = sum(1 for m in chat_history if m.get("role") == "assistant")
+            a_count = sum(1 for m in chat_history if m.get("role") == "user")
+            summary = f"질문 {q_count}개 · 답변 {a_count}개"
+            
+            history.append({
+                "session_id": sid,
+                "date": session.get("created_at", ""),
+                "summary": summary,
+                "score": avg_score,
+                "status": session.get("status"),
+                "message_count": len(chat_history)
+            })
+    
+    # 최신순 정렬
+    history.sort(key=lambda x: x["date"], reverse=True)
+    
+    return {"history": history}
 
 
 # ========== 세션 생성 요청 모델 ==========
