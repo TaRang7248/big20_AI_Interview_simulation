@@ -3520,7 +3520,7 @@ async def upload_resume(
                 
                 # PDF 인덱싱
                 print(f"📚 이력서 인덱싱 시작: {file_path}")
-                session_rag.load_and_index_pdf(file_path)
+                num_chunks = session_rag.load_and_index_pdf(file_path)
                 
                 # 세션에 retriever 저장
                 retriever = session_rag.get_retriever()
@@ -3531,8 +3531,7 @@ async def upload_resume(
                     "retriever": retriever
                 })
                 
-                # 청크 수 추정 (로그에서 가져올 수 없으므로 대략적으로)
-                chunks_created = 1  # 최소 1개 이상
+                chunks_created = num_chunks if num_chunks else 1
                 print(f"✅ RAG 인덱싱 완료: {collection_name}")
             else:
                 print("⚠️ POSTGRES_CONNECTION_STRING 미설정, RAG 비활성화")
