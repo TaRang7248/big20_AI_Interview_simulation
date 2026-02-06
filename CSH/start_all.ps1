@@ -12,6 +12,17 @@ Write-Host ""
 # 현재 디렉토리를 스크립트 위치로 변경
 Set-Location $PSScriptRoot
 
+# 0. 가상환경 활성화
+$venvPath = Join-Path $PSScriptRoot "..\interview_env\Scripts\Activate.ps1"
+if (Test-Path $venvPath) {
+    Write-Host "[0/4] 가상환경 활성화 중..." -ForegroundColor Yellow
+    & $venvPath
+    Write-Host "✅ 가상환경 활성화됨 (interview_env)" -ForegroundColor Green
+} else {
+    Write-Host "⚠️  가상환경을 찾을 수 없습니다: $venvPath" -ForegroundColor Red
+    Write-Host "    시스템 Python으로 실행합니다." -ForegroundColor Red
+}
+
 # 1. Redis 확인
 Write-Host "[1/4] Redis 상태 확인 중..." -ForegroundColor Yellow
 try {
@@ -40,7 +51,8 @@ try {
 
 # 3. Celery Worker 시작 (새 창)
 Write-Host "[3/4] Celery Worker 시작 중..." -ForegroundColor Yellow
-Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$PSScriptRoot'; celery -A celery_app worker --pool=solo --loglevel=info" -WindowStyle Normal
+$activateScript = Join-Path $PSScriptRoot "..\interview_env\Scripts\Activate.ps1"
+Start-Process powershell -ArgumentList "-NoExit", "-Command", "& '$activateScript'; cd '$PSScriptRoot'; celery -A celery_app worker --pool=solo --loglevel=info" -WindowStyle Normal
 Write-Host "✅ Celery Worker 시작됨 (새 창)" -ForegroundColor Green
 
 # 잠시 대기
