@@ -22,13 +22,19 @@ async def init():
 
 async def init_webcam():
     try:
-        constraints = to_js({"video": True, "audio": True})
+        # Fix: Create a proper JS object for constraints using JSON parsing
+        # to_js on a dict creates a Map, which getUserMedia doesn't accept.
+        constraints_json = json.dumps({"video": True, "audio": True})
+        constraints = js.JSON.parse(constraints_json)
+        
         stream = await window.navigator.mediaDevices.getUserMedia(constraints)
         video_element = document.getElementById('webcam')
         video_element.srcObject = stream
+        
+        js.console.log("Webcam initialized successfully")
     except Exception as e:
-        js.console.error(f"Webcam access denied: {e}")
-        js.alert("Webcam access denied.")
+        js.console.error(f"Webcam access denied or error: {e}")
+        js.alert(f"Webcam error: {e}")
 
 async def load_next_question():
     global current_question_id, audio_chunks
@@ -114,7 +120,7 @@ async def start_recording(event=None):
             audio_chunks.append(e.data)
             
         def on_stop(e):
-            nonlocal is_recording
+            global is_recording
             is_recording = False
             window.setTimeout(create_proxy(submit_answer), 0)
 
