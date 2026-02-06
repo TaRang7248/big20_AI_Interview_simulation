@@ -227,6 +227,22 @@ except ImportError:
     except ImportError:
         print("⚠️ LangChain Memory 모듈 비활성화 (수동 대화 기록 사용)")
 
+# 한국어 띄어쓰기 보정기 (STT 후처리용) — deepface보다 먼저 import해야 함
+# deepface가 tf_keras를 활성화하면 tensorflow.keras.layers.TFSMLayer를 찾지 못함
+print(f"🐍 현재 Python: {sys.executable}")
+try:
+    from stt_engine import KoreanSpacingCorrector
+    _spacing_corrector = KoreanSpacingCorrector()
+    SPACING_CORRECTION_AVAILABLE = _spacing_corrector.is_available
+    if SPACING_CORRECTION_AVAILABLE:
+        print("✅ 한국어 띄어쓰기 보정 (pykospacing) 활성화됨")
+    else:
+        print("⚠️ pykospacing 미설치 - 띄어쓰기 보정 비활성화")
+except ImportError as e:
+    _spacing_corrector = None
+    SPACING_CORRECTION_AVAILABLE = False
+    print(f"⚠️ 한국어 띄어쓰기 보정 비활성화 (stt_engine 모듈 없음): {e}")
+
 # 감정 분석
 try:
     from deepface import DeepFace
@@ -323,20 +339,6 @@ except ImportError as e:
     deepgram_client = None
     EventType = None
     print(f"⚠️ Deepgram STT 서비스 비활성화: {e}")
-
-# 한국어 띄어쓰기 보정기 (STT 후처리용)
-try:
-    from stt_engine import KoreanSpacingCorrector
-    _spacing_corrector = KoreanSpacingCorrector()
-    SPACING_CORRECTION_AVAILABLE = _spacing_corrector.is_available
-    if SPACING_CORRECTION_AVAILABLE:
-        print("✅ 한국어 띄어쓰기 보정 (pykospacing) 활성화됨")
-    else:
-        print("⚠️ pykospacing 미설치 - 띄어쓰기 보정 비활성화")
-except ImportError:
-    _spacing_corrector = None
-    SPACING_CORRECTION_AVAILABLE = False
-    print("⚠️ 한국어 띄어쓰기 보정 비활성화 (stt_engine 모듈 없음)")
 
 
 # ========== 전역 상태 관리 ==========
@@ -2130,11 +2132,6 @@ async def index():
                 </div>
             </div>
             
-            <div class="sub-links">
-                <a href="/static/dashboard.html" class="sub-link">📊 감정 대시보드</a>
-                <a href="/docs" class="sub-link">📚 API 문서</a>
-            </div>
-            
             <div class="status">
                 서비스 상태: 
                 <span>LLM """ + ("✅" if LLM_AVAILABLE else "❌") + """</span> | 
@@ -2153,6 +2150,7 @@ async def index():
                     <div class="form-group">
                         <label>이메일 *</label>
                         <input type="email" id="regEmail" placeholder="example@email.com" required>
+                        <div id="emailCheckResult" style="margin-top:4px; font-size:0.85em; display:none;"></div>
                     </div>
                     <div class="form-group">
                         <label>비밀번호 *</label>
@@ -2585,9 +2583,66 @@ async def index():
                 }
             }
             
+            // 이메일 중복 확인 (실시간)
+            let _emailCheckTimer = null;
+            let _emailAvailable = false;
+
+            document.addEventListener('DOMContentLoaded', function() {
+                const regEmailInput = document.getElementById('regEmail');
+                if (regEmailInput) {
+                    regEmailInput.addEventListener('input', function() {
+                        clearTimeout(_emailCheckTimer);
+                        _emailAvailable = false;
+                        const resultEl = document.getElementById('emailCheckResult');
+                        const email = this.value.trim();
+                        if (!email) { resultEl.style.display = 'none'; return; }
+                        _emailCheckTimer = setTimeout(() => checkEmailDuplicate(email), 500);
+                    });
+                    regEmailInput.addEventListener('blur', function() {
+                        const email = this.value.trim();
+                        if (email) checkEmailDuplicate(email);
+                    });
+                }
+            });
+
+            async function checkEmailDuplicate(email) {
+                const resultEl = document.getElementById('emailCheckResult');
+                resultEl.style.display = 'block';
+                resultEl.style.color = '#aaa';
+                resultEl.textContent = '확인 중...';
+                try {
+                    const res = await fetch('/api/auth/check-email?email=' + encodeURIComponent(email));
+                    const data = await res.json();
+                    if (data.available) {
+                        resultEl.style.color = '#00e676';
+                        resultEl.textContent = '✅ ' + data.message;
+                        _emailAvailable = true;
+                    } else {
+                        resultEl.style.color = '#ff5252';
+                        resultEl.textContent = '❌ ' + data.message;
+                        _emailAvailable = false;
+                    }
+                } catch (err) {
+                    resultEl.style.color = '#ff5252';
+                    resultEl.textContent = '⚠️ 이메일 확인 중 오류가 발생했습니다.';
+                    _emailAvailable = false;
+                }
+            }
+
             async function handleRegister(e) {
                 e.preventDefault();
                 const errorEl = document.getElementById('registerError');
+
+                // 이메일 중복 확인 통과 여부 검사
+                if (!_emailAvailable) {
+                    const email = document.getElementById('regEmail').value.trim();
+                    if (email) await checkEmailDuplicate(email);
+                    if (!_emailAvailable) {
+                        errorEl.textContent = '사용 가능한 이메일인지 확인해주세요.';
+                        errorEl.classList.add('active');
+                        return;
+                    }
+                }
                 
                 const password = document.getElementById('regPassword').value;
                 const passwordConfirm = document.getElementById('regPasswordConfirm').value;
@@ -3070,6 +3125,21 @@ async def social_login_status():
 
 
 # ========== 회원가입/로그인 API ==========
+
+@app.get("/api/auth/check-email")
+async def check_email_duplicate(email: str):
+    """이메일 중복 확인 API"""
+    import re
+    email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(email_pattern, email):
+        return {"available": False, "message": "올바른 이메일 형식이 아닙니다."}
+    
+    existing_user = get_user_by_email(email)
+    if existing_user:
+        return {"available": False, "message": "이미 등록된 이메일입니다."}
+    
+    return {"available": True, "message": "사용 가능한 이메일입니다."}
+
 
 @app.post("/api/auth/register", response_model=UserRegisterResponse)
 async def register_user(request: UserRegisterRequest):
