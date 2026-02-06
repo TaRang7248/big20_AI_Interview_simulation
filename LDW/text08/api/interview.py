@@ -16,8 +16,11 @@ from services.llm_service import LLMService
 
 # ... imports ...
 
+from services.video_service import VideoService
+
 interview_service = InterviewService()
 llm_service_instance = LLMService()
+video_service = VideoService()
 
 @router.post("/start")
 async def start_interview(
@@ -58,6 +61,7 @@ async def submit_answer(
     text_content = answer_text
     audio_path = None
     image_path = None
+    video_scores = {}
     
     # Retrieve session state to get context (current question)
     session = interview_service.sessions.get(session_id)
@@ -65,12 +69,19 @@ async def submit_answer(
     if session:
         current_question_context = session.get("current_question", "")
 
-    # Process Audio
+    # Process Audio (Video file from frontend)
     if audio:
         file_path = f"{UPLOAD_DIR}/{session_id}_{datetime.utcnow().timestamp()}.webm"
         with open(file_path, "wb+") as file_object:
             shutil.copyfileobj(audio.file, file_object)
         audio_path = file_path
+        
+        # Video Analysis
+        try:
+            # We treat the uploaded "audio" as video since we switched frontend to video/webm
+            video_scores = video_service.analyze_video(file_path)
+        except Exception as ve:
+            print(f"Video Analysis Error: {ve}")
         
         # STT with Context and Custom Vocabulary
         if not text_content:
@@ -116,29 +127,10 @@ async def submit_answer(
         if not session:
              raise HTTPException(status_code=404, detail="Session not found or expired")
         
-        # We need the *last asked* question.
-        # InterviewService logic says: "Decide on next step... next_question".
-        # We don't strictly have the "current question" stored in a simple field in `session` dict 
-        # based on previous `view_file` of `interview_service.py` (it had 'history', 'current_step').
-        # Let's assume the frontend sends it OR we fetch it from history if properly stored.
-        # Wait, `interview_service.py` L102 logs (name, job, question, answer).
-        # But `process_answer` takes `question` as input.
-        # This is a bit of a design flaw in `InterviewService`: it expects the caller to know the question.
-        # For this fix, let's assume the frontend *does* send the question text, or we hack it.
-        # If question_id is passed, maybe we can't look it up easily since we aren't using DB for questions.
-        
-        # Workaround: Use "Previous Question" placeholder if not provided, or modify InterviewService.
-        # Better: Modify InterviewService to store `current_question`.
-        # BUT, I can't modify InterviewService right now easily without risking more breaks?
-        # Actually I CAN. I previously read it.
-        # Let's try to grab it from session if I modify InterviewService in next step?
-        # No, let's just pass "Current Question" for now if missing, or rely on frontend sending it.
-        # original `submit_answer` took `question_id`.
-        
         # Use stored session question effectively (Service ignores this arg if session has current_question)
         current_question_text = "" 
         
-        result = await interview_service.process_answer(session_id, current_question_text, text_content)
+        result = await interview_service.process_answer(session_id, current_question_text, text_content, video_scores)
         
         return {
             "status": "success",

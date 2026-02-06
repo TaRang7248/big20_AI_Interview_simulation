@@ -216,7 +216,7 @@ async def submit_answer(event=None):
         # Create Blob from chunks
         # We need to convert python list of JS objects to JS array
         js_chunks = to_js(audio_chunks)
-        audio_blob = js.Blob.new(js_chunks, field_type="audio/webm") # Helper might be needed for options
+        audio_blob = js.Blob.new(js_chunks, field_type="video/webm") # Helper might be needed for options
         # Note: js.Blob.new takes (sequence, options_dict)
         # to_js on a list creates a JsProxy for the list.
         

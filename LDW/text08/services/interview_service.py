@@ -84,7 +84,7 @@ class InterviewService:
         """Starts the PyAudio recording."""
         self.stt.start_recording()
 
-    async def process_answer(self, session_id: str, question_text_from_client: str, answer: str):
+    async def process_answer(self, session_id: str, question_text_from_client: str, answer: str, video_scores: dict = None):
         """Evaluates an answer, logs result, and decides on the next question or completion."""
         if session_id not in self.sessions:
             raise Exception("Invalid session ID")
@@ -102,11 +102,22 @@ class InterviewService:
         # 1. Evaluate answer
         evaluation = await self.llm.evaluate_and_next_action(job_title, question_to_evaluate, answer, is_last_question)
         
-        # Track scores for average calculation
-        if "scores" not in session:
-            session["scores"] = []
-        session["scores"].append(evaluation.get("score", 0))
+        # Track specific scores
+        if "answer_scores" not in session:
+            session["answer_scores"] = []
+        if "video_scores_list" not in session:
+            session["video_scores_list"] = []
+
+        session["answer_scores"].append(evaluation.get("score", 0))
+        # Support backward compatibility if 'scores' was used before (though I am changing it here)
+        session["scores"] = session["answer_scores"] 
         
+        if video_scores:
+            session["video_scores_list"].append(video_scores)
+        else:
+            # Add default/placeholder if no video analysis
+             session["video_scores_list"].append({"confidence": 50, "attitude": 50, "avg_video_score": 50})
+
         # 2. Log to SQLite (interview_save.db)
         log_interview_step(name, job_title, question_to_evaluate, answer, evaluation)
         
@@ -152,11 +163,35 @@ class InterviewService:
 
         # Check for completion
         if session["current_step"] > 10:
-             avg_score = sum(session["scores"]) / len(session["scores"]) if session["scores"] else 0
-             pass_fail = "합격" if avg_score >= 70 else "불합격"
-             next_question = f"면접이 종료되었습니다. 평균 점수는 {avg_score:.1f}점이며, 결과는 '{pass_fail}'입니다. 수고하셨습니다."
+             # Calculate averages
+             avg_answer_score = sum(session["answer_scores"]) / len(session["answer_scores"]) if session["answer_scores"] else 0
+             
+             # Calculate video averages
+             v_scores = session["video_scores_list"]
+             avg_confidence = sum([v.get("confidence", 0) for v in v_scores]) / len(v_scores) if v_scores else 0
+             avg_attitude = sum([v.get("attitude", 0) for v in v_scores]) / len(v_scores) if v_scores else 0
+             avg_video_total = sum([v.get("avg_video_score", 0) for v in v_scores]) / len(v_scores) if v_scores else 0
+             
+             # Pass criteria: Answer >= 70 AND Video >= 70 (Confidence/Attitude avg)
+             # "자신감과 태도 점수가 70 이상" -> interpreted as the avg of these.
+             # Or maybe each? "Confidence AND Attitude score >= 70"?
+             # User said: "(자신감과 태도 점수)가 70 이상이면 합격" -> Likely the combined score.
+             
+             pass_fail = "불합격"
+             if avg_answer_score >= 70 and avg_video_total >= 70:
+                 pass_fail = "합격"
+             
+             next_question = (
+                 f"면접이 종료되었습니다.\n\n"
+                 f"종합 결과: {pass_fail}\n"
+                 f"- 답변 평균 점수: {avg_answer_score:.1f}점\n"
+                 f"- 영상 분석 점수: {avg_video_total:.1f}점 (자신감: {avg_confidence:.1f}, 태도: {avg_attitude:.1f})\n\n"
+                 f"수고하셨습니다."
+             )
+             
              is_completed = True
-             evaluation["avg_score"] = avg_score
+             evaluation["avg_score"] = avg_answer_score
+             evaluation["video_score"] = avg_video_total
              evaluation["result_status"] = pass_fail
              # Clear session or mark finished
         elif not next_question: # If not already set by follow-up logic
