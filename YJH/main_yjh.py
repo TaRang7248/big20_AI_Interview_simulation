@@ -14,6 +14,7 @@ from fastapi import Form  # [필수] Form 데이터 수신용
 from pydantic import BaseModel
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
+from collections import Counter
 import json
 
 # 프로젝트 모듈 임포트
@@ -94,22 +95,24 @@ async def chat_endpoint(request: ChatRequest):
     finally:
         db.close() # DB 세션 닫기
 
+
+
 # 5. 음성 대화 (Audio -> Audio) 엔드포인트
 @app.post("/chat/voice/audio")
 async def chat_voice_audio_endpoint(
     file: UploadFile = File(...), 
-    thread_id: str = "voice_session_final_test", # # 기본값 통일
-    current_emotion: str = Form("neutral") # [신규] 프론트에서 보낸 감정 받기
+    thread_id: str = "voice_session_final_test", 
+    current_emotion: str = Form("neutral") 
 ):
     """
-    [Full Duplex] 음성 파일 업로드 -> STT -> LangGraph -> TTS -> 음성 파일 반환
+    [Full Duplex] 음성 파일 업로드 -> STT -> RAG(강제 주입) -> LangGraph -> TTS -> 음성 파일 반환
     """
     db = SessionLocal()
     try:
-        # 1. STT 변환 (Deepgram)
+        # 1. STT 변환
         audio_bytes = await file.read()
         user_text = await transcribe_audio(audio_bytes, mimetype=file.content_type)
-        print(f"🎤 User(STT): {user_text}")
+        print(f"🎤 User(STT): {user_text} [Emotion: {current_emotion}]")
 
         if not user_text.strip():
             raise HTTPException(status_code=400, detail="음성이 인식되지 않았습니다.")
@@ -118,54 +121,49 @@ async def chat_voice_audio_endpoint(
         save_transcript(db, thread_id, "human", user_text, emotion=current_emotion)
 
         # ---------------------------------------------------------
-        # [RAG 핵심 로직] 이력서에서 관련 내용 검색
-        # 사용자의 발언(user_text)과 관련된 이력서 내용을 찾아옵니다.
-        # 예: 사용자가 "프로젝트 경험 말해볼게" -> 프로젝트 관련 이력서 내용 검색
-        retrieved_context = get_relevant_context(thread_id, user_text)
+        # [★핵심 수정] RAG 검색어 전략: "User Input" + "Fixed Keywords"
+        # 사용자가 "안녕하세요"라고만 해도, 뒤에 "기술 스택 프로젝트 경험"을 붙여서
+        # 이력서의 핵심 내용을 강제로 긁어오게 만듭니다.
+        # ---------------------------------------------------------
+        rag_query = f"{user_text} technical skills project experience strength main stack"
+        retrieved_context = get_relevant_context(thread_id, rag_query)
         
+        # 만약 그래도 검색이 안 되면, '요약(summary)'이라도 가져오라고 한 번 더 시도 (안전장치)
+        if not retrieved_context:
+             retrieved_context = get_relevant_context(thread_id, "summary of candidate resume")
+
         final_input_text = user_text
+        
         if retrieved_context:
-            print(f"📚 [RAG 검색 성공] 이력서 내용 참고함 (길이: {len(retrieved_context)})")
+            print(f"📚 [RAG 검색 성공] 이력서 내용 추출됨 (길이: {len(retrieved_context)})")
             
-            # [수정] 프롬프트를 훨씬 강력하게(Strict) 변경합니다.
+            # [프롬프트 강화] 이력서 내용을 바탕으로 질문하도록 강력하게 지시
             final_input_text = f"""
             [System Instruction]
-            You are a strict technical interviewer evaluating a candidate based on their Resume.
+            You are a strict technical interviewer. 
+            The user just said: "{user_text}"
             
-            ⚠️ CRITICAL RULES:
-            1. You MUST generate a follow-up question based **ONLY** on the [Resume Context] provided below.
-            2. DO NOT ask generic questions or questions about topics not mentioned in the resume (e.g., Do NOT ask about NLP, AI, or Deep Learning unless the resume explicitly lists them).
-            3. The candidate is a **Backend Developer** (Java, Python, FastAPI, Redis, AWS). Ask specifically about these technologies.
-            4. If the candidate mentioned "Migration from Java to Python", ask about the challenges or trade-offs of that specific experience.
-
-            [Resume Context]
+            [Resume Context - VERY IMPORTANT]
+            Use the following details from the candidate's resume to generate a relevant follow-up question.
+            Focus on their specific projects and tech stack mentioned below:
             {retrieved_context}
-
+            
             [User Emotion]
-            The candidate is currently feeling: '{current_emotion}'.
-            (If the emotion is 'fear' or 'sad', be a bit more encouraging. If 'happy', keep the momentum.)
-            
-            [Candidate's Last Response]
-            "{user_text}"
-            
-            Based on the context above, ask a deep technical question related to their project experience.
+            Current emotion: '{current_emotion}' (If fear/sad, be encouraging. If happy, be professional.)
             """
         else:
-            print("⚠️ [RAG 검색 실패] 관련 이력서 내용 없음")
-            # 이력서 내용이 없을 때도 대비
+            print("⚠️ [RAG 검색 실패] 관련 이력서 내용 없음 (일반 질문 진행)")
+            # 이력서가 정말 없을 때를 대비한 기본 프롬프트
             final_input_text = f"""
             User Answer: "{user_text}"
-            
             You are a technical interviewer. The user introduced themselves as a Backend Developer.
             Ask a standard backend question about Database, API design, or System Architecture.
             """
         # ---------------------------------------------------------
 
-        # 2. LangGraph 실행 (주입된 텍스트 전달)
+        # 2. LangGraph 실행
         config = {"configurable": {"thread_id": thread_id}}
-        inputs = {
-            "messages": [HumanMessage(content=final_input_text)] # 수정된 입력 사용
-        }
+        inputs = {"messages": [HumanMessage(content=final_input_text)]}
         
         result = interview_graph.invoke(inputs, config=config)
         ai_text = result["messages"][-1].content
@@ -174,85 +172,103 @@ async def chat_voice_audio_endpoint(
         # [저장] AI 응답
         save_transcript(db, thread_id, "ai", ai_text)
 
-        # 3. TTS 변환 (OpenAI)
-        output_filename = f"response_{uuid.uuid4()}.mp3"
-        audio_path = await generate_audio(ai_text, output_file=output_filename)
+        # 3. TTS 변환 (함수명이 프로젝트마다 다를 수 있으니 확인 필요)
+        # 만약 에러가 난다면 generate_audio 대신 text_to_speech_file 로 바꿔보세요.
+        try:
+            # 기존 코드에 있던 함수 사용 (generate_audio 라고 가정)
+            output_filename = f"response_{uuid.uuid4()}.mp3"
+            audio_path = await generate_audio(ai_text, output_file=output_filename)
+        except NameError:
+            # 만약 generate_audio가 없으면 text_to_speech_file 시도 (안전장치)
+            audio_path = await text_to_speech_file(ai_text)
 
         # 4. 파일 반환
         return FileResponse(audio_path, media_type="audio/mpeg", filename="ai_response.mp3")
 
     except Exception as e:
+        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
 
 
-# 6. [수정됨] 면접 결과 리포트 생성 API (ID 타입 에러 해결 버전)
+# 6. [업그레이드] 면접 결과 리포트 생성 API (엄격한 평가 모드)
 @app.post("/report/{thread_id}")
 async def create_report_endpoint(thread_id: str):
-    """
-    thread_id(문자열)로 session_id(숫자)를 찾은 뒤, 대화 내용을 조회합니다.
-    """
     print(f"📊 [리포트 생성 요청] Thread ID: {thread_id}")
     
     db = SessionLocal()
     try:
-        # 1. [핵심 수정] 문자열 ID(thread_id)로 DB의 숫자 ID(session.id)를 먼저 찾습니다.
+        # 1. 세션 조회
         session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
-        
         if not session:
-            print("⚠️ 해당 thread_id를 가진 세션이 없습니다.")
-            return {
-                "total_score": 0,
-                "feedback_summary": "저장된 세션 정보가 없습니다. (면접이 시작되지 않았을 수 있습니다)",
-                "details": []
-            }
+            return {"total_score": 0, "feedback_summary": "세션 정보가 없습니다.", "details": []}
 
-        # 2. 찾은 숫자 ID (session.id)로 대화 내용 조회
+        # 2. 대화 기록 조회
         transcripts = db.query(Transcript).filter(Transcript.session_id == session.id).order_by(Transcript.id).all()
         
         if not transcripts:
-            print("⚠️ 대화 기록 없음")
-            return {
-                "total_score": 0,
-                "feedback_summary": "대화 기록이 없습니다.",
-                "details": []
-            }
+            return {"total_score": 0, "feedback_summary": "대화 기록이 없습니다.", "details": []}
 
-        # 3. 대화 내용을 텍스트로 변환
+        # 3. 대화 텍스트 & 감정 데이터 추출
         full_conversation = ""
+        emotion_list = []
+        user_speech_count = 0  # 지원자가 말한 횟수
+
         for t in transcripts:
             role = "면접관(AI)" if t.sender == "ai" else "지원자"
             full_conversation += f"[{role}]: {t.content}\n"
+            
+            if t.sender == "human":
+                user_speech_count += 1
+                if t.emotion:
+                    emotion_list.append(t.emotion)
 
-        print(f"📝 분석 대상 텍스트 길이: {len(full_conversation)}자")
-        
-        if len(full_conversation) < 50:
+        # 4. 데이터 부족 시 조기 종료 (안전장치)
+        if user_speech_count < 2:
              return {
-                "total_score": 0,
-                "feedback_summary": "면접 데이터가 너무 부족하여 분석할 수 없습니다.",
+                "total_score": 0, 
+                "feedback_summary": "평가할 수 있는 대화가 부족합니다. (답변 횟수 부족)", 
                 "details": []
             }
 
-        # 4. LLM에게 채점 요청 (GPT-4o)
+        # 감정 통계
+        emotion_stats = Counter(emotion_list)
+        dominant_emotion = emotion_stats.most_common(1)[0][0] if emotion_stats else "정보 없음"
+        
+        print(f"📝 분석 대상 텍스트 길이: {len(full_conversation)}자")
+        print(f"👁️ 감정 통계: {dict(emotion_stats)}")
+
+        # 5. LLM에게 채점 요청 (독한 면접관 모드)
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
         
-        system_prompt = """
-        당신은 20년 경력의 베테랑 기술 면접관입니다.
-        아래 [대화 기록]을 분석하여 면접 결과 리포트를 JSON 형식으로 작성하십시오.
-        
-        [필수 출력 형식]
-        반드시 아래 JSON 구조를 그대로 따르세요. (Markdown backticks 없이 순수 JSON만 출력)
-        {
-            "total_score": 85,
-            "feedback_summary": "지원자는 ... 점이 훌륭했으나, ... 에 대한 설명이 부족했습니다. (전반적인 총평을 3~4문장으로 서술)",
+        system_prompt = f"""
+        당신은 지원자를 냉정하게 평가하는 'Technical Interviewer'입니다.
+        제공된 [대화 기록]만을 근거로 채점하십시오. 상상하거나 지어내지 마십시오.
+
+        [⚠️ 감점(Fail) 기준 - 매우 중요]
+        1. **회피형 답변**: 지원자가 "모르겠습니다", "죄송합니다", "준비가 안 됐습니다"라고 답변한 경우, 해당 항목은 **0점** 처리하십시오.
+        2. **단답형 답변**: 기술적인 설명 없이 "네/아니오"로만 답하면 감점하십시오.
+        3. **환각 금지**: 대화 기록에 없는 기술(Redis, Kafka 등)을 사용했다고 칭찬하지 마십시오. 오직 대화에 나온 내용만 평가하십시오.
+
+        [평가 가중치]
+        - 답변의 기술적 깊이 (80%)
+        - 태도 및 의사소통 (20%)
+
+        [비언어적 감정 데이터]
+        - 주요 감정: {dominant_emotion} (참고용)
+
+        [필수 출력 형식 (JSON)]
+        {{
+            "total_score": (정수 0~100),
+            "feedback_summary": "(지원자의 실제 답변 태도와 지식 수준을 냉정하게 요약. 답변을 못했으면 솔직하게 못했다고 적을 것)",
             "details": [
-                {"category": "직무 역량(Hard Skill)", "score": 80, "comment": "Redis 캐싱 전략에 대한 설명이 논리적임"},
-                {"category": "의사소통(Soft Skill)", "score": 90, "comment": "질문의 요지를 잘 파악하고 두괄식으로 답변함"},
-                {"category": "문제 해결력", "score": 85, "comment": "마이그레이션 과정의 트러블 슈팅 경험이 구체적임"}
+                {{"category": "직무 지식", "score": (0~100), "comment": "(구체적인 근거)"}},
+                {{"category": "의사소통", "score": (0~100), "comment": "(감정 상태 및 답변 태도 반영)"}},
+                {{"category": "문제해결", "score": (0~100), "comment": "(트러블슈팅 답변 여부)"}}
             ]
-        }
+        }}
         """
 
         messages = [
@@ -262,28 +278,43 @@ async def create_report_endpoint(thread_id: str):
 
         response = llm.invoke(messages)
         
-        # 5. JSON 파싱 및 반환
+        # 6. JSON 파싱
         content = response.content.replace("```json", "").replace("```", "").strip()
+        report_json = json.loads(content)
+
+        # ==========================================================
+        # [★수정됨] DB 컬럼 이름(summary)에 맞춰서 저장하기
+        # ==========================================================
         try:
-            report_json = json.loads(content)
-            print("✅ 리포트 생성 성공!")
-            return report_json
-        except json.JSONDecodeError:
-            print("❌ LLM 응답 파싱 실패")
-            return {
-                "total_score": 0,
-                "feedback_summary": "분석 결과 파싱 중 오류가 발생했습니다.",
-                "details": []
-            }
+            existing_report = db.query(EvaluationReport).filter(EvaluationReport.session_id == session.id).first()
+            
+            if not existing_report:
+                new_report = EvaluationReport(
+                    session_id=session.id,
+                    total_score=report_json.get("total_score", 0),
+                    
+                    # [수정] DB에는 'summary'라고 되어 있으므로 키 이름을 맞춰줍니다!
+                    summary=report_json.get("feedback_summary", ""),
+                    
+                    # (선택) 상세 점수가 DB에 technical_score 등으로 되어 있다면 매핑 필요
+                    # 만약 DB 컬럼이 details(JSON)라면 아래처럼 저장
+                    # details=json.dumps(report_json.get("details", [])) 
+                )
+                db.add(new_report)
+                db.commit()
+                print("💾 [DB] 면접 결과 리포트 저장 완료! (Success)")
+        except Exception as db_err:
+            # 에러 메시지를 더 자세히 출력해서 원인을 찾기 쉽게 함
+            print(f"⚠️ 리포트 저장 실패: {db_err}")
+            # db.rollback() # 필요시 롤백
+        # ==========================================================
+
+        return report_json
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        return {
-            "total_score": 0,
-            "feedback_summary": f"서버 에러 발생: {str(e)}",
-            "details": []
-        }
+        return {"total_score": 0, "feedback_summary": f"에러 발생: {str(e)}", "details": []}
     finally:
         db.close()
 
