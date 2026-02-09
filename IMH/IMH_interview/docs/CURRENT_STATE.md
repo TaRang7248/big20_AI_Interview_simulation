@@ -109,7 +109,7 @@ IMH/IMH_Interview/
    - IMH/ 는 실행 진입점만 담당하고 로직을 가지지 않는다.
    - 진행 상태:
    - `packages/imh_core/`: ✅ DONE (TASK-002 완료, logging 포함)
-   - `packages/imh_providers/`: 🔄 ACTIVE (TASK-003 진행 중)
+   - `packages/imh_providers/`: ✅ DONE (TASK-003 완료)
 
 ## 7. 로깅 / 기록 규칙 (중요)
 
@@ -174,21 +174,23 @@ IMH/IMH_Interview/
 
 ## 10. 현재 최우선 목표 (단 하나)
 
-### TASK-003: Provider 인터페이스 + Mock 구현
+### TASK-004: FastAPI 최소 엔트리 + Healthcheck
 - 목표:
-  - STT / LLM / Emotion / Visual / Voice Provider **인터페이스를 고정**
-  - 개발/테스트용 **Mock Provider 구현체 제공**
+  - FastAPI 실행 진입점 확정
+  - 서버 생존 여부 확인용 `/health` 엔드포인트 제공
 - 범위(포함):
-  - `packages/imh_providers/` 내 인터페이스 정의
-  - Mock 구현체 작성(외부 API/로컬 모델 호출 없이 동작)
+  - `IMH/` 하위 FastAPI app 생성
+  - `/health` 단일 엔드포인트
 - 범위(제외):
-  - 실제 Provider 연동(API Key, 모델 실행 등)
-  - FastAPI 엔트리/라우터 구현(TASK-004)
-- 완료 기준(DoD):
-  - 각 Provider 인터페이스가 import 가능하고, Mock으로 최소 동작 검증이 가능하다.
-  - (가능하면) 단일 검증 스크립트로 기본 동작이 확인된다.
+  - Provider 실제 연동
+  - DB 연결
+  - 인증/세션/비즈니스 로직
 
 ### 최근 완료
+- TASK-003: Provider 인터페이스 + Mock 구현 ✅ DONE
+  - STT / LLM / Emotion / Visual / Voice Provider 인터페이스 정의
+  - Async Mock Provider 구현
+  - 검증 스크립트(`scripts/verify_task_003.py`) 통과
 - TASK-002: imh_core 최소 패키지 구성(config / errors / dto) ✅ DONE
 - TASK-001: 로깅 기반 구축 ✅ DONE
 

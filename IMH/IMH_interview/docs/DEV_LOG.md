@@ -54,3 +54,25 @@
   ├── errors.py
   └── logging/ (기존 유지)
   ```
+
+### TASK-003 Provider 인터페이스 + Mock 구현 (Provider Layer)
+- **요약**: STT, LLM, Emotion, Visual, Voice 5개 도메인의 Provider 인터페이스 정의 및 Async Mock 구현체 작성.
+- **변경 사항**:
+    - `packages/imh_core/dto.py`: 각 Provider별 입출력 DTO 추가 (`TranscriptDTO`, `LLMMessageDTO` 등).
+    - `packages/imh_providers/`: 도메인별 패키지 구조 생성.
+    - `packages/imh_providers/{domain}/base.py`: `abc.ABC` 기반 Async 인터페이스 정의 (`ISTTProvider` 등).
+    - `packages/imh_providers/{domain}/mock.py`: `asyncio.sleep` 기반 Latency 시뮬레이션이 가능한 Mock 구현체 작성.
+    - `scripts/verify_task_003.py`: 5개 Mock Provider 통합 검증 스크립트 작성.
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_003.py` -> `ALL MOCK PROVIDERS VERIFIED SUCCESSFULLY!`
+    - **DTO**: Pydantic 모델을 통한 입출력 타입 강제 확인.
+    - **Async**: `async def` 인터페이스 및 `await` 호출 정상 동작 확인.
+- **디렉토리 구조**:
+  ```text
+  packages/imh_providers/
+  ├── stt/ (base.py, mock.py)
+  ├── llm/ (base.py, mock.py)
+  ├── emotion/ (base.py, mock.py)
+  ├── visual/ (base.py, mock.py)
+  └── voice/ (base.py, mock.py)
+  ```

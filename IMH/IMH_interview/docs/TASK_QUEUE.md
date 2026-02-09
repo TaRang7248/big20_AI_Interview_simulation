@@ -40,11 +40,14 @@
 
 ---
 
-## ACTIVE
-
 ### TASK-003 Provider 인터페이스 + Mock 구현
 - STT / LLM / Emotion / Visual / Voice 인터페이스 정의
 - Mock 구현체 작성 (테스트 용도)
+- **Verification**: `scripts/verify_task_003.py` Pass
+
+---
+
+## ACTIVE
 
 ### TASK-004 FastAPI 최소 엔트리 + healthcheck
 - `/health` 단일 엔드포인트
