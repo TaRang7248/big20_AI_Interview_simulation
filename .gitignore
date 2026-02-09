@@ -232,3 +232,15 @@ storage/
 
 # 모든 영상 데이터 무시
 *.webm
+
+# Python
+*.pyc
+
+# Node (Frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Uploads
+uploads/
+*.pdf
