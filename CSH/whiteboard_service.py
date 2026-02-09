@@ -21,6 +21,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 load_dotenv()
 
+# JSON Resilience 유틸리티
+from json_utils import resilient_json_parse, parse_architecture_json
+
 # FastAPI
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -252,14 +255,10 @@ class ArchitectureProblemGenerator:
                 # LLM 없으면 기본 문제 반환
                 return self._create_fallback_problem(category, difficulty, problem_id, cat_info, diff_info)
             
-            # JSON 파싱
-            json_match = response_text
-            if "```json" in response_text:
-                json_match = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                json_match = response_text.split("```")[1].split("```")[0]
-            
-            data = json.loads(json_match.strip())
+            # JSON Resilience 파싱
+            data = resilient_json_parse(response_text, fallback=None, expect_type=dict, context="generate_problem")
+            if data is None:
+                raise ValueError("문제 생성 JSON 파싱 실패")
             
             problem = ArchitectureProblem(
                 id=problem_id,
@@ -479,14 +478,9 @@ class DiagramAnalyzer:
             
             response = self.vision_llm.invoke([message])
             
-            # JSON 추출 및 파싱
+            # JSON Resilience 파싱
             response_text = response.content
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0]
-            
-            result_data = json.loads(response_text.strip())
+            result_data = parse_architecture_json(response_text, context="Qwen3-VL vision")
             
             # 점수 계산
             eval_data = result_data.get("architecture_evaluation", {})
@@ -570,13 +564,7 @@ class DiagramAnalyzer:
             )
             
             response_text = response.content[0].text
-            json_match = response_text
-            if "```json" in response_text:
-                json_match = response_text.split("```json")[1].split("```")[0]
-            elif "```" in response_text:
-                json_match = response_text.split("```")[1].split("```")[0]
-            
-            result_data = json.loads(json_match.strip())
+            result_data = parse_architecture_json(response_text, context="Claude vision")
             eval_data = result_data.get("architecture_evaluation", {})
             overall_score = (
                 eval_data.get("structure_score", 0) + eval_data.get("scalability_score", 0) +
@@ -646,9 +634,7 @@ JSON 형식으로 응답하세요:
             
             try:
                 result_text = response.content
-                if "```json" in result_text:
-                    result_text = result_text.split("```json")[1].split("```")[0]
-                result_data = json.loads(result_text.strip())
+                result_data = parse_architecture_json(result_text, context="text-only fallback")
                 
                 eval_data = result_data.get("architecture_evaluation", {})
                 overall_score = sum([
