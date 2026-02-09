@@ -33,19 +33,18 @@
 
 ---
 
-## ACTIVE
-
-
+### TASK-002 imh_core 최소 패키지 구성 (Phase 1)
+- **Goal**: config / errors / dto 최소 코어 확정 및 구현
+- **Scope**: `packages/imh_core/{config.py, errors.py, dto.py}`
+- **Verification**: `scripts/verify_task_002.py` Pass
 
 ---
 
-## BACKLOG
-
-### TASK-002 imh_core 최소 패키지 구성
-- config / errors / dto / logging 공통화
+## ACTIVE
 
 ### TASK-003 Provider 인터페이스 + Mock 구현
-- STT / LLM / Emotion / Visual / Voice 인터페이스
+- STT / LLM / Emotion / Visual / Voice 인터페이스 정의
+- Mock 구현체 작성 (테스트 용도)
 
 ### TASK-004 FastAPI 최소 엔트리 + healthcheck
 - `/health` 단일 엔드포인트

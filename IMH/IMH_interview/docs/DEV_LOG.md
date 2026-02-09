@@ -33,3 +33,24 @@
   │   └── __init__.py
   └── __init__.py
   ```
+
+### TASK-002 imh_core 최소 패키지 구성 (Core Infrastructure)
+- **요약**: `imh_core` 패키지 내 `config`, `errors`, `dto` 모듈 구현 및 표준화
+- **변경 사항**:
+    - `packages/imh_core/config.py`: `pydantic-settings` 기반 단일 설정 클래스(`IMHConfig`) 구현. `.env` 로딩 지원.
+    - `packages/imh_core/errors.py`: 공통 예외 클래스(`IMHBaseError`) 및 에러 코드 체계 정의.
+    - `packages/imh_core/dto.py`: `pydantic.BaseModel` 기반 `BaseDTO` 정의 (ORM 모드, 공백 제거 자동화).
+    - `scripts/verify_task_002.py`: 모듈 동작 검증 스크립트 작성.
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_002.py` -> `ALL PASS`
+    - **Config**: `.env` 파일 로드 및 기본값 동작 확인.
+    - **Errors**: 사용자 정의 에러 raise/catch 및 에러 코드 확인.
+    - **DTO**: Pydantic 기능(공백 제거 등) 동작 확인.
+- **디렉토리 구조**:
+  ```text
+  packages/imh_core
+  ├── config.py
+  ├── dto.py
+  ├── errors.py
+  └── logging/ (기존 유지)
+  ```

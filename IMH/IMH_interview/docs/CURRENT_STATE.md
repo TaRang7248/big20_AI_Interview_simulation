@@ -19,14 +19,13 @@
 
 ## 2. 현재 개발 단계
 
-- 상태: **개발 초기 (Phase 0 ~ Phase 1 진입 직전)**
+- 상태: **Phase 1 진행 중 (초기)**
 - 실제 비즈니스 로직 구현: ❌ 아직 없음
 - API / DB / Playground 구현: ❌ 아직 없음
-- 현재 목표: **운영·통제·기반 구조를 먼저 고정**
+- 현재 목표: **기반 패키지(코어/프로바이더) 구조를 먼저 고정**
 
 > ❗ 지금 단계에서 “기능 구현”을 서두르는 것은 금지  
-> 운영 문서와 구조가 먼저 확정되어야 한다.
-
+> 기반 구조(코어/프로바이더/엔트리) 확정이 우선이다.
 ---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -108,6 +107,9 @@ IMH/IMH_Interview/
 ```
    - packages/ 는 팀원과 공유 가능한 단위로 설계한다.
    - IMH/ 는 실행 진입점만 담당하고 로직을 가지지 않는다.
+   - 진행 상태:
+   - `packages/imh_core/`: ✅ DONE (TASK-002 완료, logging 포함)
+   - `packages/imh_providers/`: 🔄 ACTIVE (TASK-003 진행 중)
 
 ## 7. 로깅 / 기록 규칙 (중요)
 
@@ -172,16 +174,22 @@ IMH/IMH_Interview/
 
 ## 10. 현재 최우선 목표 (단 하나)
 
-### TASK-001: 로깅 기반 구축
-- 목표: 어떤 모듈에서 예외가 나도 **반드시 파일 로그로 남는 상태**를 만든다.
-- 범위(예시):
-  - `logs/agent/`, `logs/runtime/` 폴더 구조 확정
-  - 공통 로거 유틸(로테이션 포함) 설계/구현
-  - 에러 발생 시 `*.error.log`에 스택트레이스가 남는지 검증
+### TASK-003: Provider 인터페이스 + Mock 구현
+- 목표:
+  - STT / LLM / Emotion / Visual / Voice Provider **인터페이스를 고정**
+  - 개발/테스트용 **Mock Provider 구현체 제공**
+- 범위(포함):
+  - `packages/imh_providers/` 내 인터페이스 정의
+  - Mock 구현체 작성(외부 API/로컬 모델 호출 없이 동작)
+- 범위(제외):
+  - 실제 Provider 연동(API Key, 모델 실행 등)
+  - FastAPI 엔트리/라우터 구현(TASK-004)
+- 완료 기준(DoD):
+  - 각 Provider 인터페이스가 import 가능하고, Mock으로 최소 동작 검증이 가능하다.
+  - (가능하면) 단일 검증 스크립트로 기본 동작이 확인된다.
 
-### 완료 기준(DoD)
-- 의도적으로 예외를 발생시켰을 때:
-  - `logs/agent/*.error.log` 또는 `logs/runtime/*.error.log`에 스택트레이스가 기록된다.
-- `docs/DEV_LOG.md`에는 “요약 + 로그 경로 + 재현 방법”이 남는다.
+### 최근 완료
+- TASK-002: imh_core 최소 패키지 구성(config / errors / dto) ✅ DONE
+- TASK-001: 로깅 기반 구축 ✅ DONE
 
-> 다음 작업은 `docs/TASK_QUEUE.md`에 정의된 작업만 수행한다.
+> 다음 작업은 `docs/TASK_QUEUE.md`에 ACTIVE로 정의된 작업만 수행한다.
