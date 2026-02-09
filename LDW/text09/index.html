@@ -69,8 +69,15 @@
                         <input type="text" id="reg-name" required>
                     </div>
                     <div class="form-group">
-                        <label for="reg-dob">생년월일</label>
-                        <input type="date" id="reg-dob" required>
+                        <label for="reg-dob-year">생년월일</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="text" id="reg-dob-year" placeholder="YYYY" maxlength="4" required
+                                style="flex: 1;">
+                            <input type="text" id="reg-dob-month" placeholder="MM" maxlength="2" required
+                                style="flex: 1;">
+                            <input type="text" id="reg-dob-day" placeholder="DD" maxlength="2" required
+                                style="flex: 1;">
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="reg-gender">성별</label>
@@ -89,8 +96,15 @@
                         <input type="text" id="reg-addr" placeholder="주소를 입력하세요" required>
                     </div>
                     <div class="form-group">
-                        <label for="reg-phone">전화번호</label>
-                        <input type="tel" id="reg-phone" placeholder="010-1234-5678" required>
+                        <label for="reg-phone-1">전화번호</label>
+                        <div style="display: flex; gap: 10px;">
+                            <input type="tel" id="reg-phone-1" placeholder="010" maxlength="3" required
+                                style="flex: 1;">
+                            <input type="tel" id="reg-phone-2" placeholder="0000" maxlength="4" required
+                                style="flex: 1;">
+                            <input type="tel" id="reg-phone-3" placeholder="0000" maxlength="4" required
+                                style="flex: 1;">
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>회원 유형</label>
@@ -157,11 +171,14 @@
                         </div>
                         <div class="form-group">
                             <label>전화번호</label>
-                            <input type="tel" id="edit-phone">
+                            <div style="display: flex; gap: 10px;">
+                                <input type="tel" id="edit-phone-1" placeholder="010" maxlength="3" style="flex: 1;">
+                                <input type="tel" id="edit-phone-2" placeholder="0000" maxlength="4" style="flex: 1;">
+                                <input type="tel" id="edit-phone-3" placeholder="0000" maxlength="4" style="flex: 1;">
+                            </div>
                         </div>
                         <button type="submit" class="btn-primary">정보 수정 완료</button>
-                        <button type="button" class="btn-warning" id="btn-change-pw"
-                            style="background-color: #f39c12; color: white;">비밀번호 변경</button>
+                        <button type="button" class="btn-primary" id="btn-change-pw">비밀번호 변경</button>
                         <button type="button" class="btn-secondary" id="btn-cancel-myinfo">취소</button>
                     </form>
                 </div>
@@ -193,7 +210,7 @@
         <section id="applicant-dashboard-page" class="page hidden">
             <div class="container dashboard-layout">
                 <aside class="sidebar">
-                    <h3>메뉴</h3>
+                    <h3>지원자 메뉴</h3>
                     <ul>
                         <li><a href="#" class="active" onclick="return false;">지원 공고 목록</a></li>
                         <li><a href="#" id="link-my-records">내 면접 기록</a></li>
@@ -331,6 +348,7 @@
                     <ul>
                         <li><a href="#" class="active" id="admin-menu-jobs">공고 관리</a></li>
                         <li><a href="#" id="admin-menu-applicants">지원자 현황</a></li>
+                        <li><a href="#" id="admin-link-my-info">내 정보</a></li>
                     </ul>
                 </aside>
                 <main class="content">
