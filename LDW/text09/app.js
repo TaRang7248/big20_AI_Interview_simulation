@@ -26,6 +26,7 @@ const MOCK_DB = {
 const AppState = {
     currentUser: null, // Logged in user object
     currentJobId: null, // Selected Job ID for interview
+    tempPassword: null, // Temporarily store confirmed password for update
     interview: {
         inProgress: false,
         phase: 0, // 0: setup, 1: intro, 2: competency, 3: coding
@@ -152,40 +153,87 @@ function initAuth() {
         showToast('로그아웃 되었습니다.');
     });
 
-    // My Info Link
-    $('#link-my-info').addEventListener('click', async () => {
+    // My Info Link -> Password Check Logic
+    $('#link-my-info').addEventListener('click', () => {
         if (AppState.currentUser) {
-            try {
-                const response = await fetch(`/api/user/${AppState.currentUser.id}`);
-                const result = await response.json();
-                if (result.success) {
-                    AppState.currentUser = result.user; // Update local state
-                    $('#edit-email').value = result.user.email || '';
-                    $('#edit-phone').value = result.user.phone || '';
-                    navigateTo('myinfo-page');
-                } else {
-                    showToast('회원 정보를 불러오는데 실패했습니다.', 'error');
-                }
-            } catch (error) {
-                console.error('Fetch User Info Error:', error);
-                showToast('서버 연결에 실패했습니다.', 'error');
-            }
+            $('#check-pw-input').value = '';
+            navigateTo('password-check-page');
         }
     });
+
+    // Password Check Submit
+    $('#password-check-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const inputPw = $('#check-pw-input').value;
+
+        try {
+            const response = await fetch('/api/verify-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: AppState.currentUser.id, pw: inputPw })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                // Success: Save PW temporarily and Fetch latest info
+                AppState.tempPassword = inputPw;
+                await fetchAndShowMyInfo();
+            } else {
+                showToast(result.message || '비밀번호가 일치하지 않습니다.', 'error');
+            }
+        } catch (error) {
+            console.error('Verify PW Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    });
+
+    // Cancel Password Check
+    $('#btn-cancel-pw-check').addEventListener('click', () => {
+        goHome();
+    });
+
+
+    // Helper: Fetch User Info and Show Edit Page
+    async function fetchAndShowMyInfo() {
+        try {
+            const response = await fetch(`/api/user/${AppState.currentUser.id}`);
+            const result = await response.json();
+            if (result.success) {
+                AppState.currentUser = result.user; // Update local state
+                $('#edit-email').value = result.user.email || '';
+                $('#edit-phone').value = result.user.phone || '';
+                navigateTo('myinfo-page');
+            } else {
+                showToast('회원 정보를 불러오는데 실패했습니다.', 'error');
+            }
+        } catch (error) {
+            console.error('Fetch User Info Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    }
+
 
     // My Info Update
     $('#myinfo-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const confirmPw = $('#confirm-pw').value;
         const newEmail = $('#edit-email').value;
         const newPhone = $('#edit-phone').value;
+
+        // Use previously verified password
+        const verifiedPw = AppState.tempPassword;
+
+        if (!verifiedPw) {
+            showToast('세션이 만료되었습니다. 다시 시도해주세요.', 'error');
+            navigateTo('password-check-page');
+            return;
+        }
 
         try {
             const response = await fetch(`/api/user/${AppState.currentUser.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    pw: confirmPw,
+                    pw: verifiedPw,
                     email: newEmail,
                     phone: newPhone
                 })
@@ -193,11 +241,20 @@ function initAuth() {
             const result = await response.json();
 
             if (result.success) {
-                // Update local state partially or refetch
+                // Update local state
                 AppState.currentUser.email = newEmail;
                 AppState.currentUser.phone = newPhone;
+
+                // Clear temp password for security
+                AppState.tempPassword = null;
+
                 showToast('정보가 수정되었습니다.', 'success');
-                $('#confirm-pw').value = ''; // clear password input
+
+                // Auto redirect to home
+                setTimeout(() => {
+                    goHome();
+                }, 1000);
+
             } else {
                 showToast(result.message || '정보 수정 실패', 'error');
             }
@@ -209,12 +266,17 @@ function initAuth() {
 
     // My Info Cancel
     $('#btn-cancel-myinfo').addEventListener('click', () => {
+        AppState.tempPassword = null;
+        goHome();
+    });
+
+    function goHome() {
         if (AppState.currentUser && AppState.currentUser.type === 'admin') {
             navigateTo('admin-dashboard-page');
         } else {
             navigateTo('applicant-dashboard-page');
         }
-    });
+    }
 }
 
 function loginUser(user) {

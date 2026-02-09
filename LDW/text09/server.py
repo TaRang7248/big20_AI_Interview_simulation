@@ -98,6 +98,28 @@ def login():
     finally:
         if conn: conn.close()
 
+@app.route('/api/verify-password', methods=['POST'])
+def verify_password():
+    data = request.json
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Verify Password
+        c.execute('SELECT pw FROM users WHERE id = ?', (data['id'],))
+        row = c.fetchone()
+        
+        if row and row[0] == data['pw']:
+             return jsonify({'success': True})
+        else:
+             return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
+
+    except Exception as e:
+        print(f"Verify Password Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
 @app.route('/api/user/<id>', methods=['GET'])
 def get_user_info(id):
     try:
