@@ -8,10 +8,7 @@
 const MOCK_DB = {
     users: [], // Compatibility: Actual users are now in SQLite/Server
     // users data removed - moved to SQLite DB via server.py
-    jobs: [
-        { id: 1, title: '2026년 상반기 신입 개발자 공채', deadline: '2026-06-30', content: '백엔드/프론트엔드 개발자 모집' },
-        { id: 2, title: 'AI 데이터 분석가 경력직 채용', deadline: '2026-05-15', content: 'Python, SQL 능통자' }
-    ],
+    jobs: [], // Will be fetched from API
     applications: [
         // { userId: 'test', jobId: 1, status: 'completed', score: { ... } }
     ],
@@ -47,8 +44,6 @@ const $$ = (selector) => document.querySelectorAll(selector);
 document.addEventListener('DOMContentLoaded', () => {
     initRouter();
     initAuth();
-    initDashboard();
-    initAdmin();
     initDashboard();
     initAdmin();
     initInterview();
@@ -378,9 +373,29 @@ function loginUser(user) {
 
 // --- Applicant Dashboard ---
 function initDashboard() {
+    // Initial fetch
+    fetchJobs();
+
     $('#link-my-records').addEventListener('click', () => {
         showToast('아직 구현된 기록이 없습니다. (Mock Demo)', 'info');
     });
+}
+
+// Fetch Jobs from Server
+async function fetchJobs() {
+    try {
+        const response = await fetch('/api/jobs');
+        const result = await response.json();
+        if (result.success) {
+            MOCK_DB.jobs = result.jobs;
+            renderJobList();
+            if (AppState.currentUser && AppState.currentUser.type === 'admin') {
+                renderAdminJobList();
+            }
+        }
+    } catch (error) {
+        console.error('Fetch Jobs Error:', error);
+    }
 }
 
 function renderJobList() {
@@ -623,10 +638,13 @@ function initAdmin() {
     $('#admin-menu-jobs').addEventListener('click', () => {
         $('#admin-view-jobs').classList.remove('hidden');
         $('#admin-view-applicants').classList.add('hidden');
+        $('#admin-job-register-page').classList.add('hidden'); // Hide register page
+        fetchJobs(); // Refresh list
     });
     $('#admin-menu-applicants').addEventListener('click', () => {
         $('#admin-view-jobs').classList.add('hidden');
         $('#admin-view-applicants').classList.remove('hidden');
+        $('#admin-job-register-page').classList.add('hidden');
         renderAdminAppList();
     });
 
@@ -638,16 +656,47 @@ function initAdmin() {
         }
     });
 
+    // Show Job Register Page
     $('#btn-add-job').addEventListener('click', () => {
-        const title = prompt('공고 제목을 입력하세요:');
-        if (title) {
-            MOCK_DB.jobs.push({
-                id: Date.now(),
-                title: title,
-                deadline: '2026-12-31',
-                content: '추가된 공고'
+        $('#admin-view-jobs').classList.add('hidden');
+        $('#admin-job-register-page').classList.remove('hidden');
+        // Reset form
+        $('#job-title').value = '';
+        $('#job-deadline').value = '';
+    });
+
+    // Cancel Job Register
+    $('#btn-cancel-job-register').addEventListener('click', () => {
+        $('#admin-job-register-page').classList.add('hidden');
+        $('#admin-view-jobs').classList.remove('hidden');
+    });
+
+    // Submit Job Register
+    $('#admin-job-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = $('#job-title').value;
+        const deadline = $('#job-deadline').value;
+
+        try {
+            const response = await fetch('/api/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, deadline })
             });
-            renderAdminJobList();
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('공고가 등록되었습니다.', 'success');
+                // Return to list
+                $('#admin-job-register-page').classList.add('hidden');
+                $('#admin-view-jobs').classList.remove('hidden');
+                fetchJobs();
+            } else {
+                showToast(result.message || '공고 등록 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Create Job Error:', error);
+            showToast('서버 오류가 발생했습니다.', 'error');
         }
     });
 
@@ -667,7 +716,6 @@ function renderAdminJobList() {
             <td>${job.id}</td>
             <td>${job.title}</td>
             <td>${job.deadline}</td>
-            <td><button class="btn-small btn-secondary">수정</button></td>
         `;
         tbody.appendChild(tr);
     });

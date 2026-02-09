@@ -363,11 +363,29 @@
                                     <th>ID</th>
                                     <th>제목</th>
                                     <th>마감일</th>
-                                    <th>관리</th>
                                 </tr>
                             </thead>
                             <tbody><!-- JS Render --></tbody>
                         </table>
+                    </div>
+
+                    <!-- Admin: Job Registration Page (New) -->
+                    <div id="admin-job-register-page" class="hidden">
+                        <h2>공고 등록</h2>
+                        <div class="profile-card">
+                            <form id="admin-job-form">
+                                <div class="form-group">
+                                    <label>공고 제목</label>
+                                    <input type="text" id="job-title" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>마감일</label>
+                                    <input type="date" id="job-deadline" required>
+                                </div>
+                                <button type="submit" class="btn-primary">공고 등록 완료</button>
+                                <button type="button" class="btn-secondary" id="btn-cancel-job-register">취소</button>
+                            </form>
+                        </div>
                     </div>
 
                     <div id="admin-view-applicants" class="hidden">

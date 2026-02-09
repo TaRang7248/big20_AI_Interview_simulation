@@ -43,9 +43,21 @@ def init_db():
             type TEXT DEFAULT 'applicant'
         )
     ''')
+    print(f"Database initialized/connected to {DB_NAME} at {DB_HOST}")
+    
+    # Create interview_announcement table if not exists
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS interview_announcement (
+            id SERIAL PRIMARY KEY,
+            title TEXT NOT NULL,
+            deadline TEXT,
+            content TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
     conn.commit()
     conn.close()
-    print(f"Database initialized/connected to {DB_NAME} at {DB_HOST}")
+
 
 @app.route('/')
 def home():
@@ -205,6 +217,45 @@ def change_password():
 
     except Exception as e:
         print(f"Change Password Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/jobs', methods=['GET'])
+def get_jobs():
+    try:
+        conn = get_db_connection()
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute('SELECT * FROM interview_announcement ORDER BY created_at DESC')
+        rows = c.fetchall()
+        
+        jobs = [dict(row) for row in rows]
+        return jsonify({'success': True, 'jobs': jobs})
+    except Exception as e:
+        print(f"Get Jobs Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/jobs', methods=['POST'])
+def create_job():
+    data = request.json
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        c.execute('''
+            INSERT INTO interview_announcement (title, deadline, content)
+            VALUES (%s, %s, %s)
+            RETURNING id
+        ''', (data['title'], data['deadline'], data.get('content', '')))
+        
+        new_id = c.fetchone()[0]
+        conn.commit()
+        
+        return jsonify({'success': True, 'message': '공고가 등록되었습니다.', 'id': new_id})
+    except Exception as e:
+        print(f"Create Job Error: {e}")
         return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
     finally:
         if conn: conn.close()
