@@ -18,6 +18,9 @@ import json
 import time
 import re
 from typing import Dict, List, Any, Optional
+
+# JSON Resilience 유틸리티
+from json_utils import parse_evaluation_json
 from datetime import datetime, timedelta
 from collections import Counter
 
@@ -165,16 +168,12 @@ def evaluate_answer_task(
         response = llm.invoke(messages)
         response_text = response.content
         
-        # JSON 파싱
-        json_match = re.search(r'\{[\s\S]*\}', response_text)
-        if json_match:
-            evaluation = json.loads(json_match.group())
-            evaluation["task_id"] = task_id
-            evaluation["evaluated_at"] = datetime.now().isoformat()
-            print(f"[Task {task_id}] 평가 완료 - 점수: {evaluation.get('total_score', 'N/A')}")
-            return evaluation
-        else:
-            raise ValueError("JSON 형식 응답 없음")
+        # JSON Resilience 파싱
+        evaluation = parse_evaluation_json(response_text, context=f"celery_evaluate_answer[{task_id}]")
+        evaluation["task_id"] = task_id
+        evaluation["evaluated_at"] = datetime.now().isoformat()
+        print(f"[Task {task_id}] 평가 완료 - 점수: {evaluation.get('total_score', 'N/A')}")
+        return evaluation
             
     except SoftTimeLimitExceeded:
         print(f"[Task {task_id}] 시간 초과")
