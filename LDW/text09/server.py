@@ -73,6 +73,7 @@ def init_db():
         )
     ''')
     
+    
     # Create interview_information table if not exists
     c.execute('''
         CREATE TABLE IF NOT EXISTS interview_information (
@@ -82,6 +83,15 @@ def init_db():
             resume TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (id_name) REFERENCES users(id_name)
+        )
+    ''')
+
+    # Create interview_answer table if not exists
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS interview_answer (
+            id SERIAL PRIMARY KEY,
+            question TEXT NOT NULL,
+            answer TEXT NOT NULL
         )
     ''')
 
