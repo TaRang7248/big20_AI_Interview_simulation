@@ -6,9 +6,10 @@
       "type": "debugpy",
       "request": "launch",
       "module": "celery",
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal", 
       "args": [
-        "-A", "celery_app", 
+        "-A", "CSH.celery_app", 
         "worker",
         "--loglevel=info",
         "--pool=solo" 
