@@ -38,7 +38,7 @@ except ImportError:
 
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
-DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
 MAX_EXECUTION_TIME = 10  # 초
 MAX_OUTPUT_SIZE = 10000  # 문자
 SUPPORTED_LANGUAGES = ["python", "javascript", "java", "c", "cpp"]

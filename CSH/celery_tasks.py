@@ -45,7 +45,7 @@ def get_llm():
         try:
             from langchain_ollama import ChatOllama
             DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
-            DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
+            DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
             _llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.3, num_ctx=DEFAULT_LLM_NUM_CTX)
         except Exception as e:
             print(f"LLM 초기화 실패: {e}")
