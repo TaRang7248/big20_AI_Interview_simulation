@@ -37,7 +37,7 @@ class ResumeRAG:
         # 이번 예제에서는 'llama3:8b-instruct-q4_0'를 임베딩 모델로도 사용해 봅니다. (가능하다면 'nomic-embed-text' 추천)
         
         # llama3:8b-instruct-q4_0 모델을 사용하여 텍스트를 숫자로 변환하는 임베딩 엔진을 생성
-        self.embeddings = OllamaEmbeddings(model="llama3:8b-instruct-q4_0") 
+        self.embeddings = OllamaEmbeddings(model="nomic-embed-text") 
 
         # PGVector 인스턴스 초기화 (연결 자체는 나중에 이루어짐)
         # 데이터베이스와 어떻게 통신할지에 대한 설정 정보를 담은 객체를 만든다
