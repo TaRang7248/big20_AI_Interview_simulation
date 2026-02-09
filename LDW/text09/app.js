@@ -411,11 +411,50 @@ function renderJobList() {
                 <h4>${job.title}</h4>
                 <p>마감일: ${job.deadline}</p>
             </div>
-            <button class="btn-small" onclick="startInterviewSetup(${job.id})">지원하기</button>
+            <button class="btn-small" onclick="viewJobDetail(${job.id})">확인하기</button>
         `;
         list.appendChild(li);
     });
 }
+
+
+
+// --- Job Detail View ---
+window.viewJobDetail = async (jobId) => {
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`);
+        const result = await response.json();
+
+        if (result.success) {
+            const job = result.job;
+            AppState.currentJobId = job.id; // Set current Job ID
+
+            $('#detail-job-title').textContent = job.title;
+            $('#detail-job-writer').textContent = job.id_name || '알 수 없음';
+            $('#detail-job-deadline').textContent = job.deadline;
+
+            // Handle newlines in content
+            $('#detail-job-content').textContent = job.content;
+
+            navigateTo('job-detail-page');
+        } else {
+            showToast(result.message || '공고 정보를 불러오는데 실패했습니다.', 'error');
+        }
+    } catch (error) {
+        console.error('View Job Detail Error:', error);
+        showToast('서버 연결에 실패했습니다.', 'error');
+    }
+};
+
+$('#btn-back-to-list').addEventListener('click', () => {
+    navigateTo('applicant-dashboard-page');
+});
+
+$('#btn-apply-job').addEventListener('click', () => {
+    if (AppState.currentJobId) {
+        startInterviewSetup(AppState.currentJobId);
+    }
+});
 
 // --- Interview Flow ---
 // Step 1: Setup

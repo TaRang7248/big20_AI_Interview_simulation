@@ -271,6 +271,26 @@ def get_jobs():
     finally:
         if conn: conn.close()
 
+@app.route('/api/jobs/<id>', methods=['GET'])
+def get_job_detail(id):
+    try:
+        conn = get_db_connection()
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute("SELECT id, title, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement WHERE id = %s", (id,))
+        
+        row = c.fetchone()
+        
+        if row:
+            job = dict(row)
+            return jsonify({'success': True, 'job': job})
+        else:
+            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+    except Exception as e:
+        print(f"Get Job Detail Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
 @app.route('/api/jobs', methods=['POST'])
 def create_job():
     data = request.json
