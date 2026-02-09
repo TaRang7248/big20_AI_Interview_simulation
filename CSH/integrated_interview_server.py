@@ -227,7 +227,14 @@ async def _proxy_to_nextjs(request: Request, path: str = ""):
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(target_url, headers=fwd_headers)
-            return HTMLResponse(content=resp.text, status_code=resp.status_code)
+            # Next.js RSC (React Server Components) 응답 등 원본 content-type 보존
+            content_type = resp.headers.get("content-type", "text/html; charset=utf-8")
+            from fastapi.responses import Response
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers={"content-type": content_type}
+            )
     except httpx.ConnectError:
         # Next.js 서버가 아직 시작되지 않았을 때 안내 페이지
         return HTMLResponse(content=f"""
