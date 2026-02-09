@@ -6,10 +6,8 @@
 
 // --- 0. Mock Data (데이터 모델) ---
 const MOCK_DB = {
-    users: [
-        { id: 'test', pw: '1234', name: '홍길동', dob: '1995-01-01', gender: 'male', type: 'applicant', email: 'test@example.com', address: '서울시 강남구', phone: '010-1234-5678' },
-        { id: 'admin', pw: 'admin', name: '관리자', dob: '1990-05-05', gender: 'female', type: 'admin', email: 'admin@company.com', address: '서울시 서초구', phone: '010-0000-0000' }
-    ],
+    users: [], // Compatibility: Actual users are now in SQLite/Server
+    // users data removed - moved to SQLite DB via server.py
     jobs: [
         { id: 1, title: '2026년 상반기 신입 개발자 공채', deadline: '2026-06-30', content: '백엔드/프론트엔드 개발자 모집' },
         { id: 2, title: 'AI 데이터 분석가 경력직 채용', deadline: '2026-05-15', content: 'Python, SQL 능통자' }
@@ -86,31 +84,36 @@ function initRouter() {
 // --- Authentication --
 function initAuth() {
     // Login
-    $('#login-form').addEventListener('submit', (e) => {
+    $('#login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const id = $('#login-id').value;
         const pw = $('#login-pw').value;
 
-        const user = MOCK_DB.users.find(u => u.id === id && u.pw === pw);
-        if (user) {
-            loginUser(user);
-        } else {
-            showToast('아이디 또는 비밀번호가 일치하지 않습니다.', 'error');
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id, pw })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                loginUser(result.user);
+            } else {
+                showToast(result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Login Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
         }
     });
 
     // SignUp
-    $('#signup-form').addEventListener('submit', (e) => {
+    $('#signup-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const id = $('#reg-id').value;
-        const exist = MOCK_DB.users.find(u => u.id === id);
-        if (exist) {
-            showToast('이미 존재하는 아이디입니다.', 'error');
-            return;
-        }
 
         const newUser = {
-            id: id,
+            id: $('#reg-id').value,
             pw: $('#reg-pw').value,
             name: $('#reg-name').value,
             dob: $('#reg-dob').value,
@@ -120,9 +123,25 @@ function initAuth() {
             phone: $('#reg-phone').value,
             type: $('input[name="reg-type"]:checked').value
         };
-        MOCK_DB.users.push(newUser);
-        showToast('회원가입 완료! 로그인해주세요.', 'success');
-        navigateTo('login-page');
+
+        try {
+            const response = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newUser)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('회원가입 완료! 로그인해주세요.', 'success');
+                navigateTo('login-page');
+            } else {
+                showToast(result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Register Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
     });
 
     // Logout
