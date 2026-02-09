@@ -1,61 +1,91 @@
-# AI 면접 프로그램 가이드북 (GUIDEBOOK)
+# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK.md)
 
-이 문서는 AI 면접 시뮬레이션 프로그램의 실행 방법과 파일 구조를 설명합니다.
+## 1. 개요 (Overview)
+본 프로그램은 **웹 기반 AI 면접 시뮬레이션**입니다.
+사용자는 웹 브라우저를 통해 가상의 면접관(AI)과 상호작용하며, 면접 질문에 답변하고 실시간 피드백을 받을 수 있습니다.
+또한, Python Flask 서버를 통해 회원가입 정보를 로컬 데이터베이스(SQLite)에 저장하고 관리합니다.
 
-## 1. 개요
-이 프로그램은 웹 기반(HTML/JS) 프론트엔드와 Python Flask 백엔드로 구성되어 있습니다.
-사용자가 입력한 회원 정보는 로컬 데이터베이스 파일(`db/membership_information.db`)에 안전하게 저장됩니다.
+---
 
-## 2. 실행 환경 준비
-### 필수 요구 사항
-- **Python 3.x**가 설치되어 있어야 합니다.
-- **Flask** 라이브러리가 필요합니다.
-  ```bash
-  pip install flask
-  ```
+## 2. 개발 환경 (Environment)
+본 프로젝트는 다음과 같은 환경에서 개발 및 테스트되었습니다.
+*   **OS**: Windows
+*   **Language**:
+    *   **Frontend**: HTML5, CSS3, Vanilla JavaScript (ES6+)
+    *   **Backend**: Python 3.x
+*   **Framework/Library**:
+    *   Flask (Web Server)
+    *   SQLite3 (Database)
 
-## 3. 프로그램 실행 방법
-보안상의 이유로 브라우저에서 HTML 파일을 직접 여는 대신, Python 웹 서버를 통해 접속해야 합니다.
+---
 
-1. **터미널(CMD/PowerShell) 열기**
-   - 프로젝트 폴더(`text09`)로 이동합니다.
-     ```bash
-     cd C:\big20\big20_AI_Interview_simulation\LDW\text09
-     ```
+## 3. 프로그램 실행 방법 (How to Run)
+**중요**: `index.html` 파일을 직접 더블 클릭하여 실행하면 데이터베이스 기능이 작동하지 않습니다. 반드시 아래 순서대로 실행해주세요.
 
-2. **서버 실행**
-   - 다음 명령어를 입력하여 서버를 실행합니다.
-     ```bash
-     python server.py
-     ```
-   - 실행 성공 시 다음과 같은 메시지가 나타납니다:
-     ```
-     Database initialized at db\membership_information.db
-     Serving on http://localhost:5000
-     ```
+1.  **터미널 열기**: `C:\big20\big20_AI_Interview_simulation\LDW\text09` 폴더에서 명령 프롬프트(CMD) 또는 PowerShell을 엽니다.
+2.  **서버 실행**:
+    ```bash
+    python server.py
+    ```
+3.  **브라우저 자동 실행**:
+    *   서버가 정상적으로 실행되면, 잠시 후 **기본 웹 브라우저가 자동으로 열리며** 프로그램(`http://localhost:5000`)에 접속됩니다.
+4.  **프로그램 사용**:
+    *   회원가입 및 로그인을 진행하고 면접 시뮬레이션을 시작합니다.
 
-3. **웹 접속**
-   - 웹 브라우저(Chrome, Edge 등)를 열고 주소창에 입력합니다:
-     `http://localhost:5000`
+---
 
-## 4. 주요 기능 사용법
-### 회원가입
-1. 로그인 화면 하단의 **'회원가입'** 링크를 클릭합니다.
-2. 아이디, 비밀번호, 이름 등 정보를 입력하고 **'가입하기'**를 클릭합니다.
-3. 정보는 `db/membership_information.db`의 `users` 테이블에 저장됩니다.
+## 4. 사용 라이브러리 (Libraries)
+*   **Backend**:
+    *   `flask`: 웹 서버 구동 및 API 제공
+    *   `sqlite3`: 사용자 데이터 저장 (Python 내장)
+    *   `webbrowser`: 서버 실행 시 브라우저 자동 실행 (Python 내장)
+    *   `threading`: 브라우저 실행 타이머 제어 (Python 내장)
+*   **Frontend**:
+    *   Google Fonts (Noto Sans KR): 폰트 적용
+    *   SpeechRecognition API (Web API): 음성 인식 (STT) 지원 브라우저 필요 (Chrome 권장)
+    *   SpeechSynthesis API (Web API): 음성 안내 (TTS)
 
-### 로그인
-1. 가입 시 입력한 아이디와 비밀번호를 입력합니다.
-2. **'로그인'** 버튼을 클릭합니다.
-3. DB에서 일치하는 정보를 찾으면 대시보드로 이동합니다.
+---
 
-## 5. 파일 구조 설명
-- **server.py**: 웹 서버 및 데이터베이스(DB) 처리 로직 (Python Flask)
-- **app.js**: 화면 동작 및 서버 통신 담당 (JavaScript)
-- **index.html**: 메인 웹 페이지 구조
-- **styles.css**: 디자인 스타일 시트
-- **db/**: 데이터베이스 파일이 위치하는 폴더
-  - **membership_information.db**: 회원 정보가 저장되는 SQLite DB 파일
+## 5. 주요 기능 사용법 (Features)
 
-> [!NOTE]
-> `app.js`의 `MOCK_DB` 변수 내 사용자 데이터는 제거되었으며, 이제 실제 DB를 사용합니다.
+### 5.1 회원가입 및 로그인
+*   **회원가입**: ID, 비밀번호, 이름, 생년월일, 성별, 이메일, 주소, 전화번호를 입력하여 계정을 생성합니다.
+*   **로그인**: 생성한 계정으로 접속합니다. (관리자/면접자 구분)
+
+### 5.2 면접 진행 (Applicant)
+1.  **대시보드**: 지원 가능한 공고 목록을 확인하고 '지원하기' 버튼을 클릭합니다.
+2.  **환경 점검**: 카메라와 마이크 권한을 허용하고 연결 상태를 확인합니다.
+3.  **면접 시작**:
+    *   AI 면접관이 질문을 읽어줍니다 (TTS).
+    *   질문이 끝난 후 타이머가 작동하며, 사용자는 마이크를 통해 답변합니다 (STT).
+    *   '답변 완료' 버튼을 누르거나 시간이 종료되면 다음 질문으로 넘어갑니다.
+4.  **결과 확인**: 면접 종료 후 영역별 점수와 합격 여부 예측 결과를 확인합니다.
+
+### 5.3 관리자 기능 (Admin)
+*   **공고 관리**: 새로운 면접 공고를 등록하거나 기존 공고를 수정합니다.
+*   **지원자 현황**: 지원자들의 면접 점수와 합격 여부를 조회합니다.
+
+---
+
+## 6. 파일 구조 설명 (File Structure)
+
+```
+C:\big20\big20_AI_Interview_simulation\LDW\text09\
+│
+├── server.py           # [Backend] Flask 웹 서버 및 DB 관리 메인 파일
+├── index.html          # [Frontend] 웹 어플리케이션의 메인 HTML 구조
+├── styles.css          # [Frontend] UI 디자인 스타일시트
+├── app.js              # [Frontend] 클라이언트 로직 (라우팅, 면접 진행, API 통신)
+├── GUIDEBOOK.md        # [Docs] 프로그램 사용 설명서 (현재 파일)
+│
+└── db\
+    └── membership_information.db  # [Database] SQLite 사용자 정보 저장소
+```
+
+---
+
+## 7. 문제 해결 (Troubleshooting)
+*   **브라우저가 열리지 않을 때**: 주소창에 `http://localhost:5000` 또는 `http://127.0.0.1:5000`을 직접 입력하세요.
+*   **데이터베이스 오류**: `db` 폴더가 존재하는지 확인하십시오. 없으면 `server.py` 실행 시 자동으로 생성됩니다.
+*   **카메라/마이크 오류**: 브라우저 주소창 왼쪽의 '사이트 설정'에서 카메라와 마이크 권한이 '허용'되어 있는지 확인하세요.

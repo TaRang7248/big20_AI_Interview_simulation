@@ -98,7 +98,15 @@ def login():
     finally:
         if conn: conn.close()
 
+import webbrowser
+from threading import Timer
+
 if __name__ == '__main__':
     init_db()
+    
+    def open_browser():
+        webbrowser.open_new("http://localhost:5000/")
+
+    Timer(1, open_browser).start()
     print("Serving on http://localhost:5000")
     app.run(host='0.0.0.0', port=5000, debug=True)
