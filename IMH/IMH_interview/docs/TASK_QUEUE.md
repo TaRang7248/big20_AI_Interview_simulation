@@ -47,11 +47,16 @@
 
 ---
 
-## ACTIVE
-
 ### TASK-004 FastAPI 최소 엔트리 + healthcheck
 - `/health` 단일 엔드포인트
 - **Verification**: `IMH/api/health.py` 구현 및 `scripts/verify_task_004.py` Pass
+
+---
+
+### TASK-005 Playground STT (파일 업로드)
+- **Goal**: Mock STT Provider 기반 파일 업로드 및 분석 API 구현
+- **Scope**: `POST /api/v1/playground/stt`
+- **Verification**: `python scripts/verify_task_005.py` Pass
 
 ---
 
@@ -60,9 +65,6 @@
 (없음 - 에이전트 대기 중)
 
 ## BACKLOG
-
-### TASK-005 Playground STT (파일 업로드)
-- Mock STT Provider 기반
 
 ### TASK-006 Playground PDF → Text (문서 업로드)
 - PDF 업로드 → 텍스트 추출

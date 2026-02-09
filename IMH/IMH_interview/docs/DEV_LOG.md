@@ -1,4 +1,3 @@
-# DEV_LOG
 
 ## 2026-02-09
 
@@ -99,3 +98,19 @@
 - **환경 검증 보완 (2026-02-09 Supplementary)**:
     - **실행 환경**: `interview_env` (venv) 활성화 상태에서 `scripts/verify_task_004.py` 재검증 완료.
     - **패키지 확인**: `fastapi`, `uvicorn`, `httpx` 등 필수 패키지가 `interview_env`에 설치되어 있음을 확인.
+
+### TASK-005 Playground STT (파일 업로드)
+- **요약**: `dependencies.py`를 통한 Mock STT Provider 연동 및 파일 업로드 분석 API 구현.
+- **변경 사항**:
+    - `IMH/api/playground.py`: Playground STT Router 구현 (임시 파일 처리, Validation).
+    - `IMH/api/dependencies.py`: Provider Dependency Injection (`get_stt_provider`) 추가.
+    - `IMH/main.py`: Playground Router 등록 (`/api/v1/playground`).
+    - `python-multipart` 패키지 설치: `UploadFile` 처리를 위한 의존성 추가.
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_005.py`
+        - 정상 `.wav` 파일 -> 200 OK (Mock Data).
+        - 비정상 `.txt` 파일 -> 400 Bad Request.
+    - **로그 확인**: `logs/agent/agent.log`에 요청 정보(UUID 파일명, 사이즈) 및 처리 결과 기록 확인.
+- **로그 파일**:
+    - 실행 로그: `logs/agent/agent.log`
+    - 런타임 로그: `logs/runtime/runtime.log`

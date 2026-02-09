@@ -190,19 +190,24 @@ IMH/IMH_Interview/
 
 ## 10. 현재 최우선 목표 (단 하나)
 
-### TASK-004: FastAPI 최소 엔트리 + Healthcheck
+### TASK-006: Playground PDF → Text (문서 업로드)
 - 목표:
-  - FastAPI 실행 진입점 확정
-  - 서버 생존 여부 확인용 `/health` 엔드포인트 제공
+  - PDF 문서 업로드 및 텍스트 추출 API 구현 (Playground)
 - 범위(포함):
-  - `IMH/` 하위 FastAPI app 생성
-  - `/health` 단일 엔드포인트
+  - 파일 업로드 및 유효성 검증
+  - PDF 텍스트 추출 로직 (PDF parsers, pypdf 등)
+  - 임시 파일 처리 정책 준수
 - 범위(제외):
-  - Provider 실제 연동
-  - DB 연결
-  - 인증/세션/비즈니스 로직
+  - DB 저장 및 벡터화
+  - OCR (이미지 기반 문서 처리)
+  - LLM 요약 (후순위)
 
 ### 최근 완료
+- TASK-005: Playground STT (파일 업로드) ✅ DONE
+  - Mock STT Provider 연동 및 DI 구조 적용
+  - 파일 업로드 및 임시 파일 관리(100MB 제한) 구현
+  - `POST /api/v1/playground/stt` 수동 검증 완료
+
 - TASK-004: FastAPI 최소 엔트리 + Healthcheck ✅ DONE
   - FastAPI 실행 진입점 확정
   - `/health` 엔드포인트 구현
@@ -219,7 +224,7 @@ IMH/IMH_Interview/
 
 ## 10. 현재 최우선 목표 (Next Step)
 
-### TASK-005: Playground STT (파일 업로드)
+### TASK-006: Playground PDF → Text (문서 업로드)
 - 목표:
-  - Mock STT Provider를 이용한 파일 업로드 및 분석 API 구현
+  - PDF 문서 업로드 및 텍스트 추출 API 구현
 - 상태: **대기 (비활성)** → 사용자 ACTIVE 승인 필요
