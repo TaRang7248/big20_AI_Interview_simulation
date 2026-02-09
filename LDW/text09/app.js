@@ -1,0 +1,1027 @@
+/**
+ * AI Interview Program - Main Application Logic
+ * Stack: Vanilla JS (ES6+)
+ * Features: SPA Routing, Mock Data Management, Interview Simulation
+ */
+
+// --- 0. Mock Data (데이터 모델) ---
+const MOCK_DB = {
+    users: [], // Compatibility: Actual users are now in SQLite/Server
+    // users data removed - moved to SQLite DB via server.py
+    jobs: [], // Will be fetched from API
+    applications: [
+        // { userId: 'test', jobId: 1, status: 'completed', score: { ... } }
+    ],
+    interviewQuestions: {
+        'phase1': ['자기소개를 간단히 부탁드립니다.', '지원 동기가 무엇인가요?'],
+        'phase2': ['가장 열정적으로 임했던 프로젝트 경험을 말씀해주세요.', '갈등 상황을 해결한 경험이 있나요?', '본인의 장단점은 무엇인가요?'],
+        'coding': ['문자열 뒤집기 알고리즘을 설명해주세요. (화이트보드 활성화)']
+    }
+};
+
+// --- 1. Global State (상태 관리) ---
+const AppState = {
+    currentUser: null, // Logged in user object
+    currentJobId: null, // Selected Job ID for interview
+    tempPassword: null, // Temporarily store confirmed password for update
+    interview: {
+        inProgress: false,
+        phase: 0, // 0: setup, 1: intro, 2: competency, 3: coding
+        questionIndex: 0,
+        timer: null,
+        timeLeft: 0,
+        log: []
+    }
+};
+
+// --- 2. Code Implementation (로직) ---
+
+// DOM Elements shortcut
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => document.querySelectorAll(selector);
+
+// Initialization
+document.addEventListener('DOMContentLoaded', () => {
+    initRouter();
+    initAuth();
+    initDashboard();
+    initAdmin();
+    initInterview();
+    initInputMasking(); // Added Input Masking
+});
+
+// --- Router Utility ---
+function initRouter() {
+    // Basic navigation handling logic
+    window.navigateTo = (pageId) => {
+        // Hide all pages
+        $$('.page').forEach(el => el.classList.add('hidden'));
+        $$('.page').forEach(el => el.classList.remove('active'));
+
+        // Show target page
+        const target = $(`#${pageId}`);
+        if (target) {
+            target.classList.remove('hidden');
+            target.classList.add('active');
+            console.log(`Navigated to: ${pageId}`);
+
+            // Run specific page init logic if needed
+            if (pageId === 'applicant-dashboard-page') renderJobList();
+            if (pageId === 'admin-dashboard-page') renderAdminJobList();
+        }
+    };
+
+    // Navigation Buttons
+    $('#link-signup').addEventListener('click', (e) => { e.preventDefault(); navigateTo('signup-page'); });
+    $('#btn-back-login').addEventListener('click', () => navigateTo('login-page'));
+    $('#btn-go-home').addEventListener('click', () => {
+        if (AppState.currentUser?.type === 'admin') navigateTo('admin-dashboard-page');
+        else navigateTo('applicant-dashboard-page');
+    });
+}
+
+// --- Authentication --
+function initAuth() {
+    // Login
+    $('#login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = $('#login-id').value;
+        const pw = $('#login-pw').value;
+
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_name: id, pw })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                loginUser(result.user);
+            } else {
+                showToast(result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Login Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    });
+
+    // SignUp
+    $('#signup-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const newUser = {
+            id_name: $('#reg-id').value,
+            pw: $('#reg-pw').value,
+            name: $('#reg-name').value,
+            dob: `${$('#reg-dob-year').value}-${$('#reg-dob-month').value.padStart(2, '0')}-${$('#reg-dob-day').value.padStart(2, '0')}`,
+            gender: $('#reg-gender').value,
+            email: $('#reg-email').value,
+            address: $('#reg-addr').value,
+            phone: `${$('#reg-phone-1').value}-${$('#reg-phone-2').value}-${$('#reg-phone-3').value}`,
+            type: $('input[name="reg-type"]:checked').value
+        };
+
+        try {
+            const response = await fetch('/api/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newUser)
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('회원가입 완료! 로그인해주세요.', 'success');
+                navigateTo('login-page');
+            } else {
+                showToast(result.message, 'error');
+            }
+        } catch (error) {
+            console.error('Register Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    });
+
+    // Logout
+    $('#btn-logout').addEventListener('click', () => {
+        AppState.currentUser = null;
+        $('#navbar').classList.add('hidden');
+        navigateTo('login-page');
+        showToast('로그아웃 되었습니다.');
+    });
+
+    // My Info Link -> Password Check Logic
+    $('#link-my-info').addEventListener('click', () => {
+        if (AppState.currentUser) {
+            $('#check-pw-input').value = '';
+            navigateTo('password-check-page');
+        }
+    });
+
+    // Password Check Submit
+    $('#password-check-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const inputPw = $('#check-pw-input').value;
+
+        try {
+            const response = await fetch('/api/verify-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_name: AppState.currentUser.id_name, pw: inputPw })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Success: Save PW temporarily and Fetch latest info
+                AppState.tempPassword = inputPw;
+                await fetchAndShowMyInfo();
+            } else {
+                showToast(result.message || '비밀번호가 일치하지 않습니다.', 'error');
+            }
+        } catch (error) {
+            console.error('Verify PW Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    });
+
+    // Cancel Password Check
+    $('#btn-cancel-pw-check').addEventListener('click', () => {
+        goHome();
+    });
+
+
+    // Helper: Fetch User Info and Show Edit Page
+    async function fetchAndShowMyInfo() {
+        try {
+            const response = await fetch(`/api/user/${AppState.currentUser.id_name}`);
+            const result = await response.json();
+            if (result.success) {
+                AppState.currentUser = result.user; // Update local state
+
+                $('#edit-id').value = result.user.id_name || '';
+                $('#edit-name').value = result.user.name || '';
+                $('#edit-dob').value = result.user.dob || '';
+
+                const genderMap = { 'male': '남성', 'female': '여성' };
+                $('#edit-gender').value = genderMap[result.user.gender] || result.user.gender || '';
+
+                $('#edit-email').value = result.user.email || '';
+                $('#edit-addr').value = result.user.address || '';
+
+                // Phone number split
+                const phone = result.user.phone || '';
+                const phoneParts = phone.split('-');
+                $('#edit-phone-1').value = phoneParts[0] || '';
+                $('#edit-phone-2').value = phoneParts[1] || '';
+                $('#edit-phone-3').value = phoneParts[2] || '';
+
+                navigateTo('myinfo-page');
+            } else {
+                showToast('회원 정보를 불러오는데 실패했습니다.', 'error');
+            }
+        } catch (error) {
+            console.error('Fetch User Info Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    }
+
+
+    // My Info Update
+    $('#myinfo-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newEmail = $('#edit-email').value;
+        const newAddr = $('#edit-addr').value;
+        const newPhone = `${$('#edit-phone-1').value}-${$('#edit-phone-2').value}-${$('#edit-phone-3').value}`;
+
+        // Use previously verified password
+        const verifiedPw = AppState.tempPassword;
+
+        if (!verifiedPw) {
+            showToast('세션이 만료되었습니다. 다시 시도해주세요.', 'error');
+            navigateTo('password-check-page');
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/user/${AppState.currentUser.id_name}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pw: verifiedPw,
+                    email: newEmail,
+                    address: newAddr,
+                    phone: newPhone
+                })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                // Update local state
+                AppState.currentUser.email = newEmail;
+                AppState.currentUser.address = newAddr;
+                AppState.currentUser.phone = newPhone;
+
+                // Clear temp password for security
+                AppState.tempPassword = null;
+
+                showToast('정보가 수정되었습니다.', 'success');
+
+                // Auto redirect to home
+                setTimeout(() => {
+                    goHome();
+                }, 1000);
+
+            } else {
+                showToast(result.message || '정보 수정 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Update User Info Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    });
+
+    // My Info Cancel
+    $('#btn-cancel-myinfo').addEventListener('click', () => {
+        AppState.tempPassword = null;
+        goHome();
+    });
+
+    // Password Change Button (in My Info)
+    $('#btn-change-pw').addEventListener('click', () => {
+        $('#new-pw').value = '';
+        $('#confirm-new-pw').value = '';
+        navigateTo('password-change-page');
+    });
+
+    // Password Change Cancel
+    $('#btn-cancel-pw-change').addEventListener('click', () => {
+        navigateTo('myinfo-page');
+    });
+
+    // Password Change Submit
+    $('#password-change-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newPw = $('#new-pw').value;
+        const confirmPw = $('#confirm-new-pw').value;
+
+        if (newPw !== confirmPw) {
+            showToast('비밀번호가 일치하지 않습니다.', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id_name: AppState.currentUser.id_name,
+                    new_pw: newPw
+                })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('비밀번호가 변경되었습니다.', 'success');
+                AppState.tempPassword = null; // Clear temp password
+
+                // Option: Logout or Go Home. 
+                // Let's go to Home as per typical flow, or maybe Logout for security.
+                // Request didn't specify, but "Moving to Change Password Page" imply flow.
+                // Let's go to Login page to force re-login with new PW is safest.
+                // But user might find it annoying. Let's go to Home.
+                // Actually, let's follow the standard "Cancel" behavior which goes to Home/Dashboard.
+                // Wait, "Cancel" goes to My Info page according to logic above.
+                // "Change Complete" button.. let's go to Home.
+                setTimeout(() => {
+                    goHome();
+                }, 1000);
+            } else {
+                showToast(result.message || '비밀번호 변경 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Change Password Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    });
+
+    function goHome() {
+        if (AppState.currentUser && AppState.currentUser.type === 'admin') {
+            navigateTo('admin-dashboard-page');
+        } else {
+            navigateTo('applicant-dashboard-page');
+        }
+    }
+}
+
+function loginUser(user) {
+    AppState.currentUser = user;
+    $('#user-display').textContent = `${user.name}님 (${user.type === 'admin' ? '관리자' : '지원자'})`;
+    $('#navbar').classList.remove('hidden');
+
+    // Clear inputs
+    $('#login-id').value = '';
+    $('#login-pw').value = '';
+
+    if (user.type === 'admin') {
+        navigateTo('admin-dashboard-page');
+    } else {
+        navigateTo('applicant-dashboard-page');
+    }
+    showToast(`${user.name}님 환영합니다!`, 'success');
+}
+
+// --- Applicant Dashboard ---
+function initDashboard() {
+    // Initial fetch
+    fetchJobs();
+
+    $('#link-my-records').addEventListener('click', () => {
+        showToast('아직 구현된 기록이 없습니다. (Mock Demo)', 'info');
+    });
+}
+
+// Fetch Jobs from Server
+async function fetchJobs() {
+    try {
+        const response = await fetch('/api/jobs');
+        const result = await response.json();
+        if (result.success) {
+            MOCK_DB.jobs = result.jobs;
+            renderJobList();
+            if (AppState.currentUser && AppState.currentUser.type === 'admin') {
+                renderAdminJobList();
+            }
+        }
+    } catch (error) {
+        console.error('Fetch Jobs Error:', error);
+    }
+}
+
+function renderJobList() {
+    const list = $('#job-list');
+    list.innerHTML = '';
+    MOCK_DB.jobs.forEach(job => {
+        const li = document.createElement('li');
+        li.className = 'job-card';
+        li.innerHTML = `
+            <div class="job-info">
+                <h4>[${job.job || '직무 미정'}] ${job.title}</h4>
+                <p>생성일: ${job.created_at} | 마감일: ${job.deadline}</p>
+            </div>
+            <button class="btn-small" onclick="viewJobDetail(${job.id})">확인하기</button>
+        `;
+        list.appendChild(li);
+    });
+}
+
+
+
+// --- Job Detail View ---
+window.viewJobDetail = async (jobId) => {
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`);
+        const result = await response.json();
+
+        if (result.success) {
+            const job = result.job;
+            AppState.currentJobId = job.id; // Set current Job ID
+
+            $('#detail-job-title').textContent = `[${job.job || '-'}] ${job.title}`;
+            $('#detail-job-job').textContent = job.job || '-';
+            $('#detail-job-writer').textContent = job.id_name || '알 수 없음';
+            $('#detail-job-created-at').textContent = job.created_at;
+            $('#detail-job-deadline').textContent = job.deadline;
+
+            // Handle newlines in content
+            $('#detail-job-content').textContent = job.content;
+
+            navigateTo('job-detail-page');
+        } else {
+            showToast(result.message || '공고 정보를 불러오는데 실패했습니다.', 'error');
+        }
+    } catch (error) {
+        console.error('View Job Detail Error:', error);
+        showToast('서버 연결에 실패했습니다.', 'error');
+    }
+};
+
+$('#btn-back-to-list').addEventListener('click', () => {
+    navigateTo('applicant-dashboard-page');
+});
+
+$('#btn-apply-job').addEventListener('click', () => {
+    if (AppState.currentJobId) {
+        startInterviewSetup(AppState.currentJobId);
+    }
+});
+
+// --- Interview Flow ---
+// Step 1: Setup
+window.startInterviewSetup = (jobId) => {
+    AppState.currentJobId = jobId;
+    const job = MOCK_DB.jobs.find(j => j.id === jobId);
+    $('#setup-job-title').textContent = `[${job.job || '-'}] ${job.title}`;
+
+    // Reset Checks
+    $('#resume-upload').value = '';
+    $('#resume-status').textContent = '';
+    $('#resume-status').className = '';
+
+    // Reset Device Status
+    $('#cam-status').className = 'status pending';
+    $('#cam-status').textContent = '확인 필요';
+    $('#mic-status').className = 'status pending';
+    $('#mic-status').textContent = '확인 필요';
+    $('#btn-start-interview').disabled = true;
+
+    navigateTo('interview-setup-page');
+};
+
+$('#btn-test-devices').addEventListener('click', async () => {
+    // 1. Camera & Mic Permission
+    showToast('카메라/마이크 권한을 요청합니다...', 'info');
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+        // Connect to Video Element
+        const video = document.getElementById('user-video');
+        if (video) {
+            video.srcObject = stream;
+            document.getElementById('feed-label').textContent = '내 모습 (Camera On)';
+        }
+
+        $('#cam-status').className = 'status ok';
+        $('#cam-status').textContent = '정상 (연결됨)';
+        $('#mic-status').className = 'status ok';
+        $('#mic-status').textContent = '정상 (연결됨)';
+        $('#btn-start-interview').disabled = false;
+
+        showToast('장치가 정상적으로 연결되었습니다.', 'success');
+
+    } catch (err) {
+        console.error("Device Access Error:", err);
+        $('#cam-status').className = 'status error';
+        $('#cam-status').textContent = '오류 (권한 거부됨)';
+        $('#mic-status').className = 'status error';
+        $('#mic-status').textContent = '오류 (권한 거부됨)';
+        showToast('카메라/마이크 접근 권한이 필요합니다.', 'error');
+    }
+});
+
+$('#btn-cancel-interview').addEventListener('click', () => {
+    navigateTo('applicant-dashboard-page');
+});
+
+// Step 2: Main Interview Logic (Modified for Upload)
+$('#btn-start-interview').addEventListener('click', async () => {
+    // Check if resume is uploaded
+    const fileInput = $('#resume-upload');
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showToast('이력서 파일을 업로드해주세요.', 'error');
+        return;
+    }
+
+    // Upload Resume First
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('resume', file);
+    formData.append('id_name', AppState.currentUser.id_name);
+
+    // Find current job to get job title
+    const job = MOCK_DB.jobs.find(j => j.id === AppState.currentJobId);
+    formData.append('job_title', job ? job.job : 'Unknown');
+
+    try {
+        showToast('이력서 업로드 중...', 'info');
+        const response = await fetch('/api/upload/resume', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (!result.success) {
+            showToast(result.message || '이력서 업로드 실패', 'error');
+            return;
+        }
+
+        showToast('이력서 업로드 완료. 면접을 시작합니다.', 'success');
+
+    } catch (error) {
+        console.error('Resume Upload Error:', error);
+        showToast('서버 연결 실패 (이력서 업로드)', 'error');
+        return;
+    }
+
+
+    // Init Interview State
+    AppState.interview = {
+        inProgress: true,
+        phase: 1, // Start with Intro
+        questionIndex: 0,
+        logs: [],
+        timeLeft: 60 // 60s per question
+    };
+
+    // Clear UI
+    $('#chat-log').innerHTML = '';
+    $('#user-answer').value = '';
+    $('#coding-board').classList.add('hidden');
+
+    navigateTo('interview-page');
+    runInterviewPhase();
+});
+
+function runInterviewPhase() {
+    if (!AppState.interview.inProgress) return;
+
+    // Check Phase
+    let questions = [];
+    let phaseName = '';
+
+    if (AppState.interview.phase === 1) {
+        questions = MOCK_DB.interviewQuestions['phase1'];
+        phaseName = 'Phase 1: 자기소개';
+    } else if (AppState.interview.phase === 2) {
+        questions = MOCK_DB.interviewQuestions['phase2'];
+        phaseName = 'Phase 2: 역량 검증';
+    } else if (AppState.interview.phase === 3) {
+        questions = MOCK_DB.interviewQuestions['coding'];
+        phaseName = 'Phase 3: 기술 문제';
+        $('#coding-board').classList.remove('hidden');
+    } else {
+        // Finish
+        finishInterview();
+        return;
+    }
+
+    // Check Question Index
+    if (AppState.interview.questionIndex >= questions.length) {
+        // Next Phase
+        AppState.interview.phase++;
+        AppState.interview.questionIndex = 0;
+        // Recursive call for next phase
+        runInterviewPhase();
+        return;
+    }
+
+    // Update UI
+    $('#phase-label').textContent = phaseName;
+    const currentQ = questions[AppState.interview.questionIndex];
+
+    // AI Speaking (TTS)
+    $('#ai-message').textContent = '...';
+    stopListening(); // Stop STT while AI speaks
+
+    // Delay slightly then speak
+    setTimeout(() => {
+        $('#ai-message').textContent = currentQ;
+        addChatLog('AI', currentQ);
+
+        // TTS Call
+        speakText(currentQ, () => {
+            // After speaking finishes:
+            startTimer(60); // Start Timer
+            startListening(); // Start STT
+        });
+    }, 500);
+}
+
+function startTimer(seconds) {
+    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+
+    AppState.interview.timeLeft = seconds;
+    updateTimerDisplay();
+
+    AppState.interview.timer = setInterval(() => {
+        AppState.interview.timeLeft--;
+        updateTimerDisplay();
+
+        if (AppState.interview.timeLeft <= 0) {
+            clearInterval(AppState.interview.timer);
+            submitAnswer(true); // Force submit
+        }
+    }, 1000);
+}
+
+function updateTimerDisplay() {
+    const min = Math.floor(AppState.interview.timeLeft / 60);
+    const sec = AppState.interview.timeLeft % 60;
+    $('#timer-display').textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+    // Progress Bar simulation (just visual)
+    const totalTime = 60;
+    const pct = ((totalTime - AppState.interview.timeLeft) / totalTime) * 100;
+    $('#progress-bar').style.width = `${pct}%`;
+}
+
+function addChatLog(sender, text) {
+    const div = document.createElement('div');
+    div.className = `chat-msg ${sender.toLowerCase()}`;
+    div.innerHTML = `<strong>${sender}:</strong> ${text}`;
+    $('#chat-log').appendChild(div);
+    $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
+}
+
+$('#btn-submit-answer').addEventListener('click', () => submitAnswer(false));
+
+function submitAnswer(forced) {
+    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+    stopListening(); // Stop STT on submit
+
+    const answer = $('#user-answer').value.trim() || (forced ? '(시간 초과)' : '(답변 없음)');
+    addChatLog('User', answer);
+
+    // Save Log
+    AppState.interview.logs.push({
+        phase: AppState.interview.phase,
+        qIndex: AppState.interview.questionIndex,
+        answer: answer
+    });
+
+    $('#user-answer').value = '';
+
+    // Move next
+    AppState.interview.questionIndex++;
+    runInterviewPhase();
+}
+
+function finishInterview() {
+    AppState.interview.inProgress = false;
+    // Save to Mock DB
+    const result = {
+        userId: AppState.currentUser.id_name,
+        jobId: AppState.currentJobId,
+        date: new Date().toLocaleDateString(),
+        scores: {
+            tech: Math.floor(Math.random() * 30) + 70, // Mock Score
+            prob: Math.floor(Math.random() * 30) + 70,
+            comm: Math.floor(Math.random() * 30) + 70,
+            atti: Math.floor(Math.random() * 30) + 70
+        }
+    };
+    MOCK_DB.applications.push(result);
+
+    // Show Result Page
+    // Animate bars
+    navigateTo('result-page');
+    setTimeout(() => {
+        $('#score-tech').style.width = `${result.scores.tech}%`;
+        $('#score-prob').style.width = `${result.scores.prob}%`;
+        $('#score-comm').style.width = `${result.scores.comm}%`;
+        $('#score-atti').style.width = `${result.scores.atti}%`;
+
+        const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
+        $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
+        $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
+    }, 500);
+}
+
+// --- Admin Section ---
+function initAdmin() {
+    $('#admin-menu-jobs').addEventListener('click', () => {
+        $('#admin-view-jobs').classList.remove('hidden');
+        $('#admin-view-applicants').classList.add('hidden');
+        $('#admin-job-register-page').classList.add('hidden'); // Hide register page
+        $('#admin-job-edit-page').classList.add('hidden'); // Hide edit page
+        fetchJobs(); // Refresh list
+    });
+    $('#admin-menu-applicants').addEventListener('click', () => {
+        $('#admin-view-jobs').classList.add('hidden');
+        $('#admin-view-applicants').classList.remove('hidden');
+        $('#admin-job-register-page').classList.add('hidden');
+        $('#admin-job-edit-page').classList.add('hidden');
+        renderAdminAppList();
+    });
+
+    // Admin My Info Link
+    $('#admin-link-my-info').addEventListener('click', () => {
+        if (AppState.currentUser) {
+            $('#check-pw-input').value = '';
+            navigateTo('password-check-page');
+        }
+    });
+
+    // Show Job Register Page
+    $('#btn-add-job').addEventListener('click', () => {
+        $('#admin-view-jobs').classList.add('hidden');
+        $('#admin-job-register-page').classList.remove('hidden');
+        $('#admin-job-edit-page').classList.add('hidden');
+        // Reset form
+        $('#job-title').value = '';
+        $('#job-job').value = '';
+        $('#job-content').value = '';
+        $('#job-deadline').value = '';
+    });
+
+    // Cancel Job Register
+    $('#btn-cancel-job-register').addEventListener('click', () => {
+        $('#admin-job-register-page').classList.add('hidden');
+        $('#admin-view-jobs').classList.remove('hidden');
+    });
+
+    // Submit Job Register
+    $('#admin-job-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const title = $('#job-title').value;
+        const content = $('#job-content').value;
+        const deadline = $('#job-deadline').value;
+
+        try {
+            const response = await fetch('/api/jobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title,
+                    job: $('#job-job').value,
+                    content,
+                    deadline,
+                    id_name: AppState.currentUser.id_name // Add writer_id (now id_name)
+                })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('공고가 등록되었습니다.', 'success');
+                // Return to list
+                $('#admin-job-register-page').classList.add('hidden');
+                $('#admin-view-jobs').classList.remove('hidden');
+                fetchJobs();
+            } else {
+                showToast(result.message || '공고 등록 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Create Job Error:', error);
+            showToast('서버 오류가 발생했습니다.', 'error');
+        }
+    });
+
+    // Cancel Job Edit
+    $('#btn-cancel-job-edit').addEventListener('click', () => {
+        $('#admin-job-edit-page').classList.add('hidden');
+        $('#admin-view-jobs').classList.remove('hidden');
+    });
+
+    // Submit Job Edit
+    $('#admin-job-edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = $('#edit-job-id').value;
+        const title = $('#edit-job-title').value;
+        const jobVal = $('#edit-job-job').value;
+        const content = $('#edit-job-content').value;
+        const deadline = $('#edit-job-deadline').value;
+
+        try {
+            const response = await fetch(`/api/jobs/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, job: jobVal, content, deadline })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('공고가 수정되었습니다.', 'success');
+                $('#admin-job-edit-page').classList.add('hidden');
+                $('#admin-view-jobs').classList.remove('hidden');
+                fetchJobs();
+            } else {
+                showToast(result.message || '공고 수정 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Update Job Error:', error);
+            showToast('서버 오류가 발생했습니다.', 'error');
+        }
+    });
+
+    initInterview(); // Ensure interview init is called if valid
+}
+
+function initInterview() {
+    // Placeholder if extra init needed
+}
+
+function renderAdminJobList() {
+    const tbody = $('#admin-job-table tbody');
+    tbody.innerHTML = '';
+    MOCK_DB.jobs.forEach(job => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${job.id}</td>
+            <td>${job.job || '-'}</td>
+            <td>${job.title}</td>
+            <td>${job.id_name || 'Unknown'}</td>
+            <td>${job.created_at}</td>
+            <td>${job.deadline}</td>
+            <td>
+                <button class="btn-small" onclick="openEditJob(${job.id})">수정</button>
+                <button class="btn-small btn-secondary" onclick="deleteJob(${job.id})">삭제</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function openEditJob(id) {
+    const job = MOCK_DB.jobs.find(j => j.id === id);
+    if (job) {
+        $('#edit-job-id').value = job.id;
+        $('#edit-job-title').value = job.title;
+        $('#edit-job-job').value = job.job || '';
+        $('#edit-job-content').value = job.content;
+        $('#edit-job-deadline').value = job.deadline;
+
+        $('#admin-view-jobs').classList.add('hidden');
+        $('#admin-job-edit-page').classList.remove('hidden');
+    }
+}
+
+function openEditJobPage(jobId) {
+    const job = MOCK_DB.jobs.find(j => j.id == jobId); // Loose equality for string/int match
+    if (!job) return;
+
+    $('#edit-job-id').value = job.id;
+    $('#edit-job-title').value = job.title;
+    $('#edit-job-content').value = job.content || '';
+    $('#edit-job-deadline').value = job.deadline;
+
+    $('#admin-view-jobs').classList.add('hidden');
+    $('#admin-job-edit-page').classList.remove('hidden');
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('정말 이 공고를 삭제하시겠습니까?')) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('공고가 삭제되었습니다.', 'success');
+            fetchJobs();
+        } else {
+            showToast(result.message || '공고 삭제 실패', 'error');
+        }
+    } catch (error) {
+        console.error('Delete Job Error:', error);
+        showToast('서버 오류가 발생했습니다.', 'error');
+    }
+}
+
+function renderAdminAppList() {
+    const tbody = $('#admin-app-table tbody');
+    tbody.innerHTML = '';
+    MOCK_DB.applications.forEach(app => {
+        const user = MOCK_DB.users.find(u => u.id === app.userId);
+        const job = MOCK_DB.jobs.find(j => j.id === app.jobId);
+
+        const avg = (app.scores.tech + app.scores.prob + app.scores.comm + app.scores.atti) / 4;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${user ? user.name : 'Unknown'}</td>
+            <td>${job ? job.title : 'Deleted Job'}</td>
+            <td>${avg.toFixed(1)}</td>
+            <td>${avg >= 80 ? 'Pass' : 'Fail'}</td>
+            <td><button class="btn-small">상세보기</button></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// --- Input Masking Utilities ---
+// Input Masking removed for split fields (handled by HTML maxlength)
+// Legacy support or specific masking can be re-added here if needed for other fields
+
+
+// --- Utilities ---
+function showToast(msg, type = 'info') {
+    const container = $('#toast-container');
+    const div = document.createElement('div');
+    div.className = `toast ${type}`;
+    div.textContent = msg;
+    container.appendChild(div);
+
+    // Auto remove
+    setTimeout(() => {
+        div.remove();
+    }, 3000);
+}
+
+// --- Audio Utilities ---
+
+// TTS
+function speakText(text, callback) {
+    if (!('speechSynthesis' in window)) {
+        console.warn("TTS not supported.");
+        if (callback) callback();
+        return;
+    }
+
+    // Stop previous
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ko-KR';
+    utterance.rate = 1.0;
+
+    // Voices check (optional)
+    const voices = window.speechSynthesis.getVoices();
+    // Try to find a Korean voice
+    const korVoice = voices.find(v => v.lang.includes('ko'));
+    if (korVoice) utterance.voice = korVoice;
+
+    utterance.onend = () => {
+        if (callback) callback();
+    };
+
+    window.speechSynthesis.speak(utterance);
+}
+
+// STT
+let recognitionInst = null;
+
+function startListening() {
+    $('#user-answer').value = ''; // Reset input
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        $('#user-answer').placeholder = "이 브라우저는 음성 인식을 지원하지 않습니다.";
+        return;
+    }
+
+    recognitionInst = new SpeechRecognition();
+    recognitionInst.lang = 'ko-KR';
+    recognitionInst.interimResults = true;
+    recognitionInst.continuous = true;
+
+    recognitionInst.onstart = () => {
+        $('#user-answer').placeholder = "듣고 있습니다... 답변해주세요.";
+        showToast("답변을 말씀해주세요 (음성 인식 중)", "info");
+    };
+
+    recognitionInst.onresult = (event) => {
+        const transcript = Array.from(event.results)
+            .map(result => result[0].transcript)
+            .join('');
+        $('#user-answer').value = transcript;
+    };
+
+    recognitionInst.onerror = (event) => {
+        console.error("STT Error:", event.error);
+    };
+
+    recognitionInst.start();
+}
+
+function stopListening() {
+    if (recognitionInst) {
+        recognitionInst.stop();
+        recognitionInst = null;
+    }
+}

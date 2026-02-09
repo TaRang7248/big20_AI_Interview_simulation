@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AI Interview Web</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto;
+            max-width: 760px;
+            margin: 24px auto;
+        }
+
+        .card {
+            border: 1px solid #ddd;
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .row {
+            display: flex;
+            gap: 8px;
+        }
+
+        input,
+        textarea,
+        button {
+            font-size: 14px;
+            padding: 10px;
+            border-radius: 10px;
+            border: 1px solid #ccc;
+            width: 100%;
+        }
+
+        button {
+            cursor: pointer;
+            width: auto;
+        }
+
+        .chat {
+            margin-top: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .msg {
+            padding: 10px 12px;
+            border-radius: 12px;
+        }
+
+        .ai {
+            background: #f4f6ff;
+            align-self: flex-start;
+        }
+
+        .user {
+            background: #f2f2f2;
+            align-self: flex-end;
+        }
+
+        small {
+            color: #666;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>AI Interview Web (HTML/JS)</h2>
+    <p><small>FastAPI 엔진(/start, /answer) 호출하는 “서비스 느낌” 프론트</small></p>
+
+    <div class="card">
+        <div class="row">
+            <input id="apiBase" value="http://127.0.0.1:8000" />
+            <button id="btnStart">Start</button>
+        </div>
+        <div class="row" style="margin-top:8px;">
+            <input id="firstQ" value="지원 직무의 특징과 역할에 대해 아는 대로 말해주세요! (700자)" />
+            <label style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
+                <input type="checkbox" id="useLlm" /> use_llm
+            </label>
+        </div>
+
+        <div style="margin-top:12px;">
+            <textarea id="answer" rows="3" placeholder="답변을 입력하고 Send를 누르세요."></textarea>
+            <div class="row" style="margin-top:8px;">
+                <button id="btnSend">Send</button>
+                <small id="status"></small>
+            </div>
+        </div>
+
+        <div class="chat" id="chat"></div>
+    </div>
+
+    <script>
+        let sessionId = null;
+
+        function addMsg(role, text) {
+            const chat = document.getElementById("chat");
+            const div = document.createElement("div");
+            div.className = `msg ${role}`;
+            div.textContent = text;
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        async function postJson(url, body) {
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
+            if (!res.ok) {
+                const t = await res.text();
+                throw new Error(t);
+            }
+            return res.json();
+        }
+
+        document.getElementById("btnStart").onclick = async () => {
+            const base = document.getElementById("apiBase").value.trim();
+            const firstQ = document.getElementById("firstQ").value.trim();
+            const useLlm = document.getElementById("useLlm").checked;
+            document.getElementById("status").textContent = "starting...";
+            try {
+                const data = await postJson(`${base}/start`, { first_question: firstQ, use_llm: useLlm });
+                sessionId = data.session_id;
+                document.getElementById("status").textContent = `session: ${sessionId}`;
+                document.getElementById("chat").innerHTML = "";
+                addMsg("ai", data.question);
+            } catch (e) {
+                document.getElementById("status").textContent = "error";
+                alert(e);
+            }
+        };
+
+        document.getElementById("btnSend").onclick = async () => {
+            if (!sessionId) return alert("먼저 Start를 누르세요.");
+            const base = document.getElementById("apiBase").value.trim();
+            const ans = document.getElementById("answer").value.trim();
+            if (!ans) return;
+            document.getElementById("answer").value = "";
+            addMsg("user", ans);
+            document.getElementById("status").textContent = "sending...";
+            try {
+                const data = await postJson(`${base}/answer`, { session_id: sessionId, answer: ans });
+                document.getElementById("status").textContent = `turn: ${data.turn}`;
+                addMsg("ai", data.question);
+            } catch (e) {
+                document.getElementById("status").textContent = "error";
+                alert(e);
+            }
+        };
+    </script>
+</body>
+
+</html>

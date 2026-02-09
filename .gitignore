@@ -1,10 +1,17 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
+*.py[cod]
 *$py.class
 big20_AI_Interview_simulation/
 # C extensions
 *.so
+
+# 개인 실험용 python 파일
+evaluate_and_fix_answers.py
+generate_answers.py
+# local data
+YYR/data/
 
 # Distribution / packaging
 .Python
@@ -148,6 +155,7 @@ ENV/
 env.bak/
 venv.bak/
 interview_env.bak/
+.env.example
 
 # Spyder project settings
 .spyderproject
@@ -219,3 +227,21 @@ storage/
 # gitkeep
 !data/.gitkeep
 !modules/.gitkeep
+
+# 모든 mp3 파일 무시
+*.mp3
+
+# 모든 영상 데이터 무시
+*.webm
+
+# Python
+*.pyc
+
+# Node (Frontend)
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+
+# Uploads
+uploads/
+*.pdf

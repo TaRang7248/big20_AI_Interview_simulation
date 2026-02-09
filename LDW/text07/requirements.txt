@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+openai
+sqlalchemy
+psycopg2-binary
+pgvector
+python-dotenv
+jinja2
+pyaudio
+websockets
+python-multipart
