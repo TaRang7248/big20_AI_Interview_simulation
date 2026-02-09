@@ -7,10 +7,9 @@ import shutil # 파일 저장용
 # 프로젝트 루트 경로 설정
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse
-from fastapi.middleware.cors import CORSMiddleware # <--- 이거 추가!
-from fastapi import Form  # [필수] Form 데이터 수신용
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_openai import ChatOpenAI
@@ -21,9 +20,10 @@ import json
 from YJH.agents.interview_graph import app as interview_graph
 from YJH.services.voice_service import transcribe_audio
 from YJH.services.tts_service import generate_audio
-from YJH.database import get_db, SessionLocal
+from YJH.database import get_db, SessionLocal, engine   # <--- engine 추가!
+from YJH import models                                 # <--- models 통째로 추가!
 # [수정] EvaluationReport 모델 추가 임포트
-from YJH.models import InterviewSession, Transcript, EvaluationReport
+from YJH.models import InterviewSession, Transcript, EvaluationReport, User # User 추가 확인!
 # [수정] 리포트 생성 서비스 추가 임포트
 from YJH.services.report_service import generate_interview_report
 # [추가] 비디오 면접(Video Interview)
@@ -31,6 +31,11 @@ from YJH.services.vision_service import analyze_face_emotion
 # [추가] 업로드 API 추가 및 RAG 연동 임포트
 from YJH.services.rag_service import process_resume_pdf, get_relevant_context
 from YJH.services.transcript_service import save_transcript # [★추가] 방금 만든 서비스 가져오기
+
+# ==========================================================
+# [★핵심] 서버가 켜질 때, DB에 없던 테이블(Users 등)을 자동 생성합니다.
+# ==========================================================
+models.Base.metadata.create_all(bind=engine)
 
 # 1. FastAPI 앱 초기화
 app = FastAPI(
@@ -283,30 +288,53 @@ async def create_report_endpoint(thread_id: str):
         report_json = json.loads(content)
 
         # ==========================================================
-        # [★수정됨] DB 컬럼 이름(summary)에 맞춰서 저장하기
+        # [★Final Complete] 상세 점수 추출 및 DB 저장
         # ==========================================================
         try:
+            # 1. 상세 점수 추출하기 (JSON -> 변수)
+            # 기본값은 0점으로 설정
+            tech_score = 0      # 직무 역량
+            soft_score = 0      # 의사소통/태도
+            problem_score = 0   # 문제 해결력
+
+            details_list = report_json.get("details", [])
+            
+            # 리스트를 돌면서 카테고리별 점수 찾기
+            for item in details_list:
+                category = item.get("category", "")
+                score = item.get("score", 0)
+                
+                if "직무" in category or "Hard" in category:
+                    tech_score = score
+                elif "의사소통" in category or "Soft" in category or "태도" in category:
+                    soft_score = score
+                elif "문제" in category or "Solving" in category:
+                    problem_score = score
+
+            # 2. DB 중복 확인 및 저장
             existing_report = db.query(EvaluationReport).filter(EvaluationReport.session_id == session.id).first()
             
             if not existing_report:
                 new_report = EvaluationReport(
                     session_id=session.id,
                     total_score=report_json.get("total_score", 0),
-                    
-                    # [수정] DB에는 'summary'라고 되어 있으므로 키 이름을 맞춰줍니다!
                     summary=report_json.get("feedback_summary", ""),
                     
-                    # (선택) 상세 점수가 DB에 technical_score 등으로 되어 있다면 매핑 필요
-                    # 만약 DB 컬럼이 details(JSON)라면 아래처럼 저장
-                    # details=json.dumps(report_json.get("details", [])) 
+                    # [핵심] 추출한 점수를 DB 컬럼에 매핑 (DB 컬럼명과 일치해야 함)
+                    technical_score=tech_score,
+                    communication_score=soft_score,
+                    problem_solving_score=problem_score
+                    
+                    # 만약 DB에 json_details 같은 텍스트 컬럼을 따로 만드셨다면 아래 주석 해제
+                    # details=json.dumps(details_list, ensure_ascii=False)
                 )
                 db.add(new_report)
                 db.commit()
-                print("💾 [DB] 면접 결과 리포트 저장 완료! (Success)")
+                print(f"💾 [DB] 리포트 저장 완료! (T:{tech_score}, C:{soft_score}, P:{problem_score})")
+                
         except Exception as db_err:
-            # 에러 메시지를 더 자세히 출력해서 원인을 찾기 쉽게 함
-            print(f"⚠️ 리포트 저장 실패: {db_err}")
-            # db.rollback() # 필요시 롤백
+            print(f"⚠️ 리포트 저장 중 오류 (컬럼명 확인 필요): {db_err}")
+            # db.rollback()
         # ==========================================================
 
         return report_json
@@ -315,6 +343,80 @@ async def create_report_endpoint(thread_id: str):
         import traceback
         traceback.print_exc()
         return {"total_score": 0, "feedback_summary": f"에러 발생: {str(e)}", "details": []}
+    finally:
+        db.close()
+
+
+
+# ==========================================================
+# [신규 기능] 회원가입/로그인 & 마이페이지 API
+# ==========================================================
+
+# 1. 로그인 요청 데이터 구조
+class LoginRequest(BaseModel):
+    username: str
+
+# 2. 간편 로그인 API (없으면 가입, 있으면 로그인)
+@app.post("/login")
+def login(req: LoginRequest):
+    print(f"🔑 로그인 요청: {req.username}")
+    db = SessionLocal()
+    try:
+        # 이미 있는 유저인지 확인
+        user = db.query(User).filter(User.username == req.username).first()
+        
+        if not user:
+            # 없으면 신규 가입
+            user = User(username=req.username)
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            print(f"🎉 [신규 회원 가입] {req.username} (ID: {user.id})")
+        else:
+            print(f"👋 [재방문] {req.username} (ID: {user.id})")
+            
+        # 프론트엔드에 user_id와 이름 반환
+        return {"user_id": user.id, "username": user.username}
+    except Exception as e:
+        print(f"❌ 로그인 에러: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+    finally:
+        db.close()
+
+# 3. 마이 페이지 API (내 면접 기록 조회)
+@app.get("/history/{user_id}")
+def get_user_history(user_id: int):
+    print(f"📂 기록 조회 요청: User ID {user_id}")
+    db = SessionLocal()
+    try:
+        # 내 면접 세션들을 최신순으로 조회
+        sessions = db.query(InterviewSession)\
+            .filter(InterviewSession.user_id == user_id)\
+            .order_by(InterviewSession.created_at.desc())\
+            .all()
+            
+        history_list = []
+        for s in sessions:
+            # 리포트가 생성된(완료된) 면접만 리스트에 추가
+            if s.report:
+                history_list.append({
+                    "session_id": s.id,
+                    "date": s.created_at.strftime("%Y-%m-%d %H:%M"),
+                    "total_score": s.report.total_score,
+                    "summary": s.report.summary[:60] + "..." if s.report.summary else "요약 없음", # 60자 미리보기
+                    # 상세 점수도 같이 보내주면 리스트에서 바로 볼 수 있음
+                    "scores": {
+                        "tech": s.report.technical_score,
+                        "comm": s.report.communication_score,
+                        "prob": s.report.problem_solving_score
+                    }
+                })
+        
+        print(f"✅ 조회 완료: 총 {len(history_list)}건")
+        return {"history": history_list}
+    except Exception as e:
+        print(f"❌ 기록 조회 에러: {e}")
+        return {"history": []}
     finally:
         db.close()
 
@@ -341,17 +443,21 @@ async def analyze_face_endpoint(file: UploadFile = File(...)):
 
 
 
-# [신규] 이력서 PDF 업로드 API
+# [수정됨] 이력서 업로드 API (User ID 연결 포함)
 @app.post("/upload/resume")
 async def upload_resume(
     file: UploadFile = File(...), 
-    thread_id: str = "voice_session_final_test"
+    thread_id: str = Form(...),  # [변경] 프론트엔드 FormData에서 받기 위해 Form(...) 사용
+    user_id: int = Form(...)     # [신규] 로그인한 유저 ID 받기 (필수!)
 ):
     """
-    PDF 이력서를 업로드하고 RAG용 벡터 DB를 생성합니다.
+    PDF 이력서를 업로드하고 RAG용 벡터 DB를 생성하며, 
+    DB에 면접 세션 정보(User ID 포함)를 기록합니다.
     """
+    print(f"📂 [이력서 업로드] Thread: {thread_id}, User ID: {user_id}")
+
     try:
-        # 1. 파일 임시 저장
+        # 1. 파일 임시 저장 (기존 로직 유지)
         upload_dir = "uploads"
         os.makedirs(upload_dir, exist_ok=True)
         file_path = os.path.join(upload_dir, f"{thread_id}_{file.filename}")
@@ -363,9 +469,40 @@ async def upload_resume(
         success = process_resume_pdf(thread_id, file_path)
         
         if not success:
-            raise HTTPException(status_code=500, detail="이력서 처리 중 오류 발생")
+            raise HTTPException(status_code=500, detail="이력서 RAG 처리 실패")
+
+        # ==========================================================
+        # 3. [핵심 추가] DB에 면접 세션 생성 (유저 연결)
+        # ==========================================================
+        db = SessionLocal()
+        try:
+            # 혹시 이미 등록된 세션인지 확인 (중복 방지)
+            existing_session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
             
-        return {"status": "success", "message": "이력서 분석 완료! 이제 맞춤형 질문이 가능합니다."}
+            if not existing_session:
+                new_session = InterviewSession(
+                    thread_id=thread_id,
+                    user_id=user_id,       # <--- 여기가 제일 중요합니다! (내 면접으로 등록)
+                    candidate_name="지원자", # (나중에 로그인 정보에서 가져올 수도 있음)
+                    status="in_progress"
+                )
+                db.add(new_session)
+                db.commit()
+                print(f"✅ [DB] 신규 면접 세션 생성 완료 (User: {user_id})")
+            else:
+                # 이미 있으면 user_id만 업데이트 (혹시 모르니)
+                existing_session.user_id = user_id
+                db.commit()
+                print(f"✅ [DB] 기존 세션 유저 정보 업데이트 (User: {user_id})")
+                
+        except Exception as db_e:
+            print(f"⚠️ DB 세션 저장 실패: {db_e}")
+            # DB 저장이 실패해도 면접은 진행되도록 여기서 에러를 raise하지는 않음 (선택사항)
+        finally:
+            db.close()
+        # ==========================================================
+            
+        return {"status": "success", "message": "이력서 분석 및 세션 등록 완료!"}
 
     except Exception as e:
         import traceback
