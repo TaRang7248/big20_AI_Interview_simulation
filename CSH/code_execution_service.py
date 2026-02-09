@@ -1027,6 +1027,22 @@ def create_coding_router():
         result = executor.execute(request.code, request.language, "")
         return result.dict()
     
+    @router.post("/submit")
+    async def submit_code(request: CodeExecutionRequest):
+        """코드 제출 (실행 + 분석 + 테스트케이스 평가)"""
+        if request.language.lower() not in SUPPORTED_LANGUAGES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"지원하지 않는 언어입니다. 지원 언어: {SUPPORTED_LANGUAGES}"
+            )
+        result = await service.run_and_analyze(
+            code=request.code,
+            language=request.language,
+            problem_id=request.problem_id,
+            custom_test_cases=request.test_cases
+        )
+        return result
+    
     @router.get("/templates/{language}")
     async def get_template(language: str, problem_id: Optional[str] = None):
         """언어별 코드 템플릿"""

@@ -357,7 +357,7 @@ def create_tts_router():
     from fastapi.responses import FileResponse, StreamingResponse
     from pydantic import BaseModel
     
-    router = APIRouter(prefix="/tts", tags=["TTS"])
+    router = APIRouter(prefix="/api/tts", tags=["TTS"])
     interviewer_voice = HumeInterviewerVoice()
     
     class TTSRequest(BaseModel):

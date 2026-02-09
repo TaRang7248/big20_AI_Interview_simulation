@@ -250,17 +250,9 @@ function WhiteboardPage() {
     if (!cvs) return;
     setAnalyzing(true);
     try {
-      const blob = await new Promise<Blob>((res, rej) => cvs.toBlob(b => b ? res(b) : rej("toBlob failed"), "image/png"));
-      const formData = new FormData();
-      formData.append("image", blob, "whiteboard.png");
-      if (sessionId) formData.append("session_id", sessionId);
-
-      const resp = await fetch("/api/whiteboard/analyze", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${sessionStorage.getItem("access_token") || ""}` },
-        body: formData,
-      });
-      const data = await resp.json();
+      // Canvas → Base64 변환
+      const base64 = cvs.toDataURL("image/png").split(",")[1];
+      const data = await whiteboardApi.analyze(base64, sessionId || "");
       setAnalysisResult(data);
     } catch {
       setAnalysisResult({ error: "분석에 실패했습니다." });
