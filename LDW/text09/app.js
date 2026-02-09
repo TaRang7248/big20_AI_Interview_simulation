@@ -282,6 +282,64 @@ function initAuth() {
         goHome();
     });
 
+    // Password Change Button (in My Info)
+    $('#btn-change-pw').addEventListener('click', () => {
+        $('#new-pw').value = '';
+        $('#confirm-new-pw').value = '';
+        navigateTo('password-change-page');
+    });
+
+    // Password Change Cancel
+    $('#btn-cancel-pw-change').addEventListener('click', () => {
+        navigateTo('myinfo-page');
+    });
+
+    // Password Change Submit
+    $('#password-change-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newPw = $('#new-pw').value;
+        const confirmPw = $('#confirm-new-pw').value;
+
+        if (newPw !== confirmPw) {
+            showToast('비밀번호가 일치하지 않습니다.', 'error');
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/change-password', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: AppState.currentUser.id,
+                    new_pw: newPw
+                })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('비밀번호가 변경되었습니다.', 'success');
+                AppState.tempPassword = null; // Clear temp password
+
+                // Option: Logout or Go Home. 
+                // Let's go to Home as per typical flow, or maybe Logout for security.
+                // Request didn't specify, but "Moving to Change Password Page" imply flow.
+                // Let's go to Login page to force re-login with new PW is safest.
+                // But user might find it annoying. Let's go to Home.
+                // Actually, let's follow the standard "Cancel" behavior which goes to Home/Dashboard.
+                // Wait, "Cancel" goes to My Info page according to logic above.
+                // "Change Complete" button.. let's go to Home.
+                setTimeout(() => {
+                    goHome();
+                }, 1000);
+            } else {
+                showToast(result.message || '비밀번호 변경 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Change Password Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
+        }
+    });
+
     function goHome() {
         if (AppState.currentUser && AppState.currentUser.type === 'admin') {
             navigateTo('admin-dashboard-page');

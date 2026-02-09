@@ -172,6 +172,28 @@ def update_user_info(id):
     finally:
         if conn: conn.close()
 
+@app.route('/api/change-password', methods=['POST'])
+def change_password():
+    data = request.json
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Update Password
+        c.execute('UPDATE users SET pw = ? WHERE id = ?', (data['new_pw'], data['id']))
+        conn.commit()
+        
+        if c.rowcount > 0:
+            return jsonify({'success': True, 'message': '비밀번호가 변경되었습니다.'})
+        else:
+            return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
+
+    except Exception as e:
+        print(f"Change Password Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
 import webbrowser
 from threading import Timer
 
