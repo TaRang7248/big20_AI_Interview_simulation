@@ -105,7 +105,8 @@ if __name__ == '__main__':
     init_db()
     
     def open_browser():
-        webbrowser.open_new("http://localhost:5000/")
+        if not os.environ.get("WERKZEUG_RUN_MAIN"):
+            webbrowser.open_new("http://localhost:5000/")
 
     Timer(1, open_browser).start()
     print("Serving on http://localhost:5000")
