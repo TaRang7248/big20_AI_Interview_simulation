@@ -209,11 +209,18 @@ body {
 .form-group input[type="text"],
 .form-group input[type="password"],
 .form-group input[type="email"],
-.form-group input[type="tel"] {
+.form-group input[type="tel"],
+.form-group textarea {
     width: 100%;
     padding: 10px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
+    font-family: inherit; /* Ensure font consistency */
+}
+
+.form-group textarea {
+    resize: vertical; /* Allow vertical resizing only */
+    min-height: 150px; /* Default height for better UX */
 }
 
 .auth-links {
