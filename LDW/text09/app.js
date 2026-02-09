@@ -153,28 +153,58 @@ function initAuth() {
     });
 
     // My Info Link
-    $('#link-my-info').addEventListener('click', () => {
+    $('#link-my-info').addEventListener('click', async () => {
         if (AppState.currentUser) {
-            $('#edit-email').value = AppState.currentUser.email || '';
-            $('#edit-phone').value = AppState.currentUser.phone || '';
-            navigateTo('myinfo-page');
+            try {
+                const response = await fetch(`/api/user/${AppState.currentUser.id}`);
+                const result = await response.json();
+                if (result.success) {
+                    AppState.currentUser = result.user; // Update local state
+                    $('#edit-email').value = result.user.email || '';
+                    $('#edit-phone').value = result.user.phone || '';
+                    navigateTo('myinfo-page');
+                } else {
+                    showToast('회원 정보를 불러오는데 실패했습니다.', 'error');
+                }
+            } catch (error) {
+                console.error('Fetch User Info Error:', error);
+                showToast('서버 연결에 실패했습니다.', 'error');
+            }
         }
     });
 
     // My Info Update
-    $('#myinfo-form').addEventListener('submit', (e) => {
+    $('#myinfo-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const confirmPw = $('#confirm-pw').value;
-        if (confirmPw !== AppState.currentUser.pw) {
-            showToast('비밀번호가 일치하지 않습니다.', 'error');
-            return;
+        const newEmail = $('#edit-email').value;
+        const newPhone = $('#edit-phone').value;
+
+        try {
+            const response = await fetch(`/api/user/${AppState.currentUser.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pw: confirmPw,
+                    email: newEmail,
+                    phone: newPhone
+                })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                // Update local state partially or refetch
+                AppState.currentUser.email = newEmail;
+                AppState.currentUser.phone = newPhone;
+                showToast('정보가 수정되었습니다.', 'success');
+                $('#confirm-pw').value = ''; // clear password input
+            } else {
+                showToast(result.message || '정보 수정 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Update User Info Error:', error);
+            showToast('서버 연결에 실패했습니다.', 'error');
         }
-        // Update
-        const target = MOCK_DB.users.find(u => u.id === AppState.currentUser.id);
-        target.email = $('#edit-email').value;
-        target.phone = $('#edit-phone').value;
-        AppState.currentUser = target; // sync
-        showToast('정보가 수정되었습니다.', 'success');
     });
 
     // My Info Cancel
