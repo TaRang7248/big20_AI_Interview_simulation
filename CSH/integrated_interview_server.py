@@ -34,6 +34,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import shutil
+import subprocess
+import httpx
 
 # WebRTC
 from aiortc import RTCPeerConnection, RTCSessionDescription
@@ -210,6 +212,51 @@ app.add_middleware(
 static_dir = os.path.join(current_dir, "static")
 if os.path.exists(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+# ========== Next.js 프론트엔드 프록시 설정 ==========
+NEXTJS_URL = os.getenv("NEXTJS_URL", "http://localhost:3000")
+_nextjs_process = None  # Next.js 개발 서버 프로세스
+
+async def _proxy_to_nextjs(request: Request, path: str = ""):
+    """Next.js 개발 서버로 요청을 프록시합니다."""
+    target_url = f"{NEXTJS_URL}/{path}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(target_url, headers=dict(request.headers))
+            return HTMLResponse(content=resp.text, status_code=resp.status_code)
+    except httpx.ConnectError:
+        # Next.js 서버가 아직 시작되지 않았을 때 안내 페이지
+        return HTMLResponse(content=f"""
+        <!DOCTYPE html>
+        <html lang="ko">
+        <head><meta charset="utf-8"><title>Next.js 서버 대기 중</title>
+        <style>
+            body {{ font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center;
+                   align-items: center; min-height: 100vh; background: #0a0a0a; color: #ededed; margin: 0; }}
+            .card {{ background: #1a1a2e; padding: 3rem; border-radius: 16px; text-align: center;
+                     box-shadow: 0 8px 32px rgba(0,0,0,0.3); max-width: 500px; }}
+            h2 {{ color: #60a5fa; margin-bottom: 1rem; }}
+            p {{ color: #9ca3af; line-height: 1.6; }}
+            code {{ background: #374151; padding: 2px 8px; border-radius: 4px; font-size: 0.9em; }}
+            .spinner {{ width: 40px; height: 40px; border: 4px solid #374151; border-top-color: #60a5fa;
+                       border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 1.5rem; }}
+            @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+        </style>
+        <meta http-equiv="refresh" content="3">
+        </head>
+        <body>
+            <div class="card">
+                <div class="spinner"></div>
+                <h2>Next.js 프론트엔드 시작 중...</h2>
+                <p>Next.js 개발 서버가 아직 준비되지 않았습니다.<br>
+                <code>cd CSH/frontend && npm run dev</code> 를 실행하거나<br>
+                잠시 후 자동으로 새로고침됩니다.</p>
+            </div>
+        </body>
+        </html>
+        """, status_code=503)
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>프록시 오류</h1><p>{e}</p>", status_code=502)
 
 # ========== 외부 서비스 임포트 ==========
 # TTS 서비스
@@ -1812,1142 +1859,56 @@ class UserLoginResponse(BaseModel):
 # ========== API 엔드포인트 ==========
 
 @app.get("/", response_class=HTMLResponse)
-async def index():
-    """메인 페이지"""
-    return """
-    <!DOCTYPE html>
-    <html lang="ko">
-    <head>
-        <meta charset="utf-8">
-        <title>AI 모의면접 시스템</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { 
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-                min-height: 100vh;
-                color: #fff;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-            }
-            .container {
-                text-align: center;
-                padding: 40px;
-                max-width: 800px;
-            }
-            h1 {
-                font-size: 48px;
-                background: linear-gradient(90deg, #00d9ff, #00ff88);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-                margin-bottom: 20px;
-            }
-            p { color: #8892b0; margin-bottom: 40px; font-size: 18px; }
-            .main-cta {
-                display: block;
-                background: linear-gradient(135deg, #00d9ff, #00ff88);
-                color: #1a1a2e;
-                text-decoration: none;
-                font-size: 24px;
-                font-weight: 700;
-                padding: 24px 48px;
-                border-radius: 16px;
-                margin-bottom: 40px;
-                transition: all 0.3s;
-                box-shadow: 0 10px 40px rgba(0,217,255,0.3);
-            }
-            .main-cta:hover {
-                transform: translateY(-5px);
-                box-shadow: 0 20px 60px rgba(0,217,255,0.4);
-            }
-            .features {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 16px;
-                margin-bottom: 30px;
-            }
-            .feature {
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 12px;
-                padding: 20px;
-            }
-            .feature .icon { font-size: 32px; margin-bottom: 10px; }
-            .feature h4 { font-size: 14px; margin-bottom: 5px; }
-            .feature p { font-size: 12px; color: #8892b0; margin: 0; }
-            .sub-links {
-                display: flex;
-                gap: 16px;
-                justify-content: center;
-                margin-top: 30px;
-            }
-            .sub-link {
-                color: #8892b0;
-                text-decoration: none;
-                font-size: 14px;
-                padding: 8px 16px;
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 8px;
-                transition: all 0.3s;
-            }
-            .sub-link:hover { border-color: #00d9ff; color: #00d9ff; }
-            .status { margin-top: 30px; font-size: 14px; color: #666; }
-            .status span { color: #00ff88; }
-            
-            /* 회원가입/로그인 버튼 */
-            .auth-buttons {
-                display: flex;
-                gap: 12px;
-                justify-content: center;
-                margin-bottom: 30px;
-            }
-            .auth-btn {
-                background: rgba(255,255,255,0.1);
-                border: 1px solid rgba(255,255,255,0.2);
-                color: #fff;
-                padding: 12px 24px;
-                border-radius: 8px;
-                cursor: pointer;
-                font-size: 16px;
-                transition: all 0.3s;
-            }
-            .auth-btn:hover {
-                background: rgba(255,255,255,0.2);
-                border-color: #00d9ff;
-            }
-            .auth-btn.primary {
-                background: linear-gradient(135deg, #00d9ff, #00ff88);
-                color: #1a1a2e;
-                border: none;
-                font-weight: 600;
-            }
-            
-            /* 모달 스타일 */
-            .modal-overlay {
-                display: none;
-                position: fixed;
-                top: 0; left: 0; right: 0; bottom: 0;
-                background: rgba(0,0,0,0.8);
-                z-index: 1000;
-                align-items: center;
-                justify-content: center;
-            }
-            .modal-overlay.active { display: flex; }
-            .modal {
-                background: #1a1a2e;
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 16px;
-                padding: 32px;
-                width: 100%;
-                max-width: 450px;
-                box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-            }
-            .modal h2 {
-                font-size: 24px;
-                margin-bottom: 24px;
-                text-align: center;
-                background: linear-gradient(90deg, #00d9ff, #00ff88);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-            }
-            .form-group {
-                margin-bottom: 16px;
-            }
-            .form-group label {
-                display: block;
-                margin-bottom: 6px;
-                color: #8892b0;
-                font-size: 14px;
-            }
-            .form-group input, .form-group select {
-                width: 100%;
-                padding: 12px 16px;
-                background: rgba(255,255,255,0.05);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 8px;
-                color: #fff;
-                font-size: 16px;
-                transition: border-color 0.3s;
-            }
-            .form-group input:focus, .form-group select:focus {
-                outline: none;
-                border-color: #00d9ff;
-            }
-            .form-group select option {
-                background: #1a1a2e;
-                color: #fff;
-            }
-            .modal-buttons {
-                display: flex;
-                gap: 12px;
-                margin-top: 24px;
-            }
-            .modal-btn {
-                flex: 1;
-                padding: 14px;
-                border-radius: 8px;
-                font-size: 16px;
-                cursor: pointer;
-                transition: all 0.3s;
-                border: none;
-            }
-            .modal-btn.cancel {
-                background: rgba(255,255,255,0.1);
-                color: #8892b0;
-            }
-            .modal-btn.submit {
-                background: linear-gradient(135deg, #00d9ff, #00ff88);
-                color: #1a1a2e;
-                font-weight: 600;
-            }
-            .modal-btn:hover { transform: translateY(-2px); }
-            
-            /* 소셜 로그인 버튼 */
-            .social-login {
-                margin-top: 20px;
-                padding-top: 20px;
-                border-top: 1px solid rgba(255,255,255,0.1);
-            }
-            .social-login p {
-                text-align: center;
-                color: #8892b0;
-                font-size: 14px;
-                margin-bottom: 12px;
-            }
-            .social-buttons {
-                display: flex;
-                gap: 10px;
-                justify-content: center;
-            }
-            .social-btn {
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                gap: 8px;
-                padding: 12px 20px;
-                border-radius: 8px;
-                border: none;
-                cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
-                transition: all 0.3s;
-                flex: 1;
-                max-width: 120px;
-            }
-            .social-btn:hover { transform: translateY(-2px); opacity: 0.9; }
-            .social-btn.kakao {
-                background: #FEE500;
-                color: #000;
-            }
-            .social-btn.google {
-                background: #fff;
-                color: #333;
-            }
-            .social-btn.naver {
-                background: #03C75A;
-                color: #fff;
-            }
-            .social-btn svg {
-                width: 18px;
-                height: 18px;
-            }
-            
-            .user-info {
-                background: rgba(0,255,136,0.1);
-                border: 1px solid rgba(0,255,136,0.3);
-                border-radius: 8px;
-                padding: 12px 16px;
-                margin-bottom: 20px;
-                display: none;
-                justify-content: space-between;
-                align-items: center;
-            }
-            .user-info.active { display: flex; }
-            .user-info .welcome-text { color: #fff; }
-            .user-info span span { color: #00ff88; font-weight: 600; }
-            .logout-btn {
-                background: rgba(244,67,54,0.2);
-                border: 1px solid rgba(244,67,54,0.5);
-                color: #ff6b6b;
-                padding: 8px 16px;
-                border-radius: 6px;
-                cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
-                transition: all 0.3s;
-            }
-            .logout-btn:hover {
-                background: rgba(244,67,54,0.4);
-                border-color: #ff6b6b;
-            }
-            .user-buttons {
-                display: flex;
-                gap: 10px;
-            }
-            .edit-btn {
-                background: rgba(0,217,255,0.2);
-                border: 1px solid rgba(0,217,255,0.5);
-                color: #00d9ff;
-                padding: 8px 16px;
-                border-radius: 6px;
-                cursor: pointer;
-                font-size: 14px;
-                font-weight: 600;
-                transition: all 0.3s;
-            }
-            .edit-btn:hover {
-                background: rgba(0,217,255,0.4);
-                border-color: #00d9ff;
-            }
-            .error-msg {
-                color: #ff6b6b;
-                font-size: 14px;
-                margin-top: 8px;
-                display: none;
-            }
-            .error-msg.active { display: block; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🎯 AI 모의면접 시스템</h1>
-            <p>LLM 기반 면접 평가 + 실시간 감정 분석을 통한 스마트 면접 트레이닝</p>
-            
-            <!-- 사용자 정보 표시 -->
-            <div class="user-info" id="userInfo">
-                <span class="welcome-text">👋 환영합니다, <span id="userName"></span>님!</span>
-                <div class="user-buttons">
-                    <button class="edit-btn" onclick="showEditModal()">회원정보 수정</button>
-                    <button class="logout-btn" onclick="logout()">로그아웃</button>
-                </div>
-            </div>
-            
-            <!-- 회원가입/로그인 버튼 -->
-            <div class="auth-buttons" id="authButtons">
-                <button class="auth-btn" onclick="showLoginModal()">로그인</button>
-                <button class="auth-btn primary" onclick="showRegisterModal()">회원가입</button>
-            </div>
-            
-            <a href="/static/integrated_interview.html" class="main-cta" id="startBtn">
-                🎥 AI 화상 면접 시작하기
-            </a>
-            
-            <div class="features">
-                <div class="feature">
-                    <div class="icon">📄</div>
-                    <h4>이력서 RAG</h4>
-                    <p>이력서 기반 맞춤 질문</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">🎤</div>
-                    <h4>TTS 음성</h4>
-                    <p>자연스러운 AI 면접관</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">📊</div>
-                    <h4>실시간 평가</h4>
-                    <p>LLM 기반 답변 분석</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">😊</div>
-                    <h4>감정 분석</h4>
-                    <p>표정 기반 감정 측정</p>
-                </div>
-                <div class="feature">
-                    <div class="icon">💻</div>
-                    <h4>코딩 테스트</h4>
-                    <p>면접 후 자동 진행</p>
-                </div>
-            </div>
-            
-            <div class="status">
-                서비스 상태: 
-                <span>LLM """ + ("✅" if LLM_AVAILABLE else "❌") + """</span> | 
-                <span>TTS """ + ("✅" if TTS_AVAILABLE else "❌") + """</span> | 
-                <span>RAG """ + ("✅" if RAG_AVAILABLE else "❌") + """</span> | 
-                <span>감정분석 """ + ("✅" if EMOTION_AVAILABLE else "❌") + """</span> |
-                <span>코딩테스트 """ + ("✅" if CODING_TEST_AVAILABLE else "❌") + """</span>
-            </div>
-        </div>
-        
-        <!-- 회원가입 모달 -->
-        <div class="modal-overlay" id="registerModal">
-            <div class="modal">
-                <h2>📝 회원가입</h2>
-                <form id="registerForm" onsubmit="handleRegister(event)">
-                    <div class="form-group">
-                        <label>이메일 *</label>
-                        <input type="email" id="regEmail" placeholder="example@email.com" required>
-                        <div id="emailCheckResult" style="margin-top:4px; font-size:0.85em; display:none;"></div>
-                    </div>
-                    <div class="form-group">
-                        <label>비밀번호 *</label>
-                        <input type="password" id="regPassword" placeholder="8자 이상 입력" minlength="8" required>
-                    </div>
-                    <div class="form-group">
-                        <label>비밀번호 확인 *</label>
-                        <input type="password" id="regPasswordConfirm" placeholder="비밀번호 재입력" required>
-                    </div>
-                    <div class="form-group">
-                        <label>이름 *</label>
-                        <input type="text" id="regName" placeholder="홍길동" required>
-                    </div>
-                    <div class="form-group">
-                        <label>생년월일 *</label>
-                        <input type="date" id="regBirthDate" required>
-                    </div>
-                    <div class="form-group">
-                        <label>주소 *</label>
-                        <input type="text" id="regAddress" placeholder="서울시 강남구..." required>
-                    </div>
-                    <div class="form-group">
-                        <label>성별 *</label>
-                        <select id="regGender" required>
-                            <option value="">선택해주세요</option>
-                            <option value="male">남성</option>
-                            <option value="female">여성</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>회원 유형 *</label>
-                        <select id="regRole" required>
-                            <option value="">선택해주세요</option>
-                            <option value="candidate">지원자</option>
-                            <option value="recruiter">면접관</option>
-                        </select>
-                    </div>
-                    <div class="error-msg" id="registerError"></div>
-                    <div class="modal-buttons">
-                        <button type="button" class="modal-btn cancel" onclick="closeModals()">취소</button>
-                        <button type="submit" class="modal-btn submit">가입하기</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        
-        <!-- 로그인 모달 -->
-        <div class="modal-overlay" id="loginModal">
-            <div class="modal">
-                <h2>🔐 로그인</h2>
-                <form id="loginForm" onsubmit="handleLogin(event)">
-                    <div class="form-group">
-                        <label>이메일</label>
-                        <input type="email" id="loginEmail" placeholder="example@email.com" required>
-                    </div>
-                    <div class="form-group">
-                        <label>비밀번호</label>
-                        <input type="password" id="loginPassword" placeholder="비밀번호 입력" required>
-                    </div>
-                    <div class="error-msg" id="loginError"></div>
-                    <div class="modal-buttons">
-                        <button type="button" class="modal-btn cancel" onclick="closeModals()">취소</button>
-                        <button type="submit" class="modal-btn submit">로그인</button>
-                    </div>
-                </form>
-                
-                <!-- 소셜 로그인 -->
-                <div class="social-login">
-                    <p>간편 로그인</p>
-                    <div class="social-buttons">
-                        <button class="social-btn kakao" onclick="socialLogin('kakao')">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3C6.48 3 2 6.58 2 11c0 2.83 1.89 5.31 4.7 6.71l-.96 3.57c-.09.35.27.65.58.48l4.24-2.54c.47.05.95.08 1.44.08 5.52 0 10-3.58 10-8S17.52 3 12 3z"/></svg>
-                            카카오
-                        </button>
-                        <button class="social-btn google" onclick="socialLogin('google')">
-                            <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-                            구글
-                        </button>
-                        <button class="social-btn naver" onclick="socialLogin('naver')">
-                            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.273 12.845L7.376 0H0v24h7.727V11.155L16.624 24H24V0h-7.727z"/></svg>
-                            네이버
-                        </button>
-                    </div>
-                </div>
-                
-                <p style="text-align: center; margin-top: 16px; color: #8892b0; font-size: 14px;">
-                    계정이 없으신가요? <a href="#" onclick="showRegisterModal()" style="color: #00d9ff;">회원가입</a>
-                </p>
-                <p style="text-align: center; margin-top: 8px; color: #8892b0; font-size: 13px;">
-                    <a href="#" onclick="showFindPasswordModal()" style="color: #ffc107;">비밀번호를 잊으셨나요?</a>
-                </p>
-            </div>
-        </div>
-        
-        <!-- 비밀번호 찾기 모달 -->
-        <div class="modal-overlay" id="findPasswordModal">
-            <div class="modal">
-                <h2>🔑 비밀번호 찾기</h2>
-                
-                <!-- Step 1: 본인 확인 -->
-                <div id="findPwStep1">
-                    <p style="color: #8892b0; margin-bottom: 20px; font-size: 14px;">
-                        가입 시 등록한 정보를 입력해주세요.
-                    </p>
-                    <form id="findPasswordForm" onsubmit="handleVerifyIdentity(event)">
-                        <div class="form-group">
-                            <label>이메일</label>
-                            <input type="email" id="findPwEmail" placeholder="example@email.com" required>
-                        </div>
-                        <div class="form-group">
-                            <label>이름</label>
-                            <input type="text" id="findPwName" placeholder="가입 시 등록한 이름" required>
-                        </div>
-                        <div class="form-group">
-                            <label>생년월일</label>
-                            <input type="date" id="findPwBirthDate" required>
-                        </div>
-                        <div class="error-msg" id="findPwError"></div>
-                        <div class="modal-buttons">
-                            <button type="button" class="modal-btn cancel" onclick="closeFindPasswordModal()">취소</button>
-                            <button type="submit" class="modal-btn submit">본인 확인</button>
-                        </div>
-                    </form>
-                </div>
-                
-                <!-- Step 2: 새 비밀번호 설정 -->
-                <div id="findPwStep2" style="display: none;">
-                    <p style="color: #00ff88; margin-bottom: 20px; font-size: 14px;">
-                        ✅ 본인 확인 완료! 새 비밀번호를 설정해주세요.
-                    </p>
-                    <form id="resetPasswordForm" onsubmit="handleResetPassword(event)">
-                        <div class="form-group">
-                            <label>새 비밀번호</label>
-                            <input type="password" id="newPassword" placeholder="8자 이상" required minlength="8">
-                        </div>
-                        <div class="form-group">
-                            <label>새 비밀번호 확인</label>
-                            <input type="password" id="newPasswordConfirm" placeholder="비밀번호 재입력" required>
-                        </div>
-                        <div class="error-msg" id="resetPwError"></div>
-                        <div class="modal-buttons">
-                            <button type="button" class="modal-btn cancel" onclick="closeFindPasswordModal()">취소</button>
-                            <button type="submit" class="modal-btn submit">비밀번호 변경</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-        </div>
-        
-        <!-- 회원정보 수정 모달 -->
-        <div class="modal-overlay" id="editModal">
-            <div class="modal">
-                <h2>✏️ 회원정보 수정</h2>
-                <form id="editForm" onsubmit="handleEditProfile(event)">
-                    <div class="form-group">
-                        <label>이메일 (수정 불가)</label>
-                        <input type="email" id="editEmail" disabled style="background: rgba(255,255,255,0.05); color: #8892b0;">
-                    </div>
-                    <div class="form-group">
-                        <label>이름</label>
-                        <input type="text" id="editName" placeholder="이름" required>
-                    </div>
-                    <div class="form-group">
-                        <label>생년월일</label>
-                        <input type="date" id="editBirthDate">
-                    </div>
-                    <div class="form-group">
-                        <label>주소</label>
-                        <input type="text" id="editAddress" placeholder="주소">
-                    </div>
-                    <div class="form-group">
-                        <label>성별</label>
-                        <select id="editGender">
-                            <option value="">선택해주세요</option>
-                            <option value="male">남성</option>
-                            <option value="female">여성</option>
-                        </select>
-                    </div>
-                    <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
-                    <p style="color: #8892b0; font-size: 14px; margin-bottom: 15px;">비밀번호 변경 (선택사항)</p>
-                    <div class="form-group">
-                        <label>현재 비밀번호</label>
-                        <input type="password" id="editCurrentPassword" placeholder="현재 비밀번호 입력">
-                    </div>
-                    <div class="form-group">
-                        <label>새 비밀번호</label>
-                        <input type="password" id="editNewPassword" placeholder="새 비밀번호 (8자 이상)" minlength="8">
-                    </div>
-                    <div class="form-group">
-                        <label>새 비밀번호 확인</label>
-                        <input type="password" id="editNewPasswordConfirm" placeholder="새 비밀번호 재입력">
-                    </div>
-                    <div class="error-msg" id="editError"></div>
-                    <div class="modal-buttons">
-                        <button type="button" class="modal-btn cancel" onclick="closeEditModal()">취소</button>
-                        <button type="submit" class="modal-btn submit">저장</button>
-                    </div>
-                </form>
-            </div>
-        </div>
-        
-        <script>
-            // 현재 로그인된 사용자
-            let currentUser = null;
-            
-            // ========== JWT 토큰 인증 헬퍼 ==========
-            function getAuthHeaders() {
-                const token = sessionStorage.getItem('access_token');
-                const headers = { 'Content-Type': 'application/json' };
-                if (token) {
-                    headers['Authorization'] = 'Bearer ' + token;
-                }
-                return headers;
-            }
-            
-            function getAuthHeadersOnly() {
-                const token = sessionStorage.getItem('access_token');
-                if (token) {
-                    return { 'Authorization': 'Bearer ' + token };
-                }
-                return {};
-            }
-            
-            // 페이지 로드 시 세션 확인
-            // sessionStorage 사용 - 브라우저/탭 종료 시 자동 로그아웃
-            window.onload = function() {
-                const savedUser = sessionStorage.getItem('interview_user');
-                if (savedUser) {
-                    currentUser = JSON.parse(savedUser);
-                    // 이미 로그인된 상태면 대시보드로 이동
-                    window.location.href = '/dashboard';
-                    return;
-                }
-            };
-            
-            function showRegisterModal() {
-                closeModals();
-                document.getElementById('registerModal').classList.add('active');
-            }
-            
-            function showLoginModal() {
-                closeModals();
-                document.getElementById('loginModal').classList.add('active');
-            }
-            
-            function showEditModal() {
-                if (!currentUser) {
-                    alert('로그인이 필요합니다.');
-                    return;
-                }
-                // 현재 사용자 정보로 폼 채우기
-                document.getElementById('editEmail').value = currentUser.email || '';
-                document.getElementById('editName').value = currentUser.name || '';
-                document.getElementById('editBirthDate').value = currentUser.birth_date || '';
-                document.getElementById('editAddress').value = currentUser.address || '';
-                document.getElementById('editGender').value = currentUser.gender || '';
-                document.getElementById('editCurrentPassword').value = '';
-                document.getElementById('editNewPassword').value = '';
-                document.getElementById('editNewPasswordConfirm').value = '';
-                document.getElementById('editError').classList.remove('active');
-                document.getElementById('editModal').classList.add('active');
-            }
-            
-            function closeEditModal() {
-                document.getElementById('editModal').classList.remove('active');
-                document.getElementById('editError').classList.remove('active');
-            }
-            
-            async function handleEditProfile(e) {
-                e.preventDefault();
-                const errorEl = document.getElementById('editError');
-                errorEl.classList.remove('active');
-                
-                const newPassword = document.getElementById('editNewPassword').value;
-                const newPasswordConfirm = document.getElementById('editNewPasswordConfirm').value;
-                const currentPassword = document.getElementById('editCurrentPassword').value;
-                
-                // 비밀번호 변경 시 검증
-                if (newPassword || newPasswordConfirm || currentPassword) {
-                    if (!currentPassword) {
-                        errorEl.textContent = '비밀번호 변경 시 현재 비밀번호를 입력해주세요.';
-                        errorEl.classList.add('active');
-                        return;
-                    }
-                    if (newPassword !== newPasswordConfirm) {
-                        errorEl.textContent = '새 비밀번호가 일치하지 않습니다.';
-                        errorEl.classList.add('active');
-                        return;
-                    }
-                    if (newPassword.length < 8) {
-                        errorEl.textContent = '새 비밀번호는 8자 이상이어야 합니다.';
-                        errorEl.classList.add('active');
-                        return;
-                    }
-                }
-                
-                const data = {
-                    email: currentUser.email,
-                    name: document.getElementById('editName').value,
-                    birth_date: document.getElementById('editBirthDate').value,
-                    address: document.getElementById('editAddress').value,
-                    gender: document.getElementById('editGender').value
-                };
-                
-                if (newPassword && currentPassword) {
-                    data.current_password = currentPassword;
-                    data.new_password = newPassword;
-                }
-                
-                try {
-                    const response = await fetch('/api/auth/user/update', {
-                        method: 'PUT',
-                        headers: getAuthHeaders(),
-                        body: JSON.stringify(data)
-                    });
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        // 세션 스토리지 업데이트 (브라우저 종료 시 자동 삭제)
-                        currentUser = { ...currentUser, ...data };
-                        delete currentUser.current_password;
-                        delete currentUser.new_password;
-                        sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
-                        document.getElementById('userName').textContent = currentUser.name;
-                        alert('회원정보가 수정되었습니다.');
-                        closeEditModal();
-                    } else {
-                        errorEl.textContent = result.message;
-                        errorEl.classList.add('active');
-                    }
-                } catch (err) {
-                    errorEl.textContent = '서버 오류가 발생했습니다.';
-                    errorEl.classList.add('active');
-                }
-            }
-            
-            function closeModals() {
-                document.getElementById('registerModal').classList.remove('active');
-                document.getElementById('loginModal').classList.remove('active');
-                document.getElementById('editModal').classList.remove('active');
-                document.getElementById('findPasswordModal').classList.remove('active');
-                document.getElementById('registerError').classList.remove('active');
-                document.getElementById('loginError').classList.remove('active');
-            }
-            
-            // ========== 비밀번호 찾기 ==========
-            let findPwVerifiedEmail = '';
-            let findPwVerifiedName = '';
-            let findPwVerifiedBirth = '';
-            
-            function showFindPasswordModal() {
-                closeModals();
-                // 초기화
-                document.getElementById('findPwStep1').style.display = 'block';
-                document.getElementById('findPwStep2').style.display = 'none';
-                document.getElementById('findPwEmail').value = '';
-                document.getElementById('findPwName').value = '';
-                document.getElementById('findPwBirthDate').value = '';
-                document.getElementById('findPwError').classList.remove('active');
-                document.getElementById('resetPwError').classList.remove('active');
-                findPwVerifiedEmail = '';
-                findPwVerifiedName = '';
-                findPwVerifiedBirth = '';
-                document.getElementById('findPasswordModal').classList.add('active');
-            }
-            
-            function closeFindPasswordModal() {
-                document.getElementById('findPasswordModal').classList.remove('active');
-            }
-            
-            async function handleVerifyIdentity(e) {
-                e.preventDefault();
-                const errorEl = document.getElementById('findPwError');
-                errorEl.classList.remove('active');
-                
-                const email = document.getElementById('findPwEmail').value;
-                const name = document.getElementById('findPwName').value;
-                const birthDate = document.getElementById('findPwBirthDate').value;
-                
-                try {
-                    const response = await fetch('/api/auth/verify-identity', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email, name, birth_date: birthDate })
-                    });
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        // 본인 확인 성공 - Step 2로 이동
-                        findPwVerifiedEmail = email;
-                        findPwVerifiedName = name;
-                        findPwVerifiedBirth = birthDate;
-                        document.getElementById('findPwStep1').style.display = 'none';
-                        document.getElementById('findPwStep2').style.display = 'block';
-                    } else {
-                        errorEl.textContent = result.message;
-                        errorEl.classList.add('active');
-                    }
-                } catch (err) {
-                    errorEl.textContent = '서버 오류가 발생했습니다.';
-                    errorEl.classList.add('active');
-                }
-            }
-            
-            async function handleResetPassword(e) {
-                e.preventDefault();
-                const errorEl = document.getElementById('resetPwError');
-                errorEl.classList.remove('active');
-                
-                const newPassword = document.getElementById('newPassword').value;
-                const newPasswordConfirm = document.getElementById('newPasswordConfirm').value;
-                
-                if (newPassword !== newPasswordConfirm) {
-                    errorEl.textContent = '비밀번호가 일치하지 않습니다.';
-                    errorEl.classList.add('active');
-                    return;
-                }
-                
-                if (newPassword.length < 8) {
-                    errorEl.textContent = '비밀번호는 8자 이상이어야 합니다.';
-                    errorEl.classList.add('active');
-                    return;
-                }
-                
-                try {
-                    const response = await fetch('/api/auth/reset-password', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            email: findPwVerifiedEmail,
-                            new_password: newPassword,
-                            name: findPwVerifiedName,
-                            birth_date: findPwVerifiedBirth
-                        })
-                    });
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        alert('비밀번호가 성공적으로 변경되었습니다. 새 비밀번호로 로그인해주세요.');
-                        closeFindPasswordModal();
-                        showLoginModal();
-                        document.getElementById('loginEmail').value = findPwVerifiedEmail;
-                    } else {
-                        errorEl.textContent = result.message;
-                        errorEl.classList.add('active');
-                    }
-                } catch (err) {
-                    errorEl.textContent = '서버 오류가 발생했습니다.';
-                    errorEl.classList.add('active');
-                }
-            }
-            
-            // 이메일 중복 확인 (실시간)
-            let _emailCheckTimer = null;
-            let _emailAvailable = false;
-
-            document.addEventListener('DOMContentLoaded', function() {
-                const regEmailInput = document.getElementById('regEmail');
-                if (regEmailInput) {
-                    regEmailInput.addEventListener('input', function() {
-                        clearTimeout(_emailCheckTimer);
-                        _emailAvailable = false;
-                        const resultEl = document.getElementById('emailCheckResult');
-                        const email = this.value.trim();
-                        if (!email) { resultEl.style.display = 'none'; return; }
-                        _emailCheckTimer = setTimeout(() => checkEmailDuplicate(email), 500);
-                    });
-                    regEmailInput.addEventListener('blur', function() {
-                        const email = this.value.trim();
-                        if (email) checkEmailDuplicate(email);
-                    });
-                }
-            });
-
-            async function checkEmailDuplicate(email) {
-                const resultEl = document.getElementById('emailCheckResult');
-                resultEl.style.display = 'block';
-                resultEl.style.color = '#aaa';
-                resultEl.textContent = '확인 중...';
-                try {
-                    const res = await fetch('/api/auth/check-email?email=' + encodeURIComponent(email));
-                    const data = await res.json();
-                    if (data.available) {
-                        resultEl.style.color = '#00e676';
-                        resultEl.textContent = '✅ ' + data.message;
-                        _emailAvailable = true;
-                    } else {
-                        resultEl.style.color = '#ff5252';
-                        resultEl.textContent = '❌ ' + data.message;
-                        _emailAvailable = false;
-                    }
-                } catch (err) {
-                    resultEl.style.color = '#ff5252';
-                    resultEl.textContent = '⚠️ 이메일 확인 중 오류가 발생했습니다.';
-                    _emailAvailable = false;
-                }
-            }
-
-            async function handleRegister(e) {
-                e.preventDefault();
-                const errorEl = document.getElementById('registerError');
-
-                // 이메일 중복 확인 통과 여부 검사
-                if (!_emailAvailable) {
-                    const email = document.getElementById('regEmail').value.trim();
-                    if (email) await checkEmailDuplicate(email);
-                    if (!_emailAvailable) {
-                        errorEl.textContent = '사용 가능한 이메일인지 확인해주세요.';
-                        errorEl.classList.add('active');
-                        return;
-                    }
-                }
-                
-                const password = document.getElementById('regPassword').value;
-                const passwordConfirm = document.getElementById('regPasswordConfirm').value;
-                
-                // 비밀번호 확인
-                if (password !== passwordConfirm) {
-                    errorEl.textContent = '비밀번호가 일치하지 않습니다.';
-                    errorEl.classList.add('active');
-                    return;
-                }
-                
-                if (password.length < 8) {
-                    errorEl.textContent = '비밀번호는 8자 이상이어야 합니다.';
-                    errorEl.classList.add('active');
-                    return;
-                }
-                
-                const data = {
-                    email: document.getElementById('regEmail').value,
-                    password: password,
-                    name: document.getElementById('regName').value,
-                    birth_date: document.getElementById('regBirthDate').value,
-                    address: document.getElementById('regAddress').value,
-                    gender: document.getElementById('regGender').value,
-                    role: document.getElementById('regRole').value
-                };
-                
-                try {
-                    const response = await fetch('/api/auth/register', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(data)
-                    });
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        alert('회원가입이 완료되었습니다! 로그인해주세요.');
-                        closeModals();
-                        showLoginModal();
-                        document.getElementById('loginEmail').value = data.email;
-                    } else {
-                        errorEl.textContent = result.message;
-                        errorEl.classList.add('active');
-                    }
-                } catch (err) {
-                    errorEl.textContent = '서버 오류가 발생했습니다.';
-                    errorEl.classList.add('active');
-                }
-            }
-            
-            async function handleLogin(e) {
-                e.preventDefault();
-                const errorEl = document.getElementById('loginError');
-                const email = document.getElementById('loginEmail').value;
-                const password = document.getElementById('loginPassword').value;
-                
-                try {
-                    const response = await fetch('/api/auth/login', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email, password })
-                    });
-                    const result = await response.json();
-                    
-                    if (result.success) {
-                        currentUser = result.user;
-                        // JWT 토큰 저장 (Bearer 인증용)
-                        if (result.access_token) {
-                            sessionStorage.setItem('access_token', result.access_token);
-                        }
-                        sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
-                        closeModals();
-                        // 로그인 성공 시 대시보드로 이동
-                        window.location.href = '/dashboard';
-                    } else {
-                        errorEl.textContent = result.message;
-                        errorEl.classList.add('active');
-                    }
-                } catch (err) {
-                    errorEl.textContent = '서버 오류가 발생했습니다.';
-                    errorEl.classList.add('active');
-                }
-            }
-            
-            function updateUIForLoggedInUser() {
-                document.getElementById('authButtons').style.display = 'none';
-                document.getElementById('userInfo').classList.add('active');
-                document.getElementById('userName').textContent = currentUser.name;
-                
-                // 자동 로그아웃 타이머 시작
-                initAutoLogout();
-            }
-            
-            function logout() {
-                currentUser = null;
-                sessionStorage.removeItem('interview_user');
-                sessionStorage.removeItem('access_token');
-                sessionStorage.removeItem('login_time');
-                document.getElementById('authButtons').style.display = 'flex';
-                document.getElementById('userInfo').classList.remove('active');
-                stopAutoLogoutTimer();
-            }
-            
-            // ========== 자동 로그아웃 기능 ==========
-            const SESSION_TIMEOUT = 60 * 60 * 1000;  // 60분 (밀리초)
-            const IDLE_TIMEOUT = 30 * 60 * 1000;     // 30분 비활성 시 로그아웃
-            let idleTimer = null;
-            let sessionTimer = null;
-            
-            // 비활성 타이머 리셋
-            function resetIdleTimer() {
-                if (!currentUser) return;
-                
-                if (idleTimer) clearTimeout(idleTimer);
-                idleTimer = setTimeout(() => {
-                    if (currentUser) {
-                        alert('장시간 활동이 없어 자동 로그아웃됩니다.');
-                        logout();
-                    }
-                }, IDLE_TIMEOUT);
-            }
-            
-            // 세션 타이머 시작 (로그인 후 일정 시간 지나면 로그아웃)
-            function startSessionTimer() {
-                if (sessionTimer) clearTimeout(sessionTimer);
-                sessionTimer = setTimeout(() => {
-                    if (currentUser) {
-                        alert('세션이 만료되어 자동 로그아웃됩니다. 다시 로그인해주세요.');
-                        logout();
-                    }
-                }, SESSION_TIMEOUT);
-            }
-            
-            // 자동 로그아웃 타이머 중지
-            function stopAutoLogoutTimer() {
-                if (idleTimer) clearTimeout(idleTimer);
-                if (sessionTimer) clearTimeout(sessionTimer);
-                idleTimer = null;
-                sessionTimer = null;
-            }
-            
-            // 자동 로그아웃 초기화
-            function initAutoLogout() {
-                // 사용자 활동 이벤트 감지
-                const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
-                activityEvents.forEach(event => {
-                    document.addEventListener(event, resetIdleTimer, { passive: true });
-                });
-                
-                // 세션 타이머 시작
-                startSessionTimer();
-                resetIdleTimer();
-                
-                // 로그인 시간 저장 (sessionStorage - 브라우저 종료 시 자동 삭제)
-                sessionStorage.setItem('login_time', Date.now().toString());
-            }
-            
-            // 브라우저/탭 종료 시 자동 로그아웃
-            // sessionStorage 사용으로 브라우저 종료 시 자동으로 세션 데이터 삭제됨
-            // 추가 보안: visibilitychange 이벤트로 탭 전환 감지
-            document.addEventListener('visibilitychange', () => {
-                if (document.visibilityState === 'visible' && currentUser) {
-                    // 탭이 다시 활성화되면 세션 유효성 확인
-                    const savedUser = sessionStorage.getItem('interview_user');
-                    if (!savedUser) {
-                        // 세션이 만료됨 (다른 탭에서 로그아웃되었거나 세션 스토리지가 클리어됨)
-                        currentUser = null;
-                        document.getElementById('authButtons').style.display = 'flex';
-                        document.getElementById('userInfo').classList.remove('active');
-                        stopAutoLogoutTimer();
-                    }
-                }
-            });
-            
-            // 페이지 로드 시 로그인 상태면 자동 로그아웃 타이머 시작
-            if (currentUser) {
-                // 이전 로그인 시간 확인 (sessionStorage 사용)
-                const loginTime = sessionStorage.getItem('login_time');
-                if (loginTime) {
-                    const elapsed = Date.now() - parseInt(loginTime);
-                    if (elapsed > SESSION_TIMEOUT) {
-                        // 세션 만료됨
-                        alert('세션이 만료되었습니다. 다시 로그인해주세요.');
-                        logout();
-                    } else {
-                        initAutoLogout();
-                    }
-                } else {
-                    initAutoLogout();
-                }
-            }
-            
-            // 소셜 로그인
-            function socialLogin(provider) {
-                // 소셜 로그인 URL로 리다이렉트
-                window.location.href = `/api/auth/social/${provider}`;
-            }
-            
-            // OAuth 콜백 처리 (URL에 토큰이 있으면)
-            function handleOAuthCallback() {
-                const urlParams = new URLSearchParams(window.location.search);
-                const token = urlParams.get('token');
-                const error = urlParams.get('error');
-                
-                if (error) {
-                    alert('소셜 로그인 실패: ' + error);
-                    window.history.replaceState({}, '', '/');
-                    return;
-                }
-                
-                if (token) {
-                    // 토큰으로 사용자 정보 가져오기
-                    fetch('/api/auth/social/verify?token=' + token)
-                        .then(res => res.json())
-                        .then(result => {
-                            if (result.success) {
-                                currentUser = result.user;
-                                sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
-                                window.location.href = '/dashboard';
-                            }
-                            window.history.replaceState({}, '', '/');
-                        })
-                        .catch(err => {
-                            console.error('소셜 로그인 검증 실패:', err);
-                            window.history.replaceState({}, '', '/');
-                        });
-                }
-            }
-            
-            // 페이지 로드 시 OAuth 콜백 확인
-            handleOAuthCallback();
-            
-            // 모달 외부 클릭 시 닫기
-            document.querySelectorAll('.modal-overlay').forEach(modal => {
-                modal.addEventListener('click', (e) => {
-                    if (e.target === modal) closeModals();
-                });
-            });
-        </script>
-    </body>
-    </html>
-    """
+async def index(request: Request):
+    """메인 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "")
 
 
-@app.get("/coding-test")
-async def coding_test_redirect():
-    """코딩 테스트는 면접 후 자동으로 진행됨 - 면접 페이지로 리다이렉트"""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/integrated_interview.html")
+@app.get("/coding-test", response_class=HTMLResponse)
+async def coding_test_page(request: Request):
+    """코딩 테스트 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "coding")
 
 
-@app.get("/interview")
-async def interview_redirect():
-    """채팅 면접 → 화상 면접으로 리다이렉트"""
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/static/integrated_interview.html")
+@app.get("/interview", response_class=HTMLResponse)
+async def interview_page(request: Request):
+    """면접 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "interview")
+
+
+# ========== Next.js 추가 페이지 프록시 ==========
+
+@app.get("/_next/{path:path}")
+async def nextjs_assets(request: Request, path: str):
+    """Next.js 정적 자산 프록시 (_next/static, _next/data 등)"""
+    target_url = f"{NEXTJS_URL}/_next/{path}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(target_url, headers=dict(request.headers))
+            content_type = resp.headers.get("content-type", "application/octet-stream")
+            from fastapi.responses import Response
+            return Response(content=resp.content, status_code=resp.status_code,
+                          headers={"content-type": content_type, "cache-control": resp.headers.get("cache-control", "")})
+    except Exception:
+        raise HTTPException(status_code=502, detail="Next.js 서버에 연결할 수 없습니다")
+
+
+@app.get("/profile", response_class=HTMLResponse)
+async def profile_page(request: Request):
+    """프로필 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "profile")
+
+
+@app.get("/whiteboard", response_class=HTMLResponse)
+async def whiteboard_page(request: Request):
+    """화이트보드 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "whiteboard")
+
+
+@app.get("/coding", response_class=HTMLResponse)
+async def coding_page(request: Request):
+    """코딩 테스트 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "coding")
 
 
 # ========== 소셜 로그인 API ==========
@@ -3674,9 +2635,15 @@ async def delete_resume(session_id: str, current_user: Dict = Depends(get_curren
 
 # ========== 대시보드 페이지 ==========
 
-@app.get("/dashboard")
-async def dashboard_page():
-    """로그인 후 대시보드 페이지"""
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page(request: Request):
+    """대시보드 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "dashboard")
+
+
+@app.get("/legacy/dashboard")
+async def legacy_dashboard_page():
+    """레거시 대시보드 (정적 HTML 폴백)"""
     return FileResponse(os.path.join(static_dir, "my_dashboard.html"))
 
 
@@ -4435,9 +3402,15 @@ async def websocket_interview(websocket: WebSocket, session_id: str, token: Opti
 
 # ========== Emotion API ==========
 
-@app.get("/emotion")
-async def get_emotion():
-    """현재 감정 상태 조회"""
+@app.get("/emotion", response_class=HTMLResponse)
+async def emotion_page(request: Request):
+    """감정 분석 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "emotion")
+
+
+@app.get("/api/emotion/current")
+async def get_emotion_current():
+    """현재 감정 상태 조회 (API)"""
     async with state.emotion_lock:
         if state.last_emotion is None:
             return {"status": "no_data"}
@@ -5061,7 +4034,48 @@ if __name__ == "__main__":
         ssl_kwargs = {}
         print("  ⚠️ TLS 비활성화 (HTTP) — 프로덕션에서는 TLS_CERTFILE/TLS_KEYFILE 설정 권장")
     
+    # Next.js 개발 서버 자동 시작
+    import atexit, signal
+    
+    frontend_dir = os.path.join(current_dir, "frontend")
+    if os.path.exists(os.path.join(frontend_dir, "package.json")):
+        print("  🚀 Next.js 프론트엔드 개발 서버 시작 중...")
+        try:
+            _nextjs_process = subprocess.Popen(
+                ["npm", "run", "dev"],
+                cwd=frontend_dir,
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            print(f"  ✅ Next.js 서버 시작됨 (PID: {_nextjs_process.pid}, {NEXTJS_URL})")
+        except Exception as e:
+            print(f"  ⚠️ Next.js 서버 자동 시작 실패: {e}")
+            print(f"     수동 시작: cd CSH/frontend && npm run dev")
+            _nextjs_process = None
+    else:
+        print("  ⚠️ Next.js 프론트엔드 미설치 (CSH/frontend/package.json 없음)")
+        _nextjs_process = None
+    
+    def cleanup_nextjs():
+        """Next.js 프로세스 정리"""
+        global _nextjs_process
+        if _nextjs_process and _nextjs_process.poll() is None:
+            print("\n🔄 Next.js 서버 종료 중...")
+            _nextjs_process.terminate()
+            try:
+                _nextjs_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                _nextjs_process.kill()
+            print("✅ Next.js 서버 종료 완료")
+    
+    atexit.register(cleanup_nextjs)
+    
     print(f"  🌐 {protocol}://localhost:8000 에서 접속하세요")
+    print(f"  🎨 Next.js: {NEXTJS_URL} (프록시 경유: :8000)")
     print("=" * 70 + "\n")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000, **ssl_kwargs)
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=8000, **ssl_kwargs)
+    finally:
+        cleanup_nextjs()
