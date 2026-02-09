@@ -5,6 +5,19 @@
 에이전트는 이 문서에 적힌 내용만을 근거로 현재 상태를 판단하며,
 기억·추측·자율적 확장을 해서는 안 된다.
 
+## 개발 실행 환경 (강제)
+
+- Python: **3.10.11**
+- Virtual Environment: **interview_env (venv)**
+- 모든 python 실행 / pip install / 검증은
+  반드시 `interview_env` 활성화 상태에서 수행한다.
+- 글로벌(시스템) Python 환경에 패키지 설치는 금지한다.
+
+### 검증 상태
+- TASK-004 기준:
+  - `scripts/verify_task_004.py`를
+    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+
 ---
 
 ## 1. 프로젝트 목적 (확정)
@@ -19,13 +32,14 @@
 
 ## 2. 현재 개발 단계
 
-- 상태: **Phase 1 진행 중 (초기)**
+- 상태: **Phase 1 진행 중 (Core / Provider / API Entry 고정 완료)**
 - 실제 비즈니스 로직 구현: ❌ 아직 없음
 - API / DB / Playground 구현: ❌ 아직 없음
 - 현재 목표: **기반 패키지(코어/프로바이더) 구조를 먼저 고정**
 
-> ❗ 지금 단계에서 “기능 구현”을 서두르는 것은 금지  
-> 기반 구조(코어/프로바이더/엔트리) 확정이 우선이다.
+> ❗ 지금 단계에서 “비즈니스 기능 구현”을 서두르는 것은 금지  
+> Core / Provider / API Entry 구조 확정이 우선이며,
+> 실제 기능 구현은 Phase 2에서 시작한다.
 ---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -189,11 +203,23 @@ IMH/IMH_Interview/
   - 인증/세션/비즈니스 로직
 
 ### 최근 완료
+- TASK-004: FastAPI 최소 엔트리 + Healthcheck ✅ DONE
+  - FastAPI 실행 진입점 확정
+  - `/health` 엔드포인트 구현
+  - Python 3.10.11 / interview_env 기준 검증 완료
+
 - TASK-003: Provider 인터페이스 + Mock 구현 ✅ DONE
   - STT / LLM / Emotion / Visual / Voice Provider 인터페이스 정의
   - Async Mock Provider 구현
   - 검증 스크립트(`scripts/verify_task_003.py`) 통과
+
 - TASK-002: imh_core 최소 패키지 구성(config / errors / dto) ✅ DONE
+
 - TASK-001: 로깅 기반 구축 ✅ DONE
 
-> 다음 작업은 `docs/TASK_QUEUE.md`에 ACTIVE로 정의된 작업만 수행한다.
+## 10. 현재 최우선 목표 (Next Step)
+
+### TASK-005: Playground STT (파일 업로드)
+- 목표:
+  - Mock STT Provider를 이용한 파일 업로드 및 분석 API 구현
+- 상태: **대기 (비활성)** → 사용자 ACTIVE 승인 필요

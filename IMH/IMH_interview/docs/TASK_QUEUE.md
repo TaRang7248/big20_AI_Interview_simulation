@@ -51,6 +51,13 @@
 
 ### TASK-004 FastAPI 최소 엔트리 + healthcheck
 - `/health` 단일 엔드포인트
+- **Verification**: `IMH/api/health.py` 구현 및 `scripts/verify_task_004.py` Pass
+
+---
+
+## ACTIVE
+
+(없음 - 에이전트 대기 중)
 
 ## BACKLOG
 

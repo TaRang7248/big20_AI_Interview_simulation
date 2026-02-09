@@ -76,3 +76,26 @@
   ├── visual/ (base.py, mock.py)
   └── voice/ (base.py, mock.py)
   ```
+
+### TASK-004 FastAPI 최소 엔트리 + Healthcheck (Application Entry)
+- **요약**: `IMH/main.py` 진입점 생성 및 `/health` 라우터 구현. `imh_core` 로깅 연동.
+- **변경 사항**:
+    - `IMH/main.py`: FastAPI 앱 생성, `lifespan` 이벤트를 통한 런타임 로깅 초기화.
+    - `IMH/api/health.py`: Liveness Probe용 `/health` 엔드포인트.
+    - `logs/runtime/runtime.log`: 서버 실행 로그가 기록될 파일 생성 확인.
+    - `scripts/verify_task_004.py`: 서버 구동 및 Healthcheck 응답 검증 스크립트.
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_004.py` -> `[PASS] Healthcheck response is valid.`
+    - **Health Response**: `{"status": "ok", "version": "0.1.0", "timestamp": "..."}`
+    - **Runtime Log**: `Starting IMH AI Interview v0.1.0...` 기록 확인.
+- **디렉토리 구조**:
+  ```text
+  IMH/IMH_Interview/IMH
+  ├── api/
+  │   ├── health.py
+  │   └── __init__.py
+  └── main.py
+  ```
+- **환경 검증 보완 (2026-02-09 Supplementary)**:
+    - **실행 환경**: `interview_env` (venv) 활성화 상태에서 `scripts/verify_task_004.py` 재검증 완료.
+    - **패키지 확인**: `fastapi`, `uvicorn`, `httpx` 등 필수 패키지가 `interview_env`에 설치되어 있음을 확인.
