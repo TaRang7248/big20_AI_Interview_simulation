@@ -92,8 +92,9 @@ function initAuth() {
             const response = await fetch('/api/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, pw })
+                body: JSON.stringify({ id_name: id, pw })
             });
+
             const result = await response.json();
 
             if (result.success) {
@@ -112,7 +113,7 @@ function initAuth() {
         e.preventDefault();
 
         const newUser = {
-            id: $('#reg-id').value,
+            id_name: $('#reg-id').value,
             pw: $('#reg-pw').value,
             name: $('#reg-name').value,
             dob: `${$('#reg-dob-year').value}-${$('#reg-dob-month').value.padStart(2, '0')}-${$('#reg-dob-day').value.padStart(2, '0')}`,
@@ -168,8 +169,9 @@ function initAuth() {
             const response = await fetch('/api/verify-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: AppState.currentUser.id, pw: inputPw })
+                body: JSON.stringify({ id_name: AppState.currentUser.id_name, pw: inputPw })
             });
+
             const result = await response.json();
 
             if (result.success) {
@@ -194,12 +196,12 @@ function initAuth() {
     // Helper: Fetch User Info and Show Edit Page
     async function fetchAndShowMyInfo() {
         try {
-            const response = await fetch(`/api/user/${AppState.currentUser.id}`);
+            const response = await fetch(`/api/user/${AppState.currentUser.id_name}`);
             const result = await response.json();
             if (result.success) {
                 AppState.currentUser = result.user; // Update local state
 
-                $('#edit-id').value = result.user.id || '';
+                $('#edit-id').value = result.user.id_name || '';
                 $('#edit-name').value = result.user.name || '';
                 $('#edit-dob').value = result.user.dob || '';
 
@@ -244,7 +246,7 @@ function initAuth() {
         }
 
         try {
-            const response = await fetch(`/api/user/${AppState.currentUser.id}`, {
+            const response = await fetch(`/api/user/${AppState.currentUser.id_name}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -315,7 +317,7 @@ function initAuth() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    id: AppState.currentUser.id,
+                    id_name: AppState.currentUser.id_name,
                     new_pw: newPw
                 })
             });
@@ -606,7 +608,7 @@ function finishInterview() {
     AppState.interview.inProgress = false;
     // Save to Mock DB
     const result = {
-        userId: AppState.currentUser.id,
+        userId: AppState.currentUser.id_name,
         jobId: AppState.currentJobId,
         date: new Date().toLocaleDateString(),
         scores: {
@@ -687,7 +689,7 @@ function initAdmin() {
                 body: JSON.stringify({
                     title,
                     deadline,
-                    writer_id: AppState.currentUser.id // Add writer_id 
+                    id_name: AppState.currentUser.id_name // Add writer_id (now id_name)
                 })
             });
             const result = await response.json();
@@ -757,7 +759,7 @@ function renderAdminJobList() {
         tr.innerHTML = `
             <td>${job.id}</td>
             <td>${job.title}</td>
-            <td>${job.writer_id || '-'}</td>
+            <td>${job.id_name || '-'}</td>
             <td>${job.created_at || '-'}</td>
             <td>${job.deadline}</td>
             <td>
