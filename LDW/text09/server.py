@@ -1,16 +1,33 @@
-import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from flask import Flask, request, jsonify, send_from_directory
 import os
+from dotenv import load_dotenv
+
+# Load .env from project root
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env'))
 
 app = Flask(__name__, static_url_path='', static_folder='.')
 
-DB_PATH = os.path.join('db', 'membership_information.db')
+# DB Connection settings
+DB_HOST = "127.0.0.1"
+DB_NAME = "interview_db"
+DB_USER = "postgres"
+DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579") # Default fallback or from env
+DB_PORT = "5432"
+
+def get_db_connection():
+    conn = psycopg2.connect(
+        host=DB_HOST,
+        database=DB_NAME,
+        user=DB_USER,
+        password=DB_PASS,
+        port=DB_PORT
+    )
+    return conn
 
 def init_db():
-    if not os.path.exists('db'):
-        os.makedirs('db')
-    
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     c = conn.cursor()
     # Create users table if not exists
     c.execute('''
@@ -28,7 +45,7 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-    print(f"Database initialized at {DB_PATH}")
+    print(f"Database initialized/connected to {DB_NAME} at {DB_HOST}")
 
 @app.route('/')
 def home():
@@ -42,17 +59,17 @@ def serve_static(path):
 def register():
     data = request.json
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         
         # Check if ID exists
-        c.execute('SELECT id FROM users WHERE id = ?', (data['id'],))
+        c.execute('SELECT id FROM users WHERE id = %s', (data['id'],))
         if c.fetchone():
             return jsonify({'success': False, 'message': '이미 존재하는 아이디입니다.'}), 400
             
         c.execute('''
             INSERT INTO users (id, pw, name, dob, gender, email, address, phone, type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             data['id'], 
             data['pw'], 
@@ -76,18 +93,17 @@ def register():
 def login():
     data = request.json
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
+        conn = get_db_connection()
+        c = conn.cursor(cursor_factory=RealDictCursor)
         
         # User lookup logic
         # Note: In production, password should be hashed. Plain text for this demo.
-        c.execute('SELECT * FROM users WHERE id = ? AND pw = ?', (data['id'], data['pw']))
+        c.execute('SELECT * FROM users WHERE id = %s AND pw = %s', (data['id'], data['pw']))
         row = c.fetchone()
         
         if row:
-            # Map tuple to dict
-            columns = [description[0] for description in c.description]
-            user = dict(zip(columns, row))
+            # pyscopg2 RealDictCursor returns a dict-like object
+            user = dict(row)
             return jsonify({'success': True, 'user': user})
         else:
             return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
@@ -102,11 +118,11 @@ def login():
 def verify_password():
     data = request.json
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         
         # Verify Password
-        c.execute('SELECT pw FROM users WHERE id = ?', (data['id'],))
+        c.execute('SELECT pw FROM users WHERE id = %s', (data['id'],))
         row = c.fetchone()
         
         if row and row[0] == data['pw']:
@@ -123,14 +139,13 @@ def verify_password():
 @app.route('/api/user/<id>', methods=['GET'])
 def get_user_info(id):
     try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute('SELECT id, name, dob, gender, email, address, phone, type FROM users WHERE id = ?', (id,))
+        conn = get_db_connection()
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute('SELECT id, name, dob, gender, email, address, phone, type FROM users WHERE id = %s', (id,))
         row = c.fetchone()
         
         if row:
-            columns = [description[0] for description in c.description]
-            user = dict(zip(columns, row))
+            user = dict(row)
             return jsonify({'success': True, 'user': user})
         else:
             return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
@@ -144,11 +159,11 @@ def get_user_info(id):
 def update_user_info(id):
     data = request.json
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         
         # 1. Verify Password
-        c.execute('SELECT pw FROM users WHERE id = ?', (id,))
+        c.execute('SELECT pw FROM users WHERE id = %s', (id,))
         row = c.fetchone()
         if not row:
              return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
@@ -159,8 +174,8 @@ def update_user_info(id):
         # 2. Update Info
         c.execute('''
             UPDATE users 
-            SET email = ?, phone = ?, address = ?
-            WHERE id = ?
+            SET email = %s, phone = %s, address = %s
+            WHERE id = %s
         ''', (data['email'], data['phone'], data['address'], id))
         conn.commit()
         
@@ -176,11 +191,11 @@ def update_user_info(id):
 def change_password():
     data = request.json
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_db_connection()
         c = conn.cursor()
         
         # Update Password
-        c.execute('UPDATE users SET pw = ? WHERE id = ?', (data['new_pw'], data['id']))
+        c.execute('UPDATE users SET pw = %s WHERE id = %s', (data['new_pw'], data['id']))
         conn.commit()
         
         if c.rowcount > 0:
