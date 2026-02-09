@@ -3465,7 +3465,8 @@ class ResumeUploadResponse(BaseModel):
 @app.post("/api/resume/upload", response_model=ResumeUploadResponse)
 async def upload_resume(
     file: UploadFile = File(...),
-    session_id: Optional[str] = Form(None)
+    session_id: Optional[str] = Form(None),
+    user_email: Optional[str] = Form(None)
 ):
     """
     이력서 PDF 파일 업로드 및 RAG 인덱싱
@@ -3486,6 +3487,10 @@ async def upload_resume(
         session = state.get_session(session_id)
         if not session:
             session_id = state.create_session(session_id)
+    
+    # 사용자 이메일을 세션에 저장 (대시보드에서 업로드 시 면접 세션과 연결하기 위해)
+    if user_email:
+        state.update_session(session_id, {"user_email": user_email})
     
     # 파일 저장
     safe_filename = f"{session_id}_{uuid.uuid4().hex[:8]}.pdf"
@@ -3689,6 +3694,20 @@ async def create_session(request: SessionCreateRequest = None):
         "user_name": user.get("name", ""),
         "chat_history": [{"role": "assistant", "content": greeting}]
     })
+    
+    # 같은 사용자가 이전에 업로드한 이력서(RAG retriever)가 있으면 새 세션으로 복사
+    for sid, s in state.sessions.items():
+        if sid != session_id and s.get("user_email") == request.user_email and s.get("resume_uploaded"):
+            retriever = s.get("retriever")
+            if retriever:
+                state.update_session(session_id, {
+                    "resume_uploaded": True,
+                    "resume_path": s.get("resume_path"),
+                    "resume_filename": s.get("resume_filename"),
+                    "retriever": retriever
+                })
+                print(f"📚 이전 세션({sid[:8]})의 이력서 RAG를 새 세션에 연결함")
+                break
     
     print(f"✅ 면접 세션 생성: {session_id} (사용자: {request.user_email})")
     
