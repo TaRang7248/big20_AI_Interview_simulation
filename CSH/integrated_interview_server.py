@@ -61,7 +61,7 @@ from json_utils import resilient_json_parse, parse_evaluation_json
 # 보안 유틸리티 (bcrypt 비밀번호 해싱, JWT 토큰 인증, TLS)
 from security import (
     hash_password, verify_password, needs_rehash,
-    create_access_token, get_current_user, get_current_user_optional,
+    create_access_token, decode_access_token, get_current_user, get_current_user_optional,
     get_ssl_context
 )
 
@@ -182,13 +182,28 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS 설정
+# CORS 설정 (운영 환경에서는 ALLOWED_ORIGINS 환경변수로 허용 도메인 지정)
+# 예: ALLOWED_ORIGINS=https://example.com,https://app.example.com
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "").strip()
+if ALLOWED_ORIGINS:
+    cors_origins = [origin.strip() for origin in ALLOWED_ORIGINS.split(",") if origin.strip()]
+else:
+    # 개발 환경: localhost 변형만 허용
+    cors_origins = [
+        "http://localhost:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:3000",
+    ]
+
+print(f"[CORS] 허용 Origins: {cors_origins}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept"],
 )
 
 # 정적 파일 마운트
@@ -4349,8 +4364,36 @@ async def broadcast_stt_result(session_id: str, data: dict):
 # ========== WebSocket API (실시간 STT/이벤트) ==========
 
 @app.websocket("/ws/interview/{session_id}")
-async def websocket_interview(websocket: WebSocket, session_id: str):
-    """실시간 면접 WebSocket - STT 결과 및 이벤트 수신"""
+async def websocket_interview(websocket: WebSocket, session_id: str, token: Optional[str] = None):
+    """실시간 면접 WebSocket - STT 결과 및 이벤트 수신 (JWT 인증 필수)"""
+    
+    # --- JWT 토큰 검증 ---
+    # 1순위: 쿼리 파라미터 ?token=xxx  2순위: Sec-WebSocket-Protocol 헤더
+    ws_token = token
+    if not ws_token:
+        # 헤더에서 토큰 추출 시도 (subprotocol)
+        protocols = websocket.headers.get("sec-websocket-protocol", "")
+        for proto in protocols.split(","):
+            proto = proto.strip()
+            if proto.startswith("access_token."):
+                ws_token = proto[len("access_token."):]
+                break
+    
+    if not ws_token:
+        await websocket.close(code=4001, reason="인증 토큰이 필요합니다.")
+        print(f"[WS] 세션 {session_id} 인증 실패: 토큰 없음")
+        return
+    
+    payload = decode_access_token(ws_token)
+    if payload is None:
+        await websocket.close(code=4001, reason="인증 토큰이 만료되었거나 유효하지 않습니다.")
+        print(f"[WS] 세션 {session_id} 인증 실패: 유효하지 않은 토큰")
+        return
+    
+    ws_user_email = payload.get("sub", "unknown")
+    print(f"[WS] 세션 {session_id} 인증 성공: {ws_user_email}")
+    # --- JWT 검증 완료 ---
+    
     await websocket.accept()
     
     # 세션에 WebSocket 연결 추가
@@ -4358,13 +4401,14 @@ async def websocket_interview(websocket: WebSocket, session_id: str):
         state.websocket_connections[session_id] = []
     state.websocket_connections[session_id].append(websocket)
     
-    print(f"[WS] 세션 {session_id} WebSocket 연결됨")
+    print(f"[WS] 세션 {session_id} WebSocket 연결됨 (사용자: {ws_user_email})")
     
     try:
         # 연결 성공 메시지
         await websocket.send_json({
             "type": "connected",
             "session_id": session_id,
+            "user": ws_user_email,
             "stt_available": DEEPGRAM_AVAILABLE
         })
         
