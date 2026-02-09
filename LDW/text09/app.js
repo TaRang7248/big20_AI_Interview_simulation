@@ -667,6 +667,7 @@ function initAdmin() {
         $('#admin-job-edit-page').classList.add('hidden');
         // Reset form
         $('#job-title').value = '';
+        $('#job-content').value = '';
         $('#job-deadline').value = '';
     });
 
@@ -680,6 +681,7 @@ function initAdmin() {
     $('#admin-job-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const title = $('#job-title').value;
+        const content = $('#job-content').value;
         const deadline = $('#job-deadline').value;
 
         try {
@@ -688,6 +690,7 @@ function initAdmin() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title,
+                    content,
                     deadline,
                     id_name: AppState.currentUser.id_name // Add writer_id (now id_name)
                 })
@@ -720,13 +723,16 @@ function initAdmin() {
         e.preventDefault();
         const id = $('#edit-job-id').value;
         const title = $('#edit-job-title').value;
+        const content = $('#edit-job-content').value;
         const deadline = $('#edit-job-deadline').value;
 
         try {
             const response = await fetch(`/api/jobs/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, deadline })
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, content, deadline })
             });
             const result = await response.json();
 
@@ -792,6 +798,7 @@ function openEditJobPage(jobId) {
 
     $('#edit-job-id').value = job.id;
     $('#edit-job-title').value = job.title;
+    $('#edit-job-content').value = job.content || '';
     $('#edit-job-deadline').value = job.deadline;
 
     $('#admin-view-jobs').classList.add('hidden');
