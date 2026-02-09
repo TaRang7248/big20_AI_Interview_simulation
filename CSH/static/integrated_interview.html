@@ -769,9 +769,18 @@
         
         function logoutAndRedirect() {
             sessionStorage.removeItem('interview_user');
+            sessionStorage.removeItem('access_token');
             sessionStorage.removeItem('login_time');
             alert('로그아웃 되었습니다.');
             window.location.href = '/';
+        }
+        
+        // ========== JWT 인증 헬퍼 ==========
+        function getAuthHeaders() {
+            const token = sessionStorage.getItem('access_token');
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = 'Bearer ' + token;
+            return headers;
         }
         
         function updateHeaderUserInfo() {
@@ -1691,7 +1700,7 @@
                 // 세션 생성 (사용자 정보 포함)
                 const response = await fetch('/api/session', { 
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({ 
                         user_email: currentUser.email,
                         user_id: currentUser.user_id || currentUser.id
@@ -1762,7 +1771,7 @@
                 
                 const response = await fetch('/api/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         session_id: sessionId,
                         message: currentQuestionIndex === 0 ? '[START]' : '[NEXT]'
@@ -1875,7 +1884,7 @@
             try {
                 const response = await fetch('/api/intervention/start-turn', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         session_id: sessionId,
                         question: currentQuestion
@@ -1901,7 +1910,7 @@
             try {
                 await fetch('/api/intervention/vad-signal', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         session_id: sessionId,
                         is_speaking: isSpeaking,
@@ -1944,7 +1953,7 @@
             try {
                 const response = await fetch('/api/intervention/check', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         session_id: sessionId,
                         current_answer: speechBuffer,
@@ -2101,7 +2110,7 @@
                 // 턴 종료 API 호출
                 await fetch('/api/intervention/end-turn', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         session_id: sessionId,
                         final_answer: answer,
@@ -2128,7 +2137,7 @@
             try {
                 await fetch('/api/intervention/end-turn', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         session_id: sessionId,
                         final_answer: answer,
@@ -2145,7 +2154,9 @@
         // 개입 설정 로드
         async function loadInterventionSettings() {
             try {
-                const response = await fetch('/api/intervention/settings');
+                const response = await fetch('/api/intervention/settings', {
+                    headers: getAuthHeaders()
+                });
                 if (response.ok) {
                     interventionSettings = await response.json();
                     console.log('✅ 개입 설정 로드됨:', interventionSettings);
@@ -2189,7 +2200,7 @@
             try {
                 const response = await fetch('/api/evaluate', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: getAuthHeaders(),
                     body: JSON.stringify({
                         session_id: sessionId,
                         question: question,
@@ -3534,7 +3545,9 @@ int main() {
             // 면접 리포트 가져오기
             let interviewReport = null;
             try {
-                const response = await fetch(`/api/report/${sessionId}`);
+                const response = await fetch(`/api/report/${sessionId}`, {
+                    headers: getAuthHeaders()
+                });
                 interviewReport = await response.json();
             } catch (e) {
                 console.error('면접 리포트 로드 실패:', e);
