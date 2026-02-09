@@ -226,7 +226,7 @@ def get_jobs():
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute('SELECT * FROM interview_announcement ORDER BY created_at DESC')
+        c.execute("SELECT id, title, deadline, content, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
         rows = c.fetchall()
         
         jobs = [dict(row) for row in rows]
@@ -256,6 +256,51 @@ def create_job():
         return jsonify({'success': True, 'message': '공고가 등록되었습니다.', 'id': new_id})
     except Exception as e:
         print(f"Create Job Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/jobs/<id>', methods=['PUT'])
+def update_job(id):
+    data = request.json
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        c.execute('''
+            UPDATE interview_announcement
+            SET title = %s, deadline = %s, content = %s
+            WHERE id = %s
+        ''', (data['title'], data['deadline'], data.get('content', ''), id))
+        conn.commit()
+        
+        if c.rowcount > 0:
+            return jsonify({'success': True, 'message': '공고가 수정되었습니다.'})
+        else:
+            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+            
+    except Exception as e:
+        print(f"Update Job Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/jobs/<id>', methods=['DELETE'])
+def delete_job(id):
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        c.execute('DELETE FROM interview_announcement WHERE id = %s', (id,))
+        conn.commit()
+        
+        if c.rowcount > 0:
+            return jsonify({'success': True, 'message': '공고가 삭제되었습니다.'})
+        else:
+            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+            
+    except Exception as e:
+        print(f"Delete Job Error: {e}")
         return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
     finally:
         if conn: conn.close()
