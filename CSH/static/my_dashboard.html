@@ -505,8 +505,21 @@
     function handleLogout() {
         stopDeviceTest();
         sessionStorage.removeItem('interview_user');
+        sessionStorage.removeItem('access_token');
         sessionStorage.removeItem('login_time');
         location.href = '/';
+    }
+
+    // ========== JWT 인증 헬퍼 ==========
+    function getAuthHeaders() {
+        const token = sessionStorage.getItem('access_token');
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = 'Bearer ' + token;
+        return headers;
+    }
+    function getAuthHeadersOnly() {
+        const token = sessionStorage.getItem('access_token');
+        return token ? { 'Authorization': 'Bearer ' + token } : {};
     }
 
     // ========== 이력서 업로드 ==========
@@ -544,7 +557,7 @@
         if (currentUser && currentUser.email) formData.append('user_email', currentUser.email);
 
         try {
-            const res = await fetch('/api/resume/upload', { method: 'POST', body: formData });
+            const res = await fetch('/api/resume/upload', { method: 'POST', body: formData, headers: getAuthHeadersOnly() });
             const data = await res.json();
             if (data.success) {
                 currentSessionId = data.session_id;
@@ -570,7 +583,7 @@
     async function removeResume() {
         if (!currentSessionId) return;
         try {
-            await fetch('/api/resume/' + currentSessionId, { method: 'DELETE' });
+            await fetch('/api/resume/' + currentSessionId, { method: 'DELETE', headers: getAuthHeadersOnly() });
         } catch {}
         document.getElementById('resumeInfo').style.display = 'none';
         document.getElementById('uploadArea').style.display = '';
@@ -660,7 +673,7 @@
     // ========== 면접 기록 조회 ==========
     async function loadInterviewHistory() {
         try {
-            const res = await fetch('/api/interview/history?email=' + encodeURIComponent(currentUser.email));
+            const res = await fetch('/api/interview/history?email=' + encodeURIComponent(currentUser.email), { headers: getAuthHeadersOnly() });
             if (!res.ok) {
                 // API가 아직 없을 수 있음
                 return;
