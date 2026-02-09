@@ -630,6 +630,14 @@ function initAdmin() {
         renderAdminAppList();
     });
 
+    // Admin My Info Link
+    $('#admin-link-my-info').addEventListener('click', () => {
+        if (AppState.currentUser) {
+            $('#check-pw-input').value = '';
+            navigateTo('password-check-page');
+        }
+    });
+
     $('#btn-add-job').addEventListener('click', () => {
         const title = prompt('공고 제목을 입력하세요:');
         if (title) {
