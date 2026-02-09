@@ -1,0 +1,109 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "0. Prerequisites (Redis + Ollama 확인)",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-Command",
+        "Write-Host '🔍 Redis 확인 중...' -ForegroundColor Yellow; try { $r = redis-cli ping 2>$null; if ($r -eq 'PONG') { Write-Host '✅ Redis 연결됨' -ForegroundColor Green } else { Start-Process redis-server.exe -WindowStyle Minimized; Start-Sleep 2; Write-Host '🚀 Redis 자동 시작' -ForegroundColor Green } } catch { Write-Host '⚠️ Redis 미설치' -ForegroundColor Red }; Write-Host '🔍 Ollama 확인 중...' -ForegroundColor Yellow; try { ollama list 2>$null; if ($LASTEXITCODE -eq 0) { Write-Host '✅ Ollama 실행 중' -ForegroundColor Green } else { Write-Host '⚠️ Ollama 미실행' -ForegroundColor Red } } catch { Write-Host '⚠️ Ollama 미설치' -ForegroundColor Red }"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/CSH"
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "ai-interview",
+        "close": true
+      }
+    },
+    {
+      "label": "1. Celery Worker",
+      "type": "shell",
+      "command": "${workspaceFolder}/interview_env/Scripts/python.exe",
+      "args": [
+        "-m", "celery",
+        "-A", "celery_app",
+        "worker",
+        "--pool=solo",
+        "--loglevel=info"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/CSH",
+        "env": {
+          "PATH": "${workspaceFolder}/interview_env/Scripts;${env:PATH}"
+        }
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "ai-interview"
+      }
+    },
+    {
+      "label": "2. Next.js Frontend",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}/CSH/frontend"
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "ai-interview"
+      }
+    },
+    {
+      "label": "3. FastAPI Server",
+      "type": "shell",
+      "command": "${workspaceFolder}/interview_env/Scripts/python.exe",
+      "args": [
+        "-m", "uvicorn",
+        "integrated_interview_server:app",
+        "--host", "0.0.0.0",
+        "--port", "8000",
+        "--reload"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/CSH",
+        "env": {
+          "PATH": "${workspaceFolder}/interview_env/Scripts;${env:PATH}"
+        }
+      },
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "ai-interview"
+      },
+      "dependsOn": ["0. Prerequisites (Redis + Ollama 확인)"]
+    },
+    {
+      "label": "🚀 AI 모의면접 시스템 전체 시작",
+      "dependsOn": [
+        "1. Celery Worker",
+        "2. Next.js Frontend",
+        "3. FastAPI Server"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "ai-interview"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}
