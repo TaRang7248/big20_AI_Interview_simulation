@@ -446,11 +446,18 @@ def main(): # 프로그램의 메인 로직을 담는 함수
                 continue
 
             # 사용자의 질문(user_input)을 바탕으로 DB에서 관련 있는 문서 조각들을 실제로 가져온다
-            # 질문을 벡터(숫자)로 바꾼 뒤, DB에 저장된 이력서 조각들 중 숫자가 가장 비슷한 것들을 골라낸다
+            # nomic-embed-text는 'search_query:' 접두사를 붙여야 검색 품질이 향상된다
             # 결과값인 retrieved_docs는 문서 객체들의 리스트(List) 형태이다 (예: [문서1, 문서2, 문서3])
-            retrieved_docs = retriever.invoke(user_input)
+            search_input = f"search_query: {user_input}"
+            retrieved_docs = retriever.invoke(search_input)
             # 리스트 형태의 문서들을 AI가 읽기 편하도록 하나의 긴 텍스트로 합치는 과정
-            context_text = "\n".join([doc.page_content for doc in retrieved_docs])
+            # 'search_document:' 접두사가 있으면 제거
+            context_text = "\n".join([
+                doc.page_content.replace("search_document: ", "", 1) 
+                if doc.page_content.startswith("search_document: ") 
+                else doc.page_content 
+                for doc in retrieved_docs
+            ])
             
             # 검색된 컨텍스트가 있다면 프롬프트에 주입
             # context_message라는 변수를 생성하고 초기값을 None으로 설정. 검색 결과가 없을 경우를 대비해 변수를 미리 초기화해두는 과정.
