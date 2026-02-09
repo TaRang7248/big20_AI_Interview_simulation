@@ -40,6 +40,8 @@ except ImportError:
 # ========== 설정 ==========
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
 
 
 # ========== 모델 ==========
@@ -153,8 +155,8 @@ class ArchitectureProblemGenerator:
         # LLM 초기화
         if OLLAMA_AVAILABLE:
             try:
-                self.llm = ChatOllama(model="qwen3:4b", temperature=0.8)
-                print("✅ 아키텍처 문제 생성기 초기화 (Ollama)")
+                self.llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.8, num_ctx=DEFAULT_LLM_NUM_CTX)
+                print(f"✅ 아키텍처 문제 생성기 초기화 (Ollama, ctx={DEFAULT_LLM_NUM_CTX})")
             except Exception as e:
                 print(f"⚠️ Ollama 초기화 실패: {e}")
         
@@ -517,7 +519,7 @@ class DiagramAnalyzer:
             return self._create_error_result("분석 서비스 사용 불가")
         
         try:
-            llm = ChatOllama(model="qwen3:4b", temperature=0.3)
+            llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.3, num_ctx=DEFAULT_LLM_NUM_CTX)
             
             prompt = f"""시스템 아키텍처 면접에서 지원자가 다이어그램을 제출했습니다.
 
@@ -754,5 +756,5 @@ async def get_whiteboard_status():
     return {
         "claude_available": CLAUDE_AVAILABLE and bool(ANTHROPIC_API_KEY),
         "ollama_fallback": OLLAMA_AVAILABLE,
-        "model": CLAUDE_MODEL if CLAUDE_AVAILABLE and ANTHROPIC_API_KEY else "qwen3:4b (fallback)"
+        "model": CLAUDE_MODEL if CLAUDE_AVAILABLE and ANTHROPIC_API_KEY else f"{DEFAULT_LLM_MODEL} (fallback)"
     }
