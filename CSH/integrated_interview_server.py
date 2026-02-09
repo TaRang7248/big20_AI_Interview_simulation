@@ -222,18 +222,30 @@ async def _proxy_to_nextjs(request: Request, path: str = ""):
     # 쿼리스트링 유지
     query = str(request.url.query)
     target_url = f"{NEXTJS_URL}/{path}" + (f"?{query}" if query else "")
-    # Host 헤더를 Next.js 서버에 맞게 교체
-    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
+    # Host 헤더를 Next.js 서버에 맞게 교체, content-length 제거 (httpx가 자동 계산)
+    skip_headers = {"host", "content-length"}
+    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in skip_headers}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(target_url, headers=fwd_headers)
-            # Next.js RSC (React Server Components) 응답 등 원본 content-type 보존
-            content_type = resp.headers.get("content-type", "text/html; charset=utf-8")
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            # GET/POST 모두 지원
+            method = request.method
+            body = await request.body() if method in ("POST", "PUT", "PATCH") else None
+            resp = await client.request(method, target_url, headers=fwd_headers, content=body)
+            # Next.js 응답 헤더 원본 보존 (RSC, Vary, Set-Cookie 등)
+            proxy_headers = {}
+            for key in ("content-type", "vary", "x-nextjs-cache", "set-cookie", "cache-control",
+                         "x-action-redirect", "x-action-revalidate", "location",
+                         "rsc", "next-router-state-tree", "x-nextjs-matched-path"):
+                val = resp.headers.get(key)
+                if val:
+                    proxy_headers[key] = val
+            if not proxy_headers.get("content-type"):
+                proxy_headers["content-type"] = "text/html; charset=utf-8"
             from fastapi.responses import Response
             return Response(
                 content=resp.content,
                 status_code=resp.status_code,
-                headers={"content-type": content_type}
+                headers=proxy_headers
             )
     except httpx.ConnectError:
         # Next.js 서버가 아직 시작되지 않았을 때 안내 페이지
@@ -1892,16 +1904,32 @@ async def interview_page(request: Request):
 @app.get("/_next/{path:path}")
 async def nextjs_assets(request: Request, path: str):
     """Next.js 정적 자산 프록시 (_next/static, _next/data 등)"""
-    target_url = f"{NEXTJS_URL}/_next/{path}"
+    query = str(request.url.query)
+    target_url = f"{NEXTJS_URL}/_next/{path}" + (f"?{query}" if query else "")
+    skip_headers = {"host", "content-length"}
+    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() not in skip_headers}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(target_url, headers=dict(request.headers))
+            resp = await client.get(target_url, headers=fwd_headers)
             content_type = resp.headers.get("content-type", "application/octet-stream")
             from fastapi.responses import Response
             return Response(content=resp.content, status_code=resp.status_code,
                           headers={"content-type": content_type, "cache-control": resp.headers.get("cache-control", "")})
     except Exception:
         raise HTTPException(status_code=502, detail="Next.js 서버에 연결할 수 없습니다")
+
+
+@app.api_route("/__nextjs_original-stack-frame", methods=["GET"])
+@app.api_route("/__nextjs_original-stack-frames", methods=["GET"])
+async def nextjs_devtools(request: Request):
+    """Next.js 개발 도구 내부 라우트 프록시"""
+    return await _proxy_to_nextjs(request, request.url.path.lstrip("/"))
+
+
+@app.get("/favicon.ico")
+async def favicon(request: Request):
+    """파비콘 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "favicon.ico")
 
 
 @app.get("/profile", response_class=HTMLResponse)
@@ -2727,7 +2755,7 @@ async def get_interview_history(email: str, current_user: Dict = Depends(get_cur
     # 최신순 정렬
     history.sort(key=lambda x: x["date"], reverse=True)
     
-    return {"history": history}
+    return history
 
 
 # ========== 세션 생성 요청 모델 ==========
@@ -4025,6 +4053,20 @@ async def on_shutdown():
     RAG_EXECUTOR.shutdown(wait=False)
     VISION_EXECUTOR.shutdown(wait=False)
     print("✅ [Shutdown] 모든 Executor 종료 완료")
+
+
+# ========== Next.js 캐치올 프록시 (반드시 모든 라우트 뒤에 위치) ==========
+
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def nextjs_catchall(request: Request, path: str):
+    """
+    등록되지 않은 모든 경로를 Next.js로 프록시합니다.
+    FastAPI API 라우트보다 후순위로 매칭됩니다.
+    """
+    # /api/ 경로는 Next.js로 보내지 않음 (FastAPI에서 404 반환)
+    if path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="API endpoint not found")
+    return await _proxy_to_nextjs(request, path)
 
 
 # ========== 메인 실행 ==========
