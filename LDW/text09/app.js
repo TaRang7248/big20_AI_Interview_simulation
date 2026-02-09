@@ -49,7 +49,10 @@ document.addEventListener('DOMContentLoaded', () => {
     initAuth();
     initDashboard();
     initAdmin();
+    initDashboard();
+    initAdmin();
     initInterview();
+    initInputMasking(); // Added Input Masking
 });
 
 // --- Router Utility ---
@@ -117,11 +120,11 @@ function initAuth() {
             id: $('#reg-id').value,
             pw: $('#reg-pw').value,
             name: $('#reg-name').value,
-            dob: $('#reg-dob').value,
+            dob: `${$('#reg-dob-year').value}-${$('#reg-dob-month').value.padStart(2, '0')}-${$('#reg-dob-day').value.padStart(2, '0')}`,
             gender: $('#reg-gender').value,
             email: $('#reg-email').value,
             address: $('#reg-addr').value,
-            phone: $('#reg-phone').value,
+            phone: `${$('#reg-phone-1').value}-${$('#reg-phone-2').value}-${$('#reg-phone-3').value}`,
             type: $('input[name="reg-type"]:checked').value
         };
 
@@ -210,7 +213,14 @@ function initAuth() {
 
                 $('#edit-email').value = result.user.email || '';
                 $('#edit-addr').value = result.user.address || '';
-                $('#edit-phone').value = result.user.phone || '';
+
+                // Phone number split
+                const phone = result.user.phone || '';
+                const phoneParts = phone.split('-');
+                $('#edit-phone-1').value = phoneParts[0] || '';
+                $('#edit-phone-2').value = phoneParts[1] || '';
+                $('#edit-phone-3').value = phoneParts[2] || '';
+
                 navigateTo('myinfo-page');
             } else {
                 showToast('회원 정보를 불러오는데 실패했습니다.', 'error');
@@ -227,7 +237,7 @@ function initAuth() {
         e.preventDefault();
         const newEmail = $('#edit-email').value;
         const newAddr = $('#edit-addr').value;
-        const newPhone = $('#edit-phone').value;
+        const newPhone = `${$('#edit-phone-1').value}-${$('#edit-phone-2').value}-${$('#edit-phone-3').value}`;
 
         // Use previously verified password
         const verifiedPw = AppState.tempPassword;
@@ -675,6 +685,11 @@ function renderAdminAppList() {
         tbody.appendChild(tr);
     });
 }
+
+// --- Input Masking Utilities ---
+// Input Masking removed for split fields (handled by HTML maxlength)
+// Legacy support or specific masking can be re-added here if needed for other fields
+
 
 // --- Utilities ---
 function showToast(msg, type = 'info') {
