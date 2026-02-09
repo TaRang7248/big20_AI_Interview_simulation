@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 import functools
 
 # FastAPI 및 웹 프레임워크
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File, Form
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File, Form, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,6 +57,13 @@ load_dotenv()
 
 # JSON Resilience 유틸리티
 from json_utils import resilient_json_parse, parse_evaluation_json
+
+# 보안 유틸리티 (bcrypt 비밀번호 해싱, JWT 토큰 인증, TLS)
+from security import (
+    hash_password, verify_password, needs_rehash,
+    create_access_token, get_current_user, get_current_user_optional,
+    get_ssl_context
+)
 
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
@@ -1784,6 +1791,7 @@ class UserLoginResponse(BaseModel):
     success: bool
     message: str
     user: Optional[Dict] = None
+    access_token: Optional[str] = None
 
 
 # ========== API 엔드포인트 ==========
@@ -2362,6 +2370,24 @@ async def index():
             // 현재 로그인된 사용자
             let currentUser = null;
             
+            // ========== JWT 토큰 인증 헬퍼 ==========
+            function getAuthHeaders() {
+                const token = sessionStorage.getItem('access_token');
+                const headers = { 'Content-Type': 'application/json' };
+                if (token) {
+                    headers['Authorization'] = 'Bearer ' + token;
+                }
+                return headers;
+            }
+            
+            function getAuthHeadersOnly() {
+                const token = sessionStorage.getItem('access_token');
+                if (token) {
+                    return { 'Authorization': 'Bearer ' + token };
+                }
+                return {};
+            }
+            
             // 페이지 로드 시 세션 확인
             // sessionStorage 사용 - 브라우저/탭 종료 시 자동 로그아웃
             window.onload = function() {
@@ -2451,7 +2477,7 @@ async def index():
                 try {
                     const response = await fetch('/api/auth/user/update', {
                         method: 'PUT',
-                        headers: { 'Content-Type': 'application/json' },
+                        headers: getAuthHeaders(),
                         body: JSON.stringify(data)
                     });
                     const result = await response.json();
@@ -2717,6 +2743,10 @@ async def index():
                     
                     if (result.success) {
                         currentUser = result.user;
+                        // JWT 토큰 저장 (Bearer 인증용)
+                        if (result.access_token) {
+                            sessionStorage.setItem('access_token', result.access_token);
+                        }
                         sessionStorage.setItem('interview_user', JSON.stringify(currentUser));
                         closeModals();
                         // 로그인 성공 시 대시보드로 이동
@@ -2743,6 +2773,7 @@ async def index():
             function logout() {
                 currentUser = null;
                 sessionStorage.removeItem('interview_user');
+                sessionStorage.removeItem('access_token');
                 sessionStorage.removeItem('login_time');
                 document.getElementById('authButtons').style.display = 'flex';
                 document.getElementById('userInfo').classList.remove('active');
@@ -3205,9 +3236,8 @@ async def register_user(request: UserRegisterRequest):
             message="비밀번호는 8자 이상이어야 합니다."
         )
     
-    # 비밀번호 해싱 (간단한 해시 사용, 실제 운영에서는 bcrypt 권장)
-    import hashlib
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
+    # 비밀번호 해싱 (bcrypt 기반 보안 해싱)
+    password_hash = hash_password(request.password)
     
     # 회원 정보 저장 (DB 우선)
     user_data = {
@@ -3249,14 +3279,18 @@ async def login_user(request: UserLoginRequest):
             message="등록되지 않은 이메일입니다. 회원가입을 먼저 해주세요."
         )
     
-    # 비밀번호 검증
-    import hashlib
-    password_hash = hashlib.sha256(request.password.encode()).hexdigest()
-    if user.get("password_hash") != password_hash:
+    # 비밀번호 검증 (bcrypt + SHA-256 하위 호환)
+    if not verify_password(request.password, user.get("password_hash", "")):
         return UserLoginResponse(
             success=False,
             message="비밀번호가 올바르지 않습니다."
         )
+    
+    # SHA-256 → bcrypt 자동 마이그레이션
+    if needs_rehash(user.get("password_hash", "")):
+        new_hash = hash_password(request.password)
+        update_user(request.email, {"password_hash": new_hash})
+        print(f"🔄 비밀번호 해시 마이그레이션 완료: {request.email} (SHA-256 → bcrypt)")
     
     # 민감 정보 제외하고 반환
     user_info = {
@@ -3266,12 +3300,21 @@ async def login_user(request: UserLoginRequest):
         "gender": user["gender"]
     }
     
+    # JWT 액세스 토큰 발급
+    access_token = create_access_token(data={
+        "sub": user["email"],
+        "user_id": str(user["user_id"]),
+        "name": user["name"],
+        "role": user.get("role", "candidate")
+    })
+    
     print(f"✅ 로그인: {user['name']} ({user['email']})")
     
     return UserLoginResponse(
         success=True,
         message="로그인 성공",
-        user=user_info
+        user=user_info,
+        access_token=access_token
     )
 
 
@@ -3334,9 +3377,8 @@ async def reset_password(request: PasswordResetRequest):
     if len(request.new_password) < 8:
         return {"success": False, "message": "비밀번호는 8자 이상이어야 합니다."}
     
-    # 새 비밀번호 해시
-    import hashlib
-    new_password_hash = hashlib.sha256(request.new_password.encode()).hexdigest()
+    # 새 비밀번호 해시 (bcrypt)
+    new_password_hash = hash_password(request.new_password)
     
     # 비밀번호 업데이트
     success = update_user(request.email, {"password_hash": new_password_hash})
@@ -3349,8 +3391,11 @@ async def reset_password(request: PasswordResetRequest):
 
 
 @app.get("/api/auth/user/{email}")
-async def get_user_info_api(email: str):
-    """회원 정보 조회"""
+async def get_user_info_api(email: str, current_user: Dict = Depends(get_current_user)):
+    """회원 정보 조회 (인증 필요)"""
+    # 본인 정보만 조회 가능
+    if current_user["email"] != email:
+        raise HTTPException(status_code=403, detail="본인 정보만 조회할 수 있습니다.")
     # DB에서 사용자 조회
     user = get_user_by_email(email)
     
@@ -3385,9 +3430,8 @@ class UserUpdateResponse(BaseModel):
 
 
 @app.put("/api/auth/user/update")
-async def update_user_info(request: UserUpdateRequest):
-    """회원 정보 수정 API"""
-    import hashlib
+async def update_user_info(request: UserUpdateRequest, current_user: Dict = Depends(get_current_user)):
+    """회원 정보 수정 API (인증 필요)"""
     
     # 사용자 존재 확인
     user = get_user_by_email(request.email)
@@ -3422,9 +3466,8 @@ async def update_user_info(request: UserUpdateRequest):
                 message="현재 비밀번호를 입력해주세요."
             )
         
-        # 현재 비밀번호 확인
-        current_hash = hashlib.sha256(request.current_password.encode()).hexdigest()
-        if current_hash != user.get("password_hash"):
+        # 현재 비밀번호 확인 (bcrypt + SHA-256 하위 호환)
+        if not verify_password(request.current_password, user.get("password_hash", "")):
             return UserUpdateResponse(
                 success=False,
                 message="현재 비밀번호가 일치하지 않습니다."
@@ -3436,7 +3479,7 @@ async def update_user_info(request: UserUpdateRequest):
                 message="새 비밀번호는 8자 이상이어야 합니다."
             )
         
-        update_data["password_hash"] = hashlib.sha256(request.new_password.encode()).hexdigest()
+        update_data["password_hash"] = hash_password(request.new_password)
     
     # 업데이트 실행
     if update_data:
@@ -3472,7 +3515,8 @@ class ResumeUploadResponse(BaseModel):
 async def upload_resume(
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
-    user_email: Optional[str] = Form(None)
+    user_email: Optional[str] = Form(None),
+    current_user: Dict = Depends(get_current_user)
 ):
     """
     이력서 PDF 파일 업로드 및 RAG 인덱싱
@@ -3589,8 +3633,8 @@ async def get_resume_status(session_id: str):
 
 
 @app.delete("/api/resume/{session_id}")
-async def delete_resume(session_id: str):
-    """세션의 이력서 삭제"""
+async def delete_resume(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """세션의 이력서 삭제 (인증 필요)"""
     session = state.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
@@ -3624,8 +3668,8 @@ async def dashboard_page():
 # ========== 면접 이력 조회 API ==========
 
 @app.get("/api/interview/history")
-async def get_interview_history(email: str):
-    """사용자 이메일 기준 면접 이력 조회"""
+async def get_interview_history(email: str, current_user: Dict = Depends(get_current_user)):
+    """사용자 이메일 기준 면접 이력 조회 (인증 필요)"""
     user = get_user_by_email(email)
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
@@ -3671,8 +3715,8 @@ class SessionCreateRequest(BaseModel):
 # ========== Session API ==========
 
 @app.post("/api/session")
-async def create_session(request: SessionCreateRequest = None):
-    """새 면접 세션 생성 (로그인 사용자만 가능)"""
+async def create_session(request: SessionCreateRequest = None, current_user: Dict = Depends(get_current_user)):
+    """새 면접 세션 생성 (인증 필요)"""
     # 사용자 인증 확인
     if not request or not request.user_email:
         raise HTTPException(
@@ -3919,7 +3963,7 @@ class ChatRequestWithIntervention(BaseModel):
     intervention_type: Optional[str] = None  # 개입 유형
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_user)):
     """채팅 메시지 전송 및 AI 응답 받기"""
     session = state.get_session(request.session_id)
     if not session:
@@ -3958,7 +4002,7 @@ async def chat(request: ChatRequest):
 
 
 @app.post("/api/chat/with-intervention")
-async def chat_with_intervention(request: ChatRequestWithIntervention):
+async def chat_with_intervention(request: ChatRequestWithIntervention, current_user: Dict = Depends(get_current_user)):
     """개입 정보를 포함한 채팅 메시지 전송"""
     session = state.get_session(request.session_id)
     if not session:
@@ -4007,7 +4051,7 @@ async def chat_with_intervention(request: ChatRequestWithIntervention):
 # ========== Report API ==========
 
 @app.get("/api/report/{session_id}")
-async def get_report(session_id: str):
+async def get_report(session_id: str, current_user: Dict = Depends(get_current_user)):
     """면접 리포트 생성"""
     session = state.get_session(session_id)
     if not session:
@@ -4063,7 +4107,7 @@ class EvaluateResponse(BaseModel):
     brief_feedback: str
 
 @app.post("/api/evaluate", response_model=EvaluateResponse)
-async def evaluate_answer(request: EvaluateRequest):
+async def evaluate_answer(request: EvaluateRequest, current_user: Dict = Depends(get_current_user)):
     """
     LLM을 사용하여 답변 평가
     
@@ -4101,8 +4145,8 @@ async def evaluate_answer(request: EvaluateRequest):
 
 
 @app.get("/api/evaluations/{session_id}")
-async def get_evaluations(session_id: str):
-    """세션의 모든 평가 결과 조회"""
+async def get_evaluations(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """세션의 모든 평가 결과 조회 (인증 필요)"""
     session = state.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
@@ -4463,7 +4507,7 @@ class AsyncTaskResponse(BaseModel):
 
 
 @app.post("/api/async/evaluate", response_model=AsyncTaskResponse)
-async def async_evaluate_answer(request: AsyncTaskRequest):
+async def async_evaluate_answer(request: AsyncTaskRequest, current_user: Dict = Depends(get_current_user)):
     """
     비동기 답변 평가 (Celery)
     
@@ -4503,7 +4547,7 @@ async def async_evaluate_answer(request: AsyncTaskRequest):
 
 
 @app.post("/api/async/batch-evaluate", response_model=AsyncTaskResponse)
-async def async_batch_evaluate(request: Request):
+async def async_batch_evaluate(request: Request, current_user: Dict = Depends(get_current_user)):
     """
     비동기 배치 평가 (Celery)
     
@@ -4529,7 +4573,7 @@ async def async_batch_evaluate(request: Request):
 
 
 @app.post("/api/async/emotion-analysis", response_model=AsyncTaskResponse)
-async def async_emotion_analysis(request: Request):
+async def async_emotion_analysis(request: Request, current_user: Dict = Depends(get_current_user)):
     """
     비동기 감정 분석 (Celery)
     
@@ -4581,7 +4625,7 @@ async def async_batch_emotion_analysis(request: Request):
 
 
 @app.post("/api/async/generate-report", response_model=AsyncTaskResponse)
-async def async_generate_report(session_id: str):
+async def async_generate_report(session_id: str, current_user: Dict = Depends(get_current_user)):
     """
     비동기 리포트 생성 (Celery)
     
@@ -4613,7 +4657,7 @@ async def async_generate_report(session_id: str):
 
 
 @app.post("/api/async/complete-interview", response_model=AsyncTaskResponse)
-async def async_complete_interview(request: Request):
+async def async_complete_interview(request: Request, current_user: Dict = Depends(get_current_user)):
     """
     비동기 면접 완료 워크플로우 (Celery)
     
@@ -4958,7 +5002,22 @@ if __name__ == "__main__":
     print("     celery -A celery_app worker -Q llm_evaluation --pool=solo")
     print("     celery -A celery_app worker -Q report_generation --pool=solo")
     print("=" * 70)
-    print("  🌐 http://localhost:8000 에서 접속하세요")
+    
+    # TLS 설정 확인
+    ssl_context = get_ssl_context()
+    if ssl_context:
+        protocol = "https"
+        ssl_kwargs = {
+            "ssl_certfile": os.getenv("TLS_CERTFILE", ""),
+            "ssl_keyfile": os.getenv("TLS_KEYFILE", "")
+        }
+        print("  🔒 TLS 활성화 (HTTPS)")
+    else:
+        protocol = "http"
+        ssl_kwargs = {}
+        print("  ⚠️ TLS 비활성화 (HTTP) — 프로덕션에서는 TLS_CERTFILE/TLS_KEYFILE 설정 권장")
+    
+    print(f"  🌐 {protocol}://localhost:8000 에서 접속하세요")
     print("=" * 70 + "\n")
     
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, **ssl_kwargs)
