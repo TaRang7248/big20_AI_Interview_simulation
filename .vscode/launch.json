@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Celery: Worker",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "celery",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal", 
+      "args": [
+        "-A", "CSH.celery_app", 
+        "worker",
+        "--loglevel=info",
+        "--pool=solo" 
+      ],
+      "presentation": {
+        "group": "backend",
+        "order": 1
+      }
+    }
+  ]
+}
