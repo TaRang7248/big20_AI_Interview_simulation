@@ -33,7 +33,7 @@ pip install -r requirements_integrated.txt
 
 ```env
 # LLM 설정 (Ollama)
-LLM_MODEL=llama3
+LLM_MODEL=qwen3:4b
 LLM_TEMPERATURE=0.3
 
 # Hume AI TTS
@@ -73,7 +73,7 @@ DID_API_KEY=your_did_api_key
 ```bash
 # Ollama 실행
 ollama serve
-ollama pull llama3
+ollama pull qwen3:4b
 
 # Redis 실행 (Celery 브로커 + 감정 데이터 저장)
 docker run -d -p 6379:6379 redis:alpine
@@ -197,7 +197,7 @@ CSH/
 
 ### 1. LLM 기반 답변 평가 시스템
 
-LLM은 **질문 생성이 아닌 답변 평가**에 사용됩니다. Ollama의 Llama3 모델을 활용하여 지원자 답변을 5가지 기준으로 평가합니다.
+LLM은 **질문 생성이 아닌 답변 평가**에 사용됩니다. Ollama의 Qwen3-4B 모델을 활용하여 지원자 답변을 5가지 기준으로 평가합니다.
 
 | 평가 항목 | 설명 | 점수 |
 |-----------|------|------|
@@ -392,7 +392,7 @@ D-ID API를 활용한 실시간 AI 면접관 영상 생성 서비스입니다.
 
 | 서비스 | 필수 조건 | 역할 |
 |--------|----------|------|
-| LLM | Ollama 실행 + llama3 모델 |
+| LLM | Ollama 실행 + qwen3:4b 모델 |
 | TTS | HUME_API_KEY + HUME_SECRET_KEY 설정 | 음성 출력 |
 | STT | DEEPGRAM_API_KEY 설정 + pyaudio | 음성 인식 |
 | RAG | POSTGRES_CONNECTION_STRING 설정 + pgvector | 이력서 맞춤 평가 |
@@ -456,11 +456,11 @@ start_prerequisites.bat
 ```bash
 # Ollama 서비스 확인
 ollama serve
-curl http://localhost:11434/api/generate -d '{"model":"llama3","prompt":"hello"}'
+curl http://localhost:11434/api/generate -d '{"model":"qwen3:4b","prompt":"hello"}'
 
 # 모델 다운로드 확인
 ollama list
-ollama pull llama3
+ollama pull qwen3:4b
 ```
 
 ### WebRTC 연결 실패

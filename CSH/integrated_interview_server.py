@@ -2,7 +2,7 @@
 AI 모의면접 통합 시스템
 ========================
 기능 통합:
-1. LLM 기반 면접 질문 생성 (Ollama/Llama3)
+1. LLM 기반 면접 질문 생성 (Ollama/Qwen3)
 2. TTS 서비스 (Hume AI)
 3. STT 서비스 (Deepgram)
 4. 화상 면접 + 감정 분석 (DeepFace + WebRTC)
@@ -56,7 +56,7 @@ sys.path.append(current_dir)
 load_dotenv()
 
 # ========== 설정 ==========
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
