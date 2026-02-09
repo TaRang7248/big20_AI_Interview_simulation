@@ -27,6 +27,9 @@ from enum import Enum
 from dotenv import load_dotenv
 load_dotenv()
 
+# JSON Resilience 유틸리티
+from json_utils import parse_code_analysis_json
+
 # FastAPI
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -806,24 +809,20 @@ class CodeAnalyzer:
         response = self.llm.invoke(messages)
         response_text = response.content
         
-        # JSON 추출
-        json_match = re.search(r'\{[\s\S]*\}', response_text)
-        if json_match:
-            analysis = json.loads(json_match.group())
-            
-            return CodeAnalysisResult(
-                overall_score=analysis.get('overall_score', 0),
-                correctness=analysis.get('correctness', {}),
-                time_complexity=analysis.get('time_complexity', {}),
-                space_complexity=analysis.get('space_complexity', {}),
-                code_style=analysis.get('code_style', {}),
-                comments=analysis.get('comments', {}),
-                best_practices=analysis.get('best_practices', {}),
-                feedback=analysis.get('feedback', []),
-                detailed_analysis=analysis.get('detailed_analysis', '')
-            )
+        # JSON Resilience 파싱
+        analysis = parse_code_analysis_json(response_text, context="CodeAnalyzer.analyze_code")
         
-        raise ValueError("JSON 파싱 실패")
+        return CodeAnalysisResult(
+            overall_score=analysis.get('overall_score', 0),
+            correctness=analysis.get('correctness', {}),
+            time_complexity=analysis.get('time_complexity', {}),
+            space_complexity=analysis.get('space_complexity', {}),
+            code_style=analysis.get('code_style', {}),
+            comments=analysis.get('comments', {}),
+            best_practices=analysis.get('best_practices', {}),
+            feedback=analysis.get('feedback', []),
+            detailed_analysis=analysis.get('detailed_analysis', '')
+        )
     
     def _basic_analyze(
         self,
