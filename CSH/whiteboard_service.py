@@ -4,9 +4,10 @@
 시스템 아키텍처 면접을 위한 화이트보드 다이어그램 분석
 
 기능:
-1. Claude 3.5 Sonnet Vision API를 통한 다이어그램 인식
-2. 시스템 아키텍처 평가 (구조, 확장성, 보안 등)
-3. 피드백 및 개선 제안
+1. Claude 3.5 Sonnet Vision API를 통한 다이어그램 인식 (기본)
+2. Qwen3-VL:4B 비전 모델을 통한 다이어그램 인식 (폴백)
+3. 시스템 아키텍처 평가 (구조, 확장성, 보안 등)
+4. 피드백 및 개선 제안
 """
 
 import os
@@ -40,6 +41,10 @@ except ImportError:
 # ========== 설정 ==========
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
+# 다이어그램 분석 전용 비전 모델 (이미지 인식 가능)
+DIAGRAM_VISION_MODEL = "qwen3-vl:4b"
 
 
 # ========== 모델 ==========
@@ -153,8 +158,8 @@ class ArchitectureProblemGenerator:
         # LLM 초기화
         if OLLAMA_AVAILABLE:
             try:
-                self.llm = ChatOllama(model="qwen3:4b", temperature=0.8)
-                print("✅ 아키텍처 문제 생성기 초기화 (Ollama)")
+                self.llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.8, num_ctx=DEFAULT_LLM_NUM_CTX)
+                print(f"✅ 아키텍처 문제 생성기 초기화 (Ollama, ctx={DEFAULT_LLM_NUM_CTX})")
             except Exception as e:
                 print(f"⚠️ Ollama 초기화 실패: {e}")
         
@@ -341,17 +346,35 @@ class ArchitectureProblemGenerator:
 problem_generator = ArchitectureProblemGenerator()
 
 
-# ========== Claude Vision 다이어그램 분석 서비스 ==========
+# ========== Claude Vision + Qwen3-VL 폴백 다이어그램 분석 서비스 ==========
 class DiagramAnalyzer:
-    """Claude 3.5 Sonnet을 사용한 다이어그램 분석"""
+    """Claude 3.5 Sonnet을 사용한 다이어그램 분석 (Qwen3-VL:4B 폴백 지원)"""
     
     def __init__(self):
-        self.client = None
+        self.claude_client = None
+        self.vision_llm = None
+        
+        # 1순위: Claude Vision API
         if CLAUDE_AVAILABLE and ANTHROPIC_API_KEY:
-            self.client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            self.claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
             print("✅ Claude Vision API 초기화 완료")
         else:
-            print("⚠️ Claude API 미설정. 폴백 모드 사용")
+            print("⚠️ Claude API 미설정. Qwen3-VL 폴백 사용")
+        
+        # 2순위: Qwen3-VL 비전 모델 (폴백)
+        if OLLAMA_AVAILABLE:
+            try:
+                self.vision_llm = ChatOllama(
+                    model=DIAGRAM_VISION_MODEL,
+                    temperature=0.3,
+                    num_ctx=DEFAULT_LLM_NUM_CTX
+                )
+                print(f"✅ Qwen3-VL 폴백 모델 초기화 완료: {DIAGRAM_VISION_MODEL}")
+            except Exception as e:
+                print(f"⚠️ Qwen3-VL 초기화 실패: {e}")
+        
+        if not self.claude_client and not self.vision_llm:
+            print("⚠️ 다이어그램 분석 서비스 사용 불가: Claude API 또는 Qwen3-VL 모델을 설정해주세요")
     
     async def analyze_diagram(
         self,
@@ -359,27 +382,29 @@ class DiagramAnalyzer:
         problem: Optional[ArchitectureProblem] = None,
         user_explanation: Optional[str] = None
     ) -> DiagramAnalysisResult:
-        """다이어그램 분석 수행"""
+        """다이어그램 분석 수행 (우선순위: Claude > Qwen3-VL > 텍스트 폴백)"""
         
-        if self.client:
+        if self.claude_client:
             return await self._analyze_with_claude(image_base64, problem, user_explanation)
+        elif self.vision_llm:
+            return await self._analyze_with_vision(image_base64, problem, user_explanation)
         else:
             return await self._analyze_with_fallback(problem, user_explanation)
     
-    async def _analyze_with_claude(
+    async def _analyze_with_vision(
         self,
         image_base64: str,
         problem: Optional[ArchitectureProblem],
         user_explanation: Optional[str]
     ) -> DiagramAnalysisResult:
-        """Claude Vision API로 다이어그램 분석"""
+        """Qwen3-VL:4B 비전 모델로 다이어그램 분석"""
         
         # 이미지 데이터 정리 (data:image/png;base64, 제거)
         if "," in image_base64:
             image_base64 = image_base64.split(",")[1]
         
-        # 시스템 프롬프트
-        system_prompt = """당신은 시스템 아키텍처 전문가입니다.
+        # 프롬프트 구성
+        prompt_text = """당신은 시스템 아키텍처 전문가입니다.
 제공된 다이어그램을 분석하고 다음을 평가해주세요:
 
 1. **다이어그램 인식**: 어떤 컴포넌트들이 있는지 식별
@@ -420,64 +445,44 @@ class DiagramAnalyzer:
 ```"""
         
         # 문제 컨텍스트 추가
-        user_content = []
-        
         if problem:
-            user_content.append({
-                "type": "text",
-                "text": f"""## 문제 정보
+            prompt_text += f"""\n\n## 문제 정보
 **제목**: {problem.title}
 **설명**: {problem.description}
 **요구사항**: {', '.join(problem.requirements)}
 **예상 컴포넌트**: {', '.join(problem.expected_components)}
-**난이도**: {problem.difficulty}
-"""
-            })
+**난이도**: {problem.difficulty}"""
         
-        # 이미지 추가
-        user_content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": image_base64
-            }
-        })
-        
-        # 사용자 설명 추가
         if user_explanation:
-            user_content.append({
-                "type": "text",
-                "text": f"\n## 지원자 설명\n{user_explanation}"
-            })
+            prompt_text += f"\n\n## 지원자 설명\n{user_explanation}"
         
-        user_content.append({
-            "type": "text",
-            "text": "\n위 다이어그램을 분석하고 JSON 형식으로 평가해주세요."
-        })
+        prompt_text += "\n\n위 다이어그램을 분석하고 JSON 형식으로 평가해주세요."
         
         try:
-            # Claude API 호출
-            response = self.client.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=[
-                    {"role": "user", "content": user_content}
+            # Qwen3-VL 멀티모달 메시지 구성 (이미지 + 텍스트)
+            message = HumanMessage(
+                content=[
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{image_base64}"}
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt_text
+                    }
                 ]
             )
             
-            # 응답 파싱
-            response_text = response.content[0].text
+            response = self.vision_llm.invoke([message])
             
-            # JSON 추출
-            json_match = response_text
+            # JSON 추출 및 파싱
+            response_text = response.content
             if "```json" in response_text:
-                json_match = response_text.split("```json")[1].split("```")[0]
+                response_text = response_text.split("```json")[1].split("```")[0]
             elif "```" in response_text:
-                json_match = response_text.split("```")[1].split("```")[0]
+                response_text = response_text.split("```")[1].split("```")[0]
             
-            result_data = json.loads(json_match.strip())
+            result_data = json.loads(response_text.strip())
             
             # 점수 계산
             eval_data = result_data.get("architecture_evaluation", {})
@@ -500,10 +505,101 @@ class DiagramAnalyzer:
             )
             
         except json.JSONDecodeError as e:
-            print(f"JSON 파싱 오류: {e}")
+            print(f"Qwen3-VL JSON 파싱 오류: {e}")
+            return self._create_error_result("응답 파싱 오류")
+        except Exception as e:
+            print(f"Qwen3-VL 분석 오류: {e}")
+            return await self._analyze_with_fallback(problem, user_explanation)
+    
+    async def _analyze_with_claude(
+        self,
+        image_base64: str,
+        problem: Optional[ArchitectureProblem],
+        user_explanation: Optional[str]
+    ) -> DiagramAnalysisResult:
+        """Claude Vision API로 다이어그램 분석 (기본)"""
+        
+        # 이미지 데이터 정리
+        if "," in image_base64:
+            image_base64 = image_base64.split(",")[1]
+        
+        system_prompt = """당신은 시스템 아키텍처 전문가입니다.
+제공된 다이어그램을 분석하고 JSON 형식으로 평가해주세요.
+반드시 아래 JSON 형식으로 응답하세요:
+```json
+{
+    "diagram_recognition": {"components": [], "connections": [], "data_flows": []},
+    "architecture_evaluation": {
+        "structure_score": 0, "structure_comment": "",
+        "scalability_score": 0, "scalability_comment": "",
+        "security_score": 0, "security_comment": "",
+        "performance_score": 0, "performance_comment": ""
+    },
+    "component_analysis": [{"name": "", "role": "", "evaluation": ""}],
+    "strengths": [], "weaknesses": [],
+    "feedback": [], "detailed_analysis": ""
+}
+```"""
+        
+        user_content = []
+        if problem:
+            user_content.append({
+                "type": "text",
+                "text": f"## 문제 정보\n**제목**: {problem.title}\n**설명**: {problem.description}\n**요구사항**: {', '.join(problem.requirements)}\n**예상 컴포넌트**: {', '.join(problem.expected_components)}\n**난이도**: {problem.difficulty}"
+            })
+        
+        user_content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": image_base64}
+        })
+        
+        if user_explanation:
+            user_content.append({"type": "text", "text": f"\n## 지원자 설명\n{user_explanation}"})
+        
+        user_content.append({"type": "text", "text": "\n위 다이어그램을 분석하고 JSON 형식으로 평가해주세요."})
+        
+        try:
+            response = self.claude_client.messages.create(
+                model=CLAUDE_MODEL, max_tokens=4096,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_content}]
+            )
+            
+            response_text = response.content[0].text
+            json_match = response_text
+            if "```json" in response_text:
+                json_match = response_text.split("```json")[1].split("```")[0]
+            elif "```" in response_text:
+                json_match = response_text.split("```")[1].split("```")[0]
+            
+            result_data = json.loads(json_match.strip())
+            eval_data = result_data.get("architecture_evaluation", {})
+            overall_score = (
+                eval_data.get("structure_score", 0) + eval_data.get("scalability_score", 0) +
+                eval_data.get("security_score", 0) + eval_data.get("performance_score", 0)
+            )
+            
+            return DiagramAnalysisResult(
+                overall_score=min(100, overall_score),
+                diagram_recognition=result_data.get("diagram_recognition", {}),
+                architecture_evaluation=eval_data,
+                component_analysis=result_data.get("component_analysis", []),
+                feedback=result_data.get("feedback", []),
+                strengths=result_data.get("strengths", []),
+                weaknesses=result_data.get("weaknesses", []),
+                detailed_analysis=result_data.get("detailed_analysis", "")
+            )
+        except json.JSONDecodeError as e:
+            print(f"Claude JSON 파싱 오류: {e}")
+            # Qwen3-VL 폴백 시도
+            if self.vision_llm:
+                return await self._analyze_with_vision(image_base64, problem, user_explanation)
             return self._create_error_result("응답 파싱 오류")
         except Exception as e:
             print(f"Claude API 오류: {e}")
+            # Qwen3-VL 폴백 시도
+            if self.vision_llm:
+                return await self._analyze_with_vision(image_base64, problem, user_explanation)
             return await self._analyze_with_fallback(problem, user_explanation)
     
     async def _analyze_with_fallback(
@@ -517,7 +613,7 @@ class DiagramAnalyzer:
             return self._create_error_result("분석 서비스 사용 불가")
         
         try:
-            llm = ChatOllama(model="qwen3:4b", temperature=0.3)
+            llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.3, num_ctx=DEFAULT_LLM_NUM_CTX)
             
             prompt = f"""시스템 아키텍처 면접에서 지원자가 다이어그램을 제출했습니다.
 
@@ -538,7 +634,7 @@ JSON 형식으로 응답하세요:
     "component_analysis": [],
     "strengths": ["설명 제공"],
     "weaknesses": ["이미지 분석 불가"],
-    "feedback": ["Claude API 키를 설정하면 다이어그램을 직접 분석할 수 있습니다."],
+    "feedback": ["Qwen3-VL 비전 모델을 설치하면 다이어그램을 직접 분석할 수 있습니다. (ollama pull qwen3-vl:4b)"],
     "detailed_analysis": "폴백 모드로 분석되었습니다."
 }}"""
             
@@ -751,8 +847,20 @@ async def get_whiteboard_results(session_id: str):
 @router.get("/status")
 async def get_whiteboard_status():
     """화이트보드 서비스 상태 확인"""
+    claude_available = CLAUDE_AVAILABLE and bool(ANTHROPIC_API_KEY)
+    vision_fallback = OLLAMA_AVAILABLE  # Qwen3-VL
+    
+    if claude_available:
+        model = CLAUDE_MODEL
+    elif vision_fallback:
+        model = f"{DIAGRAM_VISION_MODEL} (fallback)"
+    else:
+        model = f"{DEFAULT_LLM_MODEL} (text-only fallback)"
+    
     return {
-        "claude_available": CLAUDE_AVAILABLE and bool(ANTHROPIC_API_KEY),
-        "ollama_fallback": OLLAMA_AVAILABLE,
-        "model": CLAUDE_MODEL if CLAUDE_AVAILABLE and ANTHROPIC_API_KEY else "qwen3:4b (fallback)"
+        "claude_available": claude_available,
+        "vision_model": DIAGRAM_VISION_MODEL,
+        "vision_fallback": vision_fallback,
+        "ollama_available": OLLAMA_AVAILABLE,
+        "model": model
     }

@@ -34,7 +34,8 @@ load_dotenv()
 
 # LLM 모델 설정 (환경변수로 오버라이드 가능)
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
-DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7")) 
+DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384")) 
 
 
 class InterviewReportGenerator:
@@ -384,8 +385,8 @@ def main(): # 프로그램의 메인 로직을 담는 함수
     
     # LLM 초기화 (Ollama 로컬 모델 사용)
     try:
-        llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=DEFAULT_LLM_TEMPERATURE)
-        print(f"✅ LLM 모델 로드 완료: {DEFAULT_LLM_MODEL}")
+        llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=DEFAULT_LLM_TEMPERATURE, num_ctx=DEFAULT_LLM_NUM_CTX)
+        print(f"✅ LLM 모델 로드 완료: {DEFAULT_LLM_MODEL} (context window: {DEFAULT_LLM_NUM_CTX})")
     except Exception as e:
         print(f"❌ LLM 초기화 실패: {e}")
         print("   Ollama가 실행 중인지 확인해주세요: 'ollama serve'")

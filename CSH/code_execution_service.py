@@ -37,6 +37,8 @@ except ImportError:
 
 
 # ========== 설정 ==========
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
 MAX_EXECUTION_TIME = 10  # 초
 MAX_OUTPUT_SIZE = 10000  # 문자
 SUPPORTED_LANGUAGES = ["python", "javascript", "java", "c", "cpp"]
@@ -723,8 +725,9 @@ class CodeAnalyzer:
         if LLM_AVAILABLE:
             try:
                 self.llm = ChatOllama(
-                    model=os.getenv("LLM_MODEL", "qwen3:4b"),
-                    temperature=0.3
+                    model=DEFAULT_LLM_MODEL,
+                    temperature=0.3,
+                    num_ctx=DEFAULT_LLM_NUM_CTX
                 )
             except Exception as e:
                 print(f"⚠️ CodeAnalyzer LLM 초기화 실패: {e}")

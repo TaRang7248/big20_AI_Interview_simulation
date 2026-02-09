@@ -58,6 +58,7 @@ load_dotenv()
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # 소셜 로그인 설정
@@ -926,12 +927,14 @@ class AIInterviewer:
                 # 평가용 LLM (낮은 temperature)
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL, 
-                    temperature=0.3
+                    temperature=0.3,
+                    num_ctx=DEFAULT_LLM_NUM_CTX
                 )
                 # 질문 생성용 LLM (높은 temperature)
                 self.question_llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL, 
-                    temperature=DEFAULT_LLM_TEMPERATURE
+                    temperature=DEFAULT_LLM_TEMPERATURE,
+                    num_ctx=DEFAULT_LLM_NUM_CTX
                 )
                 print(f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}")
             except Exception as e:
