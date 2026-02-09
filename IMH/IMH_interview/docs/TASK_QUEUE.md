@@ -52,14 +52,36 @@
 ### TASK-004 FastAPI 최소 엔트리 + healthcheck
 - `/health` 단일 엔드포인트
 
+## BACKLOG
+
 ### TASK-005 Playground STT (파일 업로드)
 - Mock STT Provider 기반
 
-### TASK-006 Playground Voice 분석
+### TASK-006 Playground PDF → Text (문서 업로드)
+- PDF 업로드 → 텍스트 추출
+- 저장 정책 준수(원본 파일 장기 저장 금지)
+- (선택) 텍스트 결과를 LLM 입력으로 연결 가능한 형태로 반환
+
+### TASK-007 Voice 분석 (Parselmouth)
 - Parselmouth 기반
 
-### TASK-007 Playground Emotion 분석
+### TASK-008 Emotion 분석 (DeepFace, 1fps)
 - DeepFace (1fps)
 
-### TASK-008 Playground Visual 분석
+### TASK-009 Visual 분석 (MediaPipe)
 - MediaPipe
+
+### TASK-010 정량 평가 엔진 (루브릭 기반)
+- 정량 평가 루브릭(JSON 스키마) 기반 점수 산출
+- 분석 결과를 평가 입력으로 변환
+
+### TASK-011 평가 근거 데이터 구조 (Evidence)
+- 평가 점수 산출 근거 데이터 구조 정의
+- 결과 리포트/감사용 Evidence JSON 설계
+
+
+## HOLD
+
+### TASK-012 TTS Provider (Text → Speech)
+- 면접관 음성 출력(TTS) Provider 인터페이스 및 Mock
+- 실시간 면접/세션 단계에서만 착수
