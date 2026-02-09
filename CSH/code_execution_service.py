@@ -723,7 +723,7 @@ class CodeAnalyzer:
         if LLM_AVAILABLE:
             try:
                 self.llm = ChatOllama(
-                    model=os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0"),
+                    model=os.getenv("LLM_MODEL", "qwen3:4b"),
                     temperature=0.3
                 )
             except Exception as e:
