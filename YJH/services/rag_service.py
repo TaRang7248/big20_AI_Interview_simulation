@@ -19,6 +19,11 @@ def process_resume_pdf(thread_id: str, file_path: str):
         # 1. PDF 로드
         loader = PyPDFLoader(file_path)
         documents = loader.load()
+
+        # [추가] 텍스트 전처리: 불필요한 줄바꿈 제거
+        for doc in documents:
+            # 줄바꿈을 공백으로 변경하고, 다중 공백을 하나로 줄임
+            doc.page_content = doc.page_content.replace('\n', ' ').replace('  ', ' ')
         
         # 2. 텍스트 분할 (청크 단위로 쪼개기)
         # 이력서는 구조가 중요하므로 청크 사이즈를 적절히 조절
@@ -28,6 +33,10 @@ def process_resume_pdf(thread_id: str, file_path: str):
             separators=["\n\n", "\n", " ", ""]
         )
         splits = text_splitter.split_documents(documents)
+
+        # [추가] 첫 번째 청크 내용 찍어보기
+        if len(splits) > 0:
+            print(f"📄 [PDF 내용 확인]: {splits[0].page_content[:200]}...") # 앞 200자만 출력
         
         # 3. 임베딩 및 벡터 저장소 생성 (FAISS)
         embeddings = OpenAIEmbeddings()

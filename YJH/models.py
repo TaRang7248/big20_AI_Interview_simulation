@@ -36,6 +36,7 @@ class Transcript(Base):
     sender = Column(String)  # 'human' or 'ai'
     content = Column(Text)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    emotion = Column(String, nullable=True) # "happy", "fear", "neutral" 등 저장
 
     session = relationship("InterviewSession", back_populates="transcripts")
 
