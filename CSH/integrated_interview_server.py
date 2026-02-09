@@ -95,8 +95,14 @@ async def run_llm_async(llm, messages):
 
 
 async def run_rag_async(retriever, query):
-    """RAG retriever invoke를 비동기로 실행"""
-    return await run_in_executor(RAG_EXECUTOR, retriever.invoke, query)
+    """RAG retriever invoke를 비동기로 실행 (nomic-embed-text 최적화: search_query 접두사 적용)"""
+    prefixed_query = f"search_query: {query}"
+    docs = await run_in_executor(RAG_EXECUTOR, retriever.invoke, prefixed_query)
+    # search_document: 접두사 제거
+    for doc in docs:
+        if doc.page_content.startswith("search_document: "):
+            doc.page_content = doc.page_content[len("search_document: "):]
+    return docs
 
 
 async def run_deepface_async(img, actions=None):
