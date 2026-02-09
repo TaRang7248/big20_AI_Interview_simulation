@@ -17,6 +17,10 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from datetime import datetime
 
+# .env 파일에서 환경변수 로드
+from dotenv import load_dotenv
+load_dotenv()
+
 # FastAPI
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
