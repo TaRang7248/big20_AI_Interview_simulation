@@ -409,7 +409,7 @@ function renderJobList() {
         li.innerHTML = `
             <div class="job-info">
                 <h4>${job.title}</h4>
-                <p>마감일: ${job.deadline}</p>
+                <p>생성일: ${job.created_at} | 마감일: ${job.deadline}</p>
             </div>
             <button class="btn-small" onclick="viewJobDetail(${job.id})">확인하기</button>
         `;
@@ -431,6 +431,7 @@ window.viewJobDetail = async (jobId) => {
 
             $('#detail-job-title').textContent = job.title;
             $('#detail-job-writer').textContent = job.id_name || '알 수 없음';
+            $('#detail-job-created-at').textContent = job.created_at;
             $('#detail-job-deadline').textContent = job.deadline;
 
             // Handle newlines in content
