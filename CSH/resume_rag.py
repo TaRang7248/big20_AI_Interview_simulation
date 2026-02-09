@@ -54,7 +54,7 @@ class ResumeRAG:
         """
         if not os.path.exists(pdf_path):
             print(f"Error: {pdf_path} 파일이 존재하지 않습니다.")
-            return
+            return 0
 
         print(f"Loading PDF: {pdf_path} ...")
         loader = PyPDFLoader(pdf_path)
@@ -72,6 +72,7 @@ class ResumeRAG:
         print("Indexing to PostgreSQL (pgvector)...")
         self.vector_store.add_documents(splits)
         print("Indexing Complete.")
+        return len(splits)
 
     def get_retriever(self):
         """
