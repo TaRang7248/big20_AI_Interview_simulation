@@ -55,6 +55,9 @@ sys.path.append(current_dir)
 
 load_dotenv()
 
+# JSON Resilience 유틸리티
+from json_utils import resilient_json_parse, parse_evaluation_json
+
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
@@ -1295,15 +1298,9 @@ class AIInterviewer:
             response = await run_llm_async(self.llm, messages)
             response_text = response.content
             
-            # JSON 파싱 시도
-            import json
-            # JSON 블록 추출
-            json_match = re.search(r'\{[\s\S]*\}', response_text)
-            if json_match:
-                evaluation = json.loads(json_match.group())
-                return evaluation
-            else:
-                raise ValueError("JSON 형식 응답 없음")
+            # JSON Resilience 파싱
+            evaluation = parse_evaluation_json(response_text, context="AIInterviewer.evaluate_answer")
+            return evaluation
                 
         except Exception as e:
             print(f"평가 오류: {e}")
