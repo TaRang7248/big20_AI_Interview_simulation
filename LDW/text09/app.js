@@ -408,7 +408,7 @@ function renderJobList() {
         li.className = 'job-card';
         li.innerHTML = `
             <div class="job-info">
-                <h4>${job.title}</h4>
+                <h4>[${job.job || '직무 미정'}] ${job.title}</h4>
                 <p>생성일: ${job.created_at} | 마감일: ${job.deadline}</p>
             </div>
             <button class="btn-small" onclick="viewJobDetail(${job.id})">확인하기</button>
@@ -429,7 +429,8 @@ window.viewJobDetail = async (jobId) => {
             const job = result.job;
             AppState.currentJobId = job.id; // Set current Job ID
 
-            $('#detail-job-title').textContent = job.title;
+            $('#detail-job-title').textContent = `[${job.job || '-'}] ${job.title}`;
+            $('#detail-job-job').textContent = job.job || '-';
             $('#detail-job-writer').textContent = job.id_name || '알 수 없음';
             $('#detail-job-created-at').textContent = job.created_at;
             $('#detail-job-deadline').textContent = job.deadline;
@@ -462,10 +463,14 @@ $('#btn-apply-job').addEventListener('click', () => {
 window.startInterviewSetup = (jobId) => {
     AppState.currentJobId = jobId;
     const job = MOCK_DB.jobs.find(j => j.id === jobId);
-    $('#setup-job-title').textContent = job.title;
+    $('#setup-job-title').textContent = `[${job.job || '-'}] ${job.title}`;
 
     // Reset Checks
     $('#resume-upload').value = '';
+    $('#resume-status').textContent = '';
+    $('#resume-status').className = '';
+
+    // Reset Device Status
     $('#cam-status').className = 'status pending';
     $('#cam-status').textContent = '확인 필요';
     $('#mic-status').className = 'status pending';
@@ -510,8 +515,47 @@ $('#btn-cancel-interview').addEventListener('click', () => {
     navigateTo('applicant-dashboard-page');
 });
 
-// Step 2: Main Interview Logic
-$('#btn-start-interview').addEventListener('click', () => {
+// Step 2: Main Interview Logic (Modified for Upload)
+$('#btn-start-interview').addEventListener('click', async () => {
+    // Check if resume is uploaded
+    const fileInput = $('#resume-upload');
+    if (!fileInput.files || fileInput.files.length === 0) {
+        showToast('이력서 파일을 업로드해주세요.', 'error');
+        return;
+    }
+
+    // Upload Resume First
+    const file = fileInput.files[0];
+    const formData = new FormData();
+    formData.append('resume', file);
+    formData.append('id_name', AppState.currentUser.id_name);
+
+    // Find current job to get job title
+    const job = MOCK_DB.jobs.find(j => j.id === AppState.currentJobId);
+    formData.append('job_title', job ? job.job : 'Unknown');
+
+    try {
+        showToast('이력서 업로드 중...', 'info');
+        const response = await fetch('/api/upload/resume', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+
+        if (!result.success) {
+            showToast(result.message || '이력서 업로드 실패', 'error');
+            return;
+        }
+
+        showToast('이력서 업로드 완료. 면접을 시작합니다.', 'success');
+
+    } catch (error) {
+        console.error('Resume Upload Error:', error);
+        showToast('서버 연결 실패 (이력서 업로드)', 'error');
+        return;
+    }
+
+
     // Init Interview State
     AppState.interview = {
         inProgress: true,
@@ -707,6 +751,7 @@ function initAdmin() {
         $('#admin-job-edit-page').classList.add('hidden');
         // Reset form
         $('#job-title').value = '';
+        $('#job-job').value = '';
         $('#job-content').value = '';
         $('#job-deadline').value = '';
     });
@@ -730,6 +775,7 @@ function initAdmin() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     title,
+                    job: $('#job-job').value,
                     content,
                     deadline,
                     id_name: AppState.currentUser.id_name // Add writer_id (now id_name)
@@ -763,6 +809,7 @@ function initAdmin() {
         e.preventDefault();
         const id = $('#edit-job-id').value;
         const title = $('#edit-job-title').value;
+        const jobVal = $('#edit-job-job').value;
         const content = $('#edit-job-content').value;
         const deadline = $('#edit-job-deadline').value;
 
@@ -772,7 +819,7 @@ function initAdmin() {
                 headers: { 'Content-Type': 'application/json' },
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, content, deadline })
+                body: JSON.stringify({ title, job: jobVal, content, deadline })
             });
             const result = await response.json();
 
@@ -804,32 +851,32 @@ function renderAdminJobList() {
         const tr = document.createElement('tr');
         tr.innerHTML = `
             <td>${job.id}</td>
+            <td>${job.job || '-'}</td>
             <td>${job.title}</td>
-            <td>${job.id_name || '-'}</td>
-            <td>${job.created_at || '-'}</td>
+            <td>${job.id_name || 'Unknown'}</td>
+            <td>${job.created_at}</td>
             <td>${job.deadline}</td>
             <td>
-                <button class="btn-small btn-edit-job" data-id="${job.id}">수정</button>
-                <button class="btn-small btn-delete-job" data-id="${job.id}" style="background-color: #e74c3c;">삭제</button>
+                <button class="btn-small" onclick="openEditJob(${job.id})">수정</button>
+                <button class="btn-small btn-secondary" onclick="deleteJob(${job.id})">삭제</button>
             </td>
         `;
         tbody.appendChild(tr);
     });
+}
 
-    // Add Event Listeners for Edit/Delete buttons dynamically
-    $$('.btn-edit-job').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const jobId = e.target.dataset.id;
-            openEditJobPage(jobId);
-        });
-    });
+function openEditJob(id) {
+    const job = MOCK_DB.jobs.find(j => j.id === id);
+    if (job) {
+        $('#edit-job-id').value = job.id;
+        $('#edit-job-title').value = job.title;
+        $('#edit-job-job').value = job.job || '';
+        $('#edit-job-content').value = job.content;
+        $('#edit-job-deadline').value = job.deadline;
 
-    $$('.btn-delete-job').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const jobId = e.target.dataset.id;
-            deleteJob(jobId);
-        });
-    });
+        $('#admin-view-jobs').classList.add('hidden');
+        $('#admin-job-edit-page').classList.remove('hidden');
+    }
 }
 
 function openEditJobPage(jobId) {

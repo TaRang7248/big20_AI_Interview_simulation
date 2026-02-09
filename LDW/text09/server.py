@@ -2,12 +2,25 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from flask import Flask, request, jsonify, send_from_directory
 import os
+from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 
 # Load .env from project root
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env'))
 
 app = Flask(__name__, static_url_path='', static_folder='.')
+
+# Upload Configuration
+UPLOAD_FOLDER = 'uploads/resumes'
+ALLOWED_EXTENSIONS = {'pdf'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # DB Connection settings
 DB_HOST = "127.0.0.1"
@@ -51,9 +64,22 @@ def init_db():
         CREATE TABLE IF NOT EXISTS interview_announcement (
             id SERIAL PRIMARY KEY,
             title TEXT NOT NULL,
+            job TEXT,
             deadline TEXT,
             content TEXT,
             id_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (id_name) REFERENCES users(id_name)
+        )
+    ''')
+    
+    # Create interview_information table if not exists
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS interview_information (
+            id SERIAL PRIMARY KEY,
+            id_name TEXT,
+            job TEXT,
+            resume TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (id_name) REFERENCES users(id_name)
         )
@@ -73,6 +99,12 @@ def init_db():
         if c.fetchone():
             c.execute("ALTER TABLE interview_announcement RENAME COLUMN writer_id TO id_name")
             print("Migrated interview_announcement table: writer_id -> id_name")
+
+        # Check if 'job' exists in interview_announcement
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_announcement' AND column_name='job'")
+        if not c.fetchone():
+            c.execute("ALTER TABLE interview_announcement ADD COLUMN job TEXT")
+            print("Migrated interview_announcement table: Added job column")
             
         conn.commit()
     except Exception as e:
@@ -259,7 +291,7 @@ def get_jobs():
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT id, title, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
+        c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
 
         rows = c.fetchall()
         
@@ -276,7 +308,7 @@ def get_job_detail(id):
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT id, title, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement WHERE id = %s", (id,))
+        c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement WHERE id = %s", (id,))
         
         row = c.fetchone()
         
@@ -299,10 +331,10 @@ def create_job():
         c = conn.cursor()
         
         c.execute('''
-            INSERT INTO interview_announcement (title, deadline, content, id_name)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO interview_announcement (title, job, deadline, content, id_name)
+            VALUES (%s, %s, %s, %s, %s)
             RETURNING id
-        ''', (data['title'], data['deadline'], data.get('content', ''), data.get('id_name')))
+        ''', (data['title'], data.get('job', ''), data['deadline'], data.get('content', ''), data.get('id_name')))
 
         
         new_id = c.fetchone()[0]
@@ -324,9 +356,9 @@ def update_job(id):
         
         c.execute('''
             UPDATE interview_announcement
-            SET title = %s, deadline = %s, content = %s
+            SET title = %s, job = %s, deadline = %s, content = %s
             WHERE id = %s
-        ''', (data['title'], data['deadline'], data.get('content', ''), id))
+        ''', (data['title'], data.get('job', ''), data['deadline'], data.get('content', ''), id))
         conn.commit()
         
         if c.rowcount > 0:
@@ -359,6 +391,45 @@ def delete_job(id):
         return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
     finally:
         if conn: conn.close()
+
+@app.route('/api/upload/resume', methods=['POST'])
+def upload_resume():
+    if 'resume' not in request.files:
+        return jsonify({'success': False, 'message': '파일이 없습니다.'}), 400
+    
+    file = request.files['resume']
+    id_name = request.form.get('id_name')
+    job_title = request.form.get('job_title') # Job title or code from the announcement
+
+    if file.filename == '':
+        return jsonify({'success': False, 'message': '선택된 파일이 없습니다.'}), 400
+        
+    if file and allowed_file(file.filename):
+        filename = secure_filename(f"{id_name}_{file.filename}")
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+
+        # DB Save
+        try:
+            conn = get_db_connection()
+            c = conn.cursor()
+            
+            # Save to interview_information
+            c.execute('''
+                INSERT INTO interview_information (id_name, job, resume)
+                VALUES (%s, %s, %s)
+            ''', (id_name, job_title, filepath))
+            
+            conn.commit()
+            return jsonify({'success': True, 'message': '이력서가 업로드되었습니다.', 'filepath': filepath})
+        except Exception as e:
+            print(f"Resume Upload DB Error: {e}")
+            return jsonify({'success': False, 'message': '데이터베이스 저장 중 오류가 발생했습니다.'}), 500
+        finally:
+            if conn: conn.close()
+
+    else:
+        return jsonify({'success': False, 'message': '허용되지 않는 파일 형식입니다. (PDF만 가능)'}), 400
 
 import webbrowser
 from threading import Timer
