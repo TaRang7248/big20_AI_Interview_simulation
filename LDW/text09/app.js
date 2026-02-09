@@ -684,7 +684,11 @@ function initAdmin() {
             const response = await fetch('/api/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, deadline })
+                body: JSON.stringify({
+                    title,
+                    deadline,
+                    writer_id: AppState.currentUser.id // Add writer_id 
+                })
             });
             const result = await response.json();
 
@@ -753,6 +757,7 @@ function renderAdminJobList() {
         tr.innerHTML = `
             <td>${job.id}</td>
             <td>${job.title}</td>
+            <td>${job.writer_id || '-'}</td>
             <td>${job.created_at || '-'}</td>
             <td>${job.deadline}</td>
             <td>

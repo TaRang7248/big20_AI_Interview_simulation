@@ -52,9 +52,22 @@ def init_db():
             title TEXT NOT NULL,
             deadline TEXT,
             content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            writer_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (writer_id) REFERENCES users(id)
         )
     ''')
+    
+    # Migration: Add writer_id column if not exists (for existing tables)
+    try:
+        c.execute("ALTER TABLE interview_announcement ADD COLUMN IF NOT EXISTS writer_id TEXT")
+        c.execute("ALTER TABLE interview_announcement DROP CONSTRAINT IF EXISTS interview_announcement_writer_id_fkey")
+        c.execute("ALTER TABLE interview_announcement ADD CONSTRAINT interview_announcement_writer_id_fkey FOREIGN KEY (writer_id) REFERENCES users(id)")
+        conn.commit()
+    except Exception as e:
+        print(f"Migration Warning (writer_id): {e}")
+        conn.rollback()
+
     conn.commit()
     conn.close()
 
@@ -226,7 +239,7 @@ def get_jobs():
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT id, title, deadline, content, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
+        c.execute("SELECT id, title, deadline, content, writer_id, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
         rows = c.fetchall()
         
         jobs = [dict(row) for row in rows]
@@ -245,10 +258,10 @@ def create_job():
         c = conn.cursor()
         
         c.execute('''
-            INSERT INTO interview_announcement (title, deadline, content)
-            VALUES (%s, %s, %s)
+            INSERT INTO interview_announcement (title, deadline, content, writer_id)
+            VALUES (%s, %s, %s, %s)
             RETURNING id
-        ''', (data['title'], data['deadline'], data.get('content', '')))
+        ''', (data['title'], data['deadline'], data.get('content', ''), data.get('writer_id')))
         
         new_id = c.fetchone()[0]
         conn.commit()
