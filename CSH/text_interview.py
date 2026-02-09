@@ -1,5 +1,5 @@
-# Llama 3을 활용한 간단한 텍스트 기반 AI 면접 프로그램
-# LangChain 라이브러리를 사용하여 Llama 3 모델과 대화하며, 면접관 페르소나를 가진 AI가 질문을 하고 사용자가 답하는 방식으로 구현
+# Qwen3를 활용한 간단한 텍스트 기반 AI 면접 프로그램
+# LangChain 라이브러리를 사용하여 Qwen3 모델과 대화하며, 면접관 페르소나를 가진 AI가 질문을 하고 사용자가 답하는 방식으로 구현
 
 # 운영체제(OS)의 기능을 파이썬에서 사용할 수 있게 해주는 모듈. 주로 API 키와 같은 환경 변수를 .env 파일에서 가져올 때 사용
 import os
@@ -7,7 +7,7 @@ import os
 import sys
 # .env 파일에 저장된 비밀 정보(OpenAI API 키 등)를 읽어와서 시스템 환경 변수로 등록해 주는 도구
 from dotenv import load_dotenv
-# LangChain에서 제공하는 Ollama 전용 채팅 모델 연결 도구. 이를 통해 Llama 3 같은 모델과 대화할 수 있다.
+# LangChain에서 제공하는 Ollama 전용 채팅 모델 연결 도구. 이를 통해 Qwen3 같은 모델과 대화할 수 있다.
 from langchain_ollama import ChatOllama
 # RAG 기능을 위한 모듈 임포트
 from resume_rag import ResumeRAG
@@ -33,7 +33,7 @@ sys.path.append(root_dir)
 load_dotenv()
 
 # LLM 모델 설정 (환경변수로 오버라이드 가능)
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7")) 
 
 
