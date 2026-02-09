@@ -235,6 +235,11 @@
                         style="margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 15px;"></h3>
 
                     <div class="form-group">
+                        <label>직무</label>
+                        <div id="detail-job-job" style="font-weight: 500;"></div>
+                    </div>
+
+                    <div class="form-group">
                         <label>작성자</label>
                         <div id="detail-job-writer" style="font-weight: 500;"></div>
                     </div>
@@ -271,8 +276,9 @@
                 <div class="setup-steps">
                     <div class="step-card">
                         <h3>1. 이력서 업로드</h3>
-                        <p>면접에 사용할 이력서를 등록해주세요.</p>
-                        <input type="file" id="resume-upload">
+                        <p>면접에 사용할 이력서를 등록해주세요. (PDF 파일만 가능)</p>
+                        <input type="file" id="resume-upload" accept=".pdf">
+                        <div id="resume-status" style="font-size: 0.9em; margin-top: 5px; color: #666;"></div>
                     </div>
                     <div class="step-card">
                         <h3>2. 환경 테스트</h3>
@@ -399,6 +405,7 @@
                             <thead>
                                 <tr>
                                     <th>ID</th>
+                                    <th>직무</th>
                                     <th>제목</th>
                                     <th>작성자</th>
                                     <th>생성일</th>
@@ -418,6 +425,10 @@
                                 <div class="form-group">
                                     <label>공고 제목</label>
                                     <input type="text" id="job-title" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>직무 (Job)</label>
+                                    <input type="text" id="job-job" placeholder="예: 백엔드 개발자" required>
                                 </div>
                                 <div class="form-group">
                                     <label>공고 내용</label>
@@ -442,6 +453,10 @@
                                 <div class="form-group">
                                     <label>공고 제목</label>
                                     <input type="text" id="edit-job-title" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>직무 (Job)</label>
+                                    <input type="text" id="edit-job-job" required>
                                 </div>
                                 <div class="form-group">
                                     <label>공고 내용</label>
