@@ -92,8 +92,9 @@ function initAuth() {
             const response = await fetch('/api/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id, pw })
+                body: JSON.stringify({ id_name: id, pw })
             });
+
             const result = await response.json();
 
             if (result.success) {
@@ -112,7 +113,7 @@ function initAuth() {
         e.preventDefault();
 
         const newUser = {
-            id: $('#reg-id').value,
+            id_name: $('#reg-id').value,
             pw: $('#reg-pw').value,
             name: $('#reg-name').value,
             dob: `${$('#reg-dob-year').value}-${$('#reg-dob-month').value.padStart(2, '0')}-${$('#reg-dob-day').value.padStart(2, '0')}`,
@@ -168,8 +169,9 @@ function initAuth() {
             const response = await fetch('/api/verify-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: AppState.currentUser.id, pw: inputPw })
+                body: JSON.stringify({ id_name: AppState.currentUser.id_name, pw: inputPw })
             });
+
             const result = await response.json();
 
             if (result.success) {
@@ -194,12 +196,12 @@ function initAuth() {
     // Helper: Fetch User Info and Show Edit Page
     async function fetchAndShowMyInfo() {
         try {
-            const response = await fetch(`/api/user/${AppState.currentUser.id}`);
+            const response = await fetch(`/api/user/${AppState.currentUser.id_name}`);
             const result = await response.json();
             if (result.success) {
                 AppState.currentUser = result.user; // Update local state
 
-                $('#edit-id').value = result.user.id || '';
+                $('#edit-id').value = result.user.id_name || '';
                 $('#edit-name').value = result.user.name || '';
                 $('#edit-dob').value = result.user.dob || '';
 
@@ -244,7 +246,7 @@ function initAuth() {
         }
 
         try {
-            const response = await fetch(`/api/user/${AppState.currentUser.id}`, {
+            const response = await fetch(`/api/user/${AppState.currentUser.id_name}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -315,7 +317,7 @@ function initAuth() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    id: AppState.currentUser.id,
+                    id_name: AppState.currentUser.id_name,
                     new_pw: newPw
                 })
             });
@@ -606,7 +608,7 @@ function finishInterview() {
     AppState.interview.inProgress = false;
     // Save to Mock DB
     const result = {
-        userId: AppState.currentUser.id,
+        userId: AppState.currentUser.id_name,
         jobId: AppState.currentJobId,
         date: new Date().toLocaleDateString(),
         scores: {
@@ -639,12 +641,14 @@ function initAdmin() {
         $('#admin-view-jobs').classList.remove('hidden');
         $('#admin-view-applicants').classList.add('hidden');
         $('#admin-job-register-page').classList.add('hidden'); // Hide register page
+        $('#admin-job-edit-page').classList.add('hidden'); // Hide edit page
         fetchJobs(); // Refresh list
     });
     $('#admin-menu-applicants').addEventListener('click', () => {
         $('#admin-view-jobs').classList.add('hidden');
         $('#admin-view-applicants').classList.remove('hidden');
         $('#admin-job-register-page').classList.add('hidden');
+        $('#admin-job-edit-page').classList.add('hidden');
         renderAdminAppList();
     });
 
@@ -660,8 +664,10 @@ function initAdmin() {
     $('#btn-add-job').addEventListener('click', () => {
         $('#admin-view-jobs').classList.add('hidden');
         $('#admin-job-register-page').classList.remove('hidden');
+        $('#admin-job-edit-page').classList.add('hidden');
         // Reset form
         $('#job-title').value = '';
+        $('#job-content').value = '';
         $('#job-deadline').value = '';
     });
 
@@ -675,13 +681,19 @@ function initAdmin() {
     $('#admin-job-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const title = $('#job-title').value;
+        const content = $('#job-content').value;
         const deadline = $('#job-deadline').value;
 
         try {
             const response = await fetch('/api/jobs', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title, deadline })
+                body: JSON.stringify({
+                    title,
+                    content,
+                    deadline,
+                    id_name: AppState.currentUser.id_name // Add writer_id (now id_name)
+                })
             });
             const result = await response.json();
 
@@ -696,6 +708,44 @@ function initAdmin() {
             }
         } catch (error) {
             console.error('Create Job Error:', error);
+            showToast('서버 오류가 발생했습니다.', 'error');
+        }
+    });
+
+    // Cancel Job Edit
+    $('#btn-cancel-job-edit').addEventListener('click', () => {
+        $('#admin-job-edit-page').classList.add('hidden');
+        $('#admin-view-jobs').classList.remove('hidden');
+    });
+
+    // Submit Job Edit
+    $('#admin-job-edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = $('#edit-job-id').value;
+        const title = $('#edit-job-title').value;
+        const content = $('#edit-job-content').value;
+        const deadline = $('#edit-job-deadline').value;
+
+        try {
+            const response = await fetch(`/api/jobs/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title, content, deadline })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showToast('공고가 수정되었습니다.', 'success');
+                $('#admin-job-edit-page').classList.add('hidden');
+                $('#admin-view-jobs').classList.remove('hidden');
+                fetchJobs();
+            } else {
+                showToast(result.message || '공고 수정 실패', 'error');
+            }
+        } catch (error) {
+            console.error('Update Job Error:', error);
             showToast('서버 오류가 발생했습니다.', 'error');
         }
     });
@@ -715,10 +765,65 @@ function renderAdminJobList() {
         tr.innerHTML = `
             <td>${job.id}</td>
             <td>${job.title}</td>
+            <td>${job.id_name || '-'}</td>
+            <td>${job.created_at || '-'}</td>
             <td>${job.deadline}</td>
+            <td>
+                <button class="btn-small btn-edit-job" data-id="${job.id}">수정</button>
+                <button class="btn-small btn-delete-job" data-id="${job.id}" style="background-color: #e74c3c;">삭제</button>
+            </td>
         `;
         tbody.appendChild(tr);
     });
+
+    // Add Event Listeners for Edit/Delete buttons dynamically
+    $$('.btn-edit-job').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const jobId = e.target.dataset.id;
+            openEditJobPage(jobId);
+        });
+    });
+
+    $$('.btn-delete-job').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const jobId = e.target.dataset.id;
+            deleteJob(jobId);
+        });
+    });
+}
+
+function openEditJobPage(jobId) {
+    const job = MOCK_DB.jobs.find(j => j.id == jobId); // Loose equality for string/int match
+    if (!job) return;
+
+    $('#edit-job-id').value = job.id;
+    $('#edit-job-title').value = job.title;
+    $('#edit-job-content').value = job.content || '';
+    $('#edit-job-deadline').value = job.deadline;
+
+    $('#admin-view-jobs').classList.add('hidden');
+    $('#admin-job-edit-page').classList.remove('hidden');
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('정말 이 공고를 삭제하시겠습니까?')) return;
+
+    try {
+        const response = await fetch(`/api/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast('공고가 삭제되었습니다.', 'success');
+            fetchJobs();
+        } else {
+            showToast(result.message || '공고 삭제 실패', 'error');
+        }
+    } catch (error) {
+        console.error('Delete Job Error:', error);
+        showToast('서버 오류가 발생했습니다.', 'error');
+    }
 }
 
 function renderAdminAppList() {

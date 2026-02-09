@@ -362,7 +362,10 @@
                                 <tr>
                                     <th>ID</th>
                                     <th>제목</th>
+                                    <th>작성자</th>
+                                    <th>생성일</th>
                                     <th>마감일</th>
+                                    <th>관리</th>
                                 </tr>
                             </thead>
                             <tbody><!-- JS Render --></tbody>
@@ -379,11 +382,39 @@
                                     <input type="text" id="job-title" required>
                                 </div>
                                 <div class="form-group">
+                                    <label>공고 내용</label>
+                                    <textarea id="job-content" rows="5" required></textarea>
+                                </div>
+                                <div class="form-group">
                                     <label>마감일</label>
                                     <input type="date" id="job-deadline" required>
                                 </div>
                                 <button type="submit" class="btn-primary">공고 등록 완료</button>
                                 <button type="button" class="btn-secondary" id="btn-cancel-job-register">취소</button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Admin: Job Edit Page (New) -->
+                    <div id="admin-job-edit-page" class="hidden">
+                        <h2>공고 수정</h2>
+                        <div class="profile-card">
+                            <form id="admin-job-edit-form">
+                                <input type="hidden" id="edit-job-id">
+                                <div class="form-group">
+                                    <label>공고 제목</label>
+                                    <input type="text" id="edit-job-title" required>
+                                </div>
+                                <div class="form-group">
+                                    <label>공고 내용</label>
+                                    <textarea id="edit-job-content" rows="5" required></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>마감일</label>
+                                    <input type="date" id="edit-job-deadline" required>
+                                </div>
+                                <button type="submit" class="btn-primary">공고 수정 완료</button>
+                                <button type="button" class="btn-secondary" id="btn-cancel-job-edit">취소</button>
                             </form>
                         </div>
                     </div>

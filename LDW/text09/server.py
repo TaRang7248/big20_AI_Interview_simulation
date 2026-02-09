@@ -32,7 +32,7 @@ def init_db():
     # Create users table if not exists
     c.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
+            id_name TEXT PRIMARY KEY,
             pw TEXT NOT NULL,
             name TEXT NOT NULL,
             dob TEXT,
@@ -43,6 +43,7 @@ def init_db():
             type TEXT DEFAULT 'applicant'
         )
     ''')
+
     print(f"Database initialized/connected to {DB_NAME} at {DB_HOST}")
     
     # Create interview_announcement table if not exists
@@ -52,9 +53,32 @@ def init_db():
             title TEXT NOT NULL,
             deadline TEXT,
             content TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (id_name) REFERENCES users(id_name)
         )
     ''')
+
+    
+    # Migration: Rename columns if they exist with old names
+    try:
+        # Check if 'id' exists in users and rename to 'id_name'
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='id'")
+        if c.fetchone():
+            c.execute("ALTER TABLE users RENAME COLUMN id TO id_name")
+            print("Migrated users table: id -> id_name")
+
+        # Check if 'writer_id' exists in interview_announcement and rename to 'id_name'
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_announcement' AND column_name='writer_id'")
+        if c.fetchone():
+            c.execute("ALTER TABLE interview_announcement RENAME COLUMN writer_id TO id_name")
+            print("Migrated interview_announcement table: writer_id -> id_name")
+            
+        conn.commit()
+    except Exception as e:
+        print(f"Migration Warning: {e}")
+        conn.rollback()
+
     conn.commit()
     conn.close()
 
@@ -75,15 +99,16 @@ def register():
         c = conn.cursor()
         
         # Check if ID exists
-        c.execute('SELECT id FROM users WHERE id = %s', (data['id'],))
+        c.execute('SELECT id_name FROM users WHERE id_name = %s', (data['id_name'],))
+
         if c.fetchone():
             return jsonify({'success': False, 'message': '이미 존재하는 아이디입니다.'}), 400
             
         c.execute('''
-            INSERT INTO users (id, pw, name, dob, gender, email, address, phone, type)
+            INSERT INTO users (id_name, pw, name, dob, gender, email, address, phone, type)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
-            data['id'], 
+            data['id_name'], 
             data['pw'], 
             data['name'], 
             data.get('dob'), 
@@ -110,7 +135,8 @@ def login():
         
         # User lookup logic
         # Note: In production, password should be hashed. Plain text for this demo.
-        c.execute('SELECT * FROM users WHERE id = %s AND pw = %s', (data['id'], data['pw']))
+        c.execute('SELECT * FROM users WHERE id_name = %s AND pw = %s', (data['id_name'], data['pw']))
+
         row = c.fetchone()
         
         if row:
@@ -134,7 +160,8 @@ def verify_password():
         c = conn.cursor()
         
         # Verify Password
-        c.execute('SELECT pw FROM users WHERE id = %s', (data['id'],))
+        c.execute('SELECT pw FROM users WHERE id_name = %s', (data['id_name'],))
+
         row = c.fetchone()
         
         if row and row[0] == data['pw']:
@@ -148,12 +175,14 @@ def verify_password():
     finally:
         if conn: conn.close()
 
-@app.route('/api/user/<id>', methods=['GET'])
-def get_user_info(id):
+@app.route('/api/user/<id_name>', methods=['GET'])
+def get_user_info(id_name):
+
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute('SELECT id, name, dob, gender, email, address, phone, type FROM users WHERE id = %s', (id,))
+        c.execute('SELECT id_name, name, dob, gender, email, address, phone, type FROM users WHERE id_name = %s', (id_name,))
+
         row = c.fetchone()
         
         if row:
@@ -167,15 +196,17 @@ def get_user_info(id):
     finally:
         if conn: conn.close()
 
-@app.route('/api/user/<id>', methods=['PUT'])
-def update_user_info(id):
+@app.route('/api/user/<id_name>', methods=['PUT'])
+def update_user_info(id_name):
+
     data = request.json
     try:
         conn = get_db_connection()
         c = conn.cursor()
         
         # 1. Verify Password
-        c.execute('SELECT pw FROM users WHERE id = %s', (id,))
+        c.execute('SELECT pw FROM users WHERE id_name = %s', (id_name,))
+
         row = c.fetchone()
         if not row:
              return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
@@ -187,8 +218,9 @@ def update_user_info(id):
         c.execute('''
             UPDATE users 
             SET email = %s, phone = %s, address = %s
-            WHERE id = %s
-        ''', (data['email'], data['phone'], data['address'], id))
+            WHERE id_name = %s
+        ''', (data['email'], data['phone'], data['address'], id_name))
+
         conn.commit()
         
         return jsonify({'success': True, 'message': '정보가 수정되었습니다.'})
@@ -207,7 +239,8 @@ def change_password():
         c = conn.cursor()
         
         # Update Password
-        c.execute('UPDATE users SET pw = %s WHERE id = %s', (data['new_pw'], data['id']))
+        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (data['new_pw'], data['id_name']))
+
         conn.commit()
         
         if c.rowcount > 0:
@@ -226,7 +259,8 @@ def get_jobs():
     try:
         conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute('SELECT * FROM interview_announcement ORDER BY created_at DESC')
+        c.execute("SELECT id, title, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
+
         rows = c.fetchall()
         
         jobs = [dict(row) for row in rows]
@@ -245,10 +279,11 @@ def create_job():
         c = conn.cursor()
         
         c.execute('''
-            INSERT INTO interview_announcement (title, deadline, content)
-            VALUES (%s, %s, %s)
+            INSERT INTO interview_announcement (title, deadline, content, id_name)
+            VALUES (%s, %s, %s, %s)
             RETURNING id
-        ''', (data['title'], data['deadline'], data.get('content', '')))
+        ''', (data['title'], data['deadline'], data.get('content', ''), data.get('id_name')))
+
         
         new_id = c.fetchone()[0]
         conn.commit()
@@ -256,6 +291,51 @@ def create_job():
         return jsonify({'success': True, 'message': '공고가 등록되었습니다.', 'id': new_id})
     except Exception as e:
         print(f"Create Job Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/jobs/<id>', methods=['PUT'])
+def update_job(id):
+    data = request.json
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        c.execute('''
+            UPDATE interview_announcement
+            SET title = %s, deadline = %s, content = %s
+            WHERE id = %s
+        ''', (data['title'], data['deadline'], data.get('content', ''), id))
+        conn.commit()
+        
+        if c.rowcount > 0:
+            return jsonify({'success': True, 'message': '공고가 수정되었습니다.'})
+        else:
+            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+            
+    except Exception as e:
+        print(f"Update Job Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/jobs/<id>', methods=['DELETE'])
+def delete_job(id):
+    try:
+        conn = get_db_connection()
+        c = conn.cursor()
+        
+        c.execute('DELETE FROM interview_announcement WHERE id = %s', (id,))
+        conn.commit()
+        
+        if c.rowcount > 0:
+            return jsonify({'success': True, 'message': '공고가 삭제되었습니다.'})
+        else:
+            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+            
+    except Exception as e:
+        print(f"Delete Job Error: {e}")
         return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
     finally:
         if conn: conn.close()

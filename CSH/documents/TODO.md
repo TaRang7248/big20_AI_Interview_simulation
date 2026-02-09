@@ -57,7 +57,6 @@
 
 | 우선순위 | 항목 | 설명 |
 |---|---|---|
-| 🔴 **Major** | SAD-2 프론트엔드 | 설계서(React/Next.js) vs 실제(Vanilla HTML) 완전 불일치 |
 | 🔴 **Major** | SAD-3 API Gateway | NGINX/Traefik/SSL 없음 |
 | 🟠 **High** | REQ-N-002 확장성 | Dockerfile·K8s 없음, 수평 확장 불가 |
 | 🟠 **High** | REQ-F-006 리포트 | 발화속도·시선추적·PDF 미구현 |
