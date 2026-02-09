@@ -219,10 +219,14 @@ _nextjs_process = None  # Next.js 개발 서버 프로세스
 
 async def _proxy_to_nextjs(request: Request, path: str = ""):
     """Next.js 개발 서버로 요청을 프록시합니다."""
-    target_url = f"{NEXTJS_URL}/{path}"
+    # 쿼리스트링 유지
+    query = str(request.url.query)
+    target_url = f"{NEXTJS_URL}/{path}" + (f"?{query}" if query else "")
+    # Host 헤더를 Next.js 서버에 맞게 교체
+    fwd_headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(target_url, headers=dict(request.headers))
+            resp = await client.get(target_url, headers=fwd_headers)
             return HTMLResponse(content=resp.text, status_code=resp.status_code)
     except httpx.ConnectError:
         # Next.js 서버가 아직 시작되지 않았을 때 안내 페이지
@@ -2390,6 +2394,30 @@ async def get_user_info_api(email: str, current_user: Dict = Depends(get_current
     }
 
 
+# ========== 프론트엔드 호환 래퍼 API (GET/PUT /api/user) ==========
+
+@app.get("/api/user")
+async def get_current_user_info(current_user: Dict = Depends(get_current_user)):
+    """현재 로그인 유저 정보 조회 (토큰 기반)"""
+    user = get_user_by_email(current_user["email"])
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+    return {
+        "user_id": user["user_id"], "email": user["email"],
+        "name": user["name"], "birth_date": user.get("birth_date"),
+        "address": user.get("address"), "gender": user.get("gender"),
+        "role": user.get("role"), "created_at": user.get("created_at")
+    }
+
+
+@app.put("/api/user")
+async def update_current_user_info(data: dict, current_user: Dict = Depends(get_current_user)):
+    """현재 로그인 유저 정보 수정 (토큰 기반)"""
+    from pydantic import BaseModel as BM
+    req = UserUpdateRequest(email=current_user["email"], **data)
+    return await update_user_info(req, current_user)
+
+
 # ========== 회원 정보 수정 모델 ==========
 class UserUpdateRequest(BaseModel):
     email: str
@@ -2642,12 +2670,19 @@ async def dashboard_page(request: Request):
 
 
 @app.get("/legacy/dashboard")
-async def legacy_dashboard_page():
-    """레거시 대시보드 (정적 HTML 폴백)"""
-    return FileResponse(os.path.join(static_dir, "my_dashboard.html"))
+async def legacy_dashboard_page(request: Request):
+    """레거시 대시보드 → Next.js 대시보드로 리디렉트"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/dashboard", status_code=302)
 
 
 # ========== 면접 이력 조회 API ==========
+
+@app.get("/api/interviews")
+async def get_interviews_list(email: str, current_user: Dict = Depends(get_current_user)):
+    """면접 이력 목록 조회 (프론트엔드 호환)"""
+    return await get_interview_history(email, current_user)
+
 
 @app.get("/api/interview/history")
 async def get_interview_history(email: str, current_user: Dict = Depends(get_current_user)):
@@ -2696,6 +2731,7 @@ class SessionCreateRequest(BaseModel):
 
 # ========== Session API ==========
 
+@app.post("/api/session/create")
 @app.post("/api/session")
 async def create_session(request: SessionCreateRequest = None, current_user: Dict = Depends(get_current_user)):
     """새 면접 세션 생성 (인증 필요)"""

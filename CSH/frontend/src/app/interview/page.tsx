@@ -3,7 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
-import { sessionApi, interviewApi, ttsApi, interventionApi, emotionApi } from "@/lib/api";
+import { sessionApi, interviewApi, ttsApi, interventionApi } from "@/lib/api";
 import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2 } from "lucide-react";
 
 /* Web Speech API 타입 (브라우저 전용) */
