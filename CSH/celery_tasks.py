@@ -44,7 +44,7 @@ def get_llm():
     if _llm is None:
         try:
             from langchain_ollama import ChatOllama
-            DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "llama3:8b-instruct-q4_0")
+            DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
             _llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.3)
         except Exception as e:
             print(f"LLM 초기화 실패: {e}")
