@@ -176,6 +176,15 @@ function initAuth() {
         AppState.currentUser = target; // sync
         showToast('정보가 수정되었습니다.', 'success');
     });
+
+    // My Info Cancel
+    $('#btn-cancel-myinfo').addEventListener('click', () => {
+        if (AppState.currentUser && AppState.currentUser.type === 'admin') {
+            navigateTo('admin-dashboard-page');
+        } else {
+            navigateTo('applicant-dashboard-page');
+        }
+    });
 }
 
 function loginUser(user) {
