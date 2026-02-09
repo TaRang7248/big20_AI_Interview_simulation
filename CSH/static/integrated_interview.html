@@ -1433,9 +1433,16 @@
                 return false;
             }
             
+            // JWT 토큰 확인
+            const wsAccessToken = sessionStorage.getItem('access_token');
+            if (!wsAccessToken) {
+                console.warn('⚠️ 인증 토큰이 없어 WebSocket을 연결할 수 없습니다. 로그인 해주세요.');
+                return false;
+            }
+            
             try {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}/ws/interview/${sessionId}`;
+                const wsUrl = `${protocol}//${window.location.host}/ws/interview/${sessionId}?token=${encodeURIComponent(wsAccessToken)}`;
                 
                 userWebSocket = new WebSocket(wsUrl);
                 
