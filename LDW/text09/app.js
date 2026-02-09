@@ -200,7 +200,16 @@ function initAuth() {
             const result = await response.json();
             if (result.success) {
                 AppState.currentUser = result.user; // Update local state
+
+                $('#edit-id').value = result.user.id || '';
+                $('#edit-name').value = result.user.name || '';
+                $('#edit-dob').value = result.user.dob || '';
+
+                const genderMap = { 'male': '남성', 'female': '여성' };
+                $('#edit-gender').value = genderMap[result.user.gender] || result.user.gender || '';
+
                 $('#edit-email').value = result.user.email || '';
+                $('#edit-addr').value = result.user.address || '';
                 $('#edit-phone').value = result.user.phone || '';
                 navigateTo('myinfo-page');
             } else {
@@ -217,6 +226,7 @@ function initAuth() {
     $('#myinfo-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const newEmail = $('#edit-email').value;
+        const newAddr = $('#edit-addr').value;
         const newPhone = $('#edit-phone').value;
 
         // Use previously verified password
@@ -235,6 +245,7 @@ function initAuth() {
                 body: JSON.stringify({
                     pw: verifiedPw,
                     email: newEmail,
+                    address: newAddr,
                     phone: newPhone
                 })
             });
@@ -243,6 +254,7 @@ function initAuth() {
             if (result.success) {
                 // Update local state
                 AppState.currentUser.email = newEmail;
+                AppState.currentUser.address = newAddr;
                 AppState.currentUser.phone = newPhone;
 
                 // Clear temp password for security

@@ -159,9 +159,9 @@ def update_user_info(id):
         # 2. Update Info
         c.execute('''
             UPDATE users 
-            SET email = ?, phone = ?
+            SET email = ?, phone = ?, address = ?
             WHERE id = ?
-        ''', (data['email'], data['phone'], id))
+        ''', (data['email'], data['phone'], data['address'], id))
         conn.commit()
         
         return jsonify({'success': True, 'message': '정보가 수정되었습니다.'})
