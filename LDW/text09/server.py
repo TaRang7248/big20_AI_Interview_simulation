@@ -98,6 +98,58 @@ def login():
     finally:
         if conn: conn.close()
 
+@app.route('/api/user/<id>', methods=['GET'])
+def get_user_info(id):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('SELECT id, name, dob, gender, email, address, phone, type FROM users WHERE id = ?', (id,))
+        row = c.fetchone()
+        
+        if row:
+            columns = [description[0] for description in c.description]
+            user = dict(zip(columns, row))
+            return jsonify({'success': True, 'user': user})
+        else:
+            return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
+    except Exception as e:
+        print(f"Get User Info Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/user/<id>', methods=['PUT'])
+def update_user_info(id):
+    data = request.json
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # 1. Verify Password
+        c.execute('SELECT pw FROM users WHERE id = ?', (id,))
+        row = c.fetchone()
+        if not row:
+             return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
+        
+        if row[0] != data['pw']:
+            return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
+
+        # 2. Update Info
+        c.execute('''
+            UPDATE users 
+            SET email = ?, phone = ?
+            WHERE id = ?
+        ''', (data['email'], data['phone'], id))
+        conn.commit()
+        
+        return jsonify({'success': True, 'message': '정보가 수정되었습니다.'})
+
+    except Exception as e:
+        print(f"Update User Info Error: {e}")
+        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
 import webbrowser
 from threading import Timer
 
