@@ -1,214 +1,246 @@
-# 00_AGENT_PLAYBOOK (공유 모듈 중심 / API 우선 → on-prem 교체)
+# 00_AGENT_PLAYBOOK_1 (보완판) — 프로젝트 누락 점검 반영본 (2026-02-09)
 
-본 문서는 AI 코딩 에이전트가 IMH 면접 시스템을 개발할 때 따라야 할 운영 규칙 + 개발 계획 + 실행 계획이다.
-목표는 "API 기반으로 코어를 빠르게 완성"한 뒤, "on-prem 모델로 교체/최적화" 하는 것이다.
-또한 팀원들과 기능 모듈을 공유하기 쉽게, 핵심 기능을 재사용 가능한 패키지 단위로 설계한다.
-
----
-
-## 0) 절대 규칙 (변경 승인 게이트)
-
-### 0.1 코드 변경 전 승인 프로토콜 (필수)
-에이전트는 아래 순서를 지키지 않으면 코드를 수정하면 안 된다.
-
-1) 변경 제안서(Plan Only) 작성
-- 어떤 파일을
-- 왜 바꾸는지
-- 무엇을 추가/변경/삭제하는지
-- 영향 범위(API/DB/테스트/마이그레이션/환경)
-- 롤백 방법(되돌리기)
-
-2) 사용자(프로젝트 오너)의 "허락"을 받은 뒤에만 실제 코드 변경 수행
-
-3) 변경 후 반드시 기록
-- docs/DEV_LOG.md (변경 요약 / 테스트 / 다음 할 일)
-
-> 사용자의 "허락" 전에는 실제 코드 변경/커밋/대규모 diff 출력 금지.
-> 계획서까지만 작성한다.
-
-### 0.2 Python 코드 품질 규칙
-- 함수/클래스: 타입힌트 + docstring 필수 (Google Style 권장)
-- 예외 처리: 의미 있는 커스텀 예외 계층 사용 (핵심 패키지에서 통일)
-- 모듈 경계: app(FastAPI)는 얇게, core는 packages에
-
-### 0.3 로그 규칙 (MD가 아닌 진짜 로그파일)
-- 에이전트가 개발/테스트/실행 중 발견하는 에러는 MD가 아닌 로그파일(.log)에 남긴다.
-- 스택트레이스 포함을 위해 logger.exception()을 사용한다.
-- 로그 파일 위치: IMH/IMH_Interview/logs/ 하위
-- docs/DEV_LOG.md에는 "요약 + 로그 경로"만 남긴다.
+> 목적: **IMH AI 면접 시스템** 코딩 에이전트가 *프로젝트 문서와 실제 구현 사이의 불일치*로 인해 기능을 빠뜨리거나 잘못 구현하는 것을 방지한다.  
+> 본 문서는 **“에이전트 실행 지침 + 문서 인벤토리 + 불일치 해결 규칙 + 개발 계획(로드맵) + Task Queue 작성 규격”**을 하나로 묶는다.
 
 ---
 
-## 1) 최상위 폴더 구조 (공유 모듈 최적화)
+## 0. 이번 보완에서 확인된 핵심 포인트 (무손실 반영 체크)
 
-모든 개발 코드는 IMH/IMH_Interview/ 아래에서만 생성/수정한다.
-참고문서는 코드와 분리해 혼동을 방지한다.
+### 0.1 UI 설계 최신본 우선
+- UI 문서는 **`26.02.06(금)AI 면접 프로그램 UI 설계 초안.md`**가 최신이며, 동일 파일명의 구버전이 존재할 수 있다.  
+- 에이전트는 **항상 날짜가 포함된 최신본(26.02.06)**을 우선 기준으로 삼는다.  
+  - 면접자 UI에는 “면접 진행도(phase 표시)”, “답변 완료 버튼”, “코딩테스트/화이트보드”가 명시되어 있다.  
 
+### 0.2 ERD: messages 테이블 제거 → interviews.chat_history(jsonb) 통합이 ‘현 설계’
+- 최신 ERD 가이드에서는 **`MESSAGES` 테이블을 삭제**하고 **`INTERVIEWS.chat_history(jsonb)`**로 통합한다.  
+- 이유: 면접 이력 조회 시 대량 Join 제거로 성능 최적화.  
+
+### 0.3 루브릭/태그: tag_code는 문자열 식별자 기반이 ‘현 설계’
+- 질문 태그는 **시스템 식별자(identifier)**로 유지하며, 변경/삭제 금지(추가만 허용).  
+- 평가 결과는 **`evaluation_scores.tag_code(varchar)` + evidence_data(jsonb)** 형태로 저장한다.  
+- 루브릭 가이드가 요구하는 LLM 평가 JSON 스키마( category/score/tag_code/rationale/evidence_data/improvement_feedback )를 준수한다.
+
+---
+
+## 1. 에이전트 필수 규칙 (Mandatory Protocols)
+
+### 1.1 변경 승인 게이트 (Plan-Only First)
+- 코드 수정 전 반드시 **변경 제안서(Proposal)** 작성 → 사용자 승인 후 구현.
+- 승인 전에는 **실제 코드 변경, 커밋, 대규모 diff 출력 금지**.
+
+### 1.2 로깅 규약 (Runtime Observation)
+- 에이전트가 발견한 에러/런타임 관측은 **MD가 아니라 `logs/*.log`** 파일에 남긴다.
+- 스택트레이스 포함을 위해 `logger.exception()` 사용.
+- 로그에 절대 포함 금지: **RAW 답변 원문**, 개인정보, 비밀번호, 인증 토큰. (보안 규정)
+
+### 1.3 모듈/폴더 구조 원칙 (공유 가능 구조)
+- **Package-Centric**: 재사용 가능한 로직은 `packages/` 아래에만 둔다.
+- 실행 진입점은 최소화하고(Thin), 비즈니스 로직은 packages로 이동한다.
+
+### 1.4 폴더 네이밍 규칙 (중요)
+- 프로젝트 규칙: **`app/` 폴더 대신 `IMH/`를 사용**한다.  
+  - 신규 생성/수정 시 `app.*` import가 나타나면 **`IMH.*`로 정리**한다.
+
+---
+
+## 2. 프로젝트 폴더 및 문서 체계 (Inventory)
+
+> 기준 루트: `IMH/IMH_Interview/`
+
+```text
 IMH/IMH_Interview/
-├─ apps/                          # 실행 가능한 앱(얇게 유지)
-│  ├─ api/                         # FastAPI (면접/플레이그라운드)
-│  └─ worker/                      # (선택) 배치/비동기 작업 실행 엔트리
-│
-├─ packages/                      # 팀 공유가 쉬운 재사용 패키지들(핵심)
-│  ├─ imh_core/                    # 공통: 설정, 로깅, 예외, DTO, 유틸
-│  ├─ imh_providers/               # Provider 추상화 + 구현(API/Local)
-│  ├─ imh_analysis/                # emotion/visual/voice 분석 파이프라인
-│  └─ imh_eval/                    # 루브릭/스코어링/리포트 생성(LLM 포함)
-│
-├─ web/                           # (선택) 프론트/대시보드(Playground UI)
-│
-├─ docs/                          # 산출 문서(사람이 읽는 것)
-│  ├─ 00_AGENT_PLAYBOOK.md
-│  └─ DEV_LOG.md
-│
-├─ logs/                          # 진짜 로그파일
-│  ├─ agent/                       # 에이전트/개발/테스트 로그
-│  └─ runtime/                     # 서버 런타임 로그
-│
-├─ _refs/                         # 참고/원문 문서(UI 초안, 스펙, 슬라이드, docx 등)
-└─ scripts/                       # 로컬 실행/테스트/도구 스크립트
-
-### 1.1 _refs 폴더명 추천 (확정)
-- IMH/IMH_Interview/_refs/
-  - 이유: docs(산출물)과 refs(참고 원문) 분리로 에이전트 혼동 방지
+├── IMH/                  # (기존 app 대체) FastAPI 엔트리/라우터/DI 조립
+├── packages/             # 핵심 비즈니스 로직 (공유 가능)
+│   ├── imh_core/         # config, logging, errors, dto, utils
+│   ├── imh_providers/    # STT/LLM/Emotion/Visual/Voice 추상화 + 구현체
+│   ├── imh_analysis/     # 파일 기반 분석(감정/시선/음성)
+│   └── imh_eval/         # 루브릭 정량 평가 엔진 + 집계
+├── docs/                 # 운영 문서(사람용): CURRENT_STATE, DEV_LOG, DECISIONS, TASK_QUEUE
+├── logs/                 # 실제 로그 파일
+│   ├── agent/
+│   └── runtime/
+├── _refs/                # “정의” 문서(원본 스펙): ERD, UI, 태그, 루브릭
+└── scripts/              # 유틸/인프라 스크립트(alembic, seed, etc.)
+```
 
 ---
 
-## 2) 공유 가능한 모듈 설계 원칙 (팀 공유/재사용)
+## 3. 참조 문서 관리 (Technical Context)
 
-### 2.1 패키지 경계
-- apps/api: 라우터/DI/요청응답 변환만 담당 (얇게)
-- packages/*: 재사용 가능한 순수 파이썬 모듈로 구성 (공유 핵심)
+에이전트는 구현 시 아래 문서를 **무손실(Zero Omission)** 반영해야 한다.
 
-### 2.2 공유 방식 (Git/팀 개발 최적)
-- packages/* 는 독립적으로도 동작 가능하게 설계한다.
-- 향후 공유 방법:
-  - (A) 같은 레포 내에서 import
-  - (B) packages/를 별도 레포로 떼거나, git subtree/submodule로 분리 가능
-  - (C) 내부 PyPI/패키지 배포도 가능하도록 구조 유지
+### 3.1 _refs/ 문서(스펙) — 우선순위
+1) **ERD/데이터 아키텍쳐**  
+   - `26.02.05(목)데이터 아키텍쳐,ERD 가이드.md`  
+   - 핵심: `INTERVIEWS.chat_history(jsonb)` 통합, PGVector, Redis Key 규약, 로그 필드, 인증 전략
 
-### 2.3 외부 의존성 최소화
-- packages/imh_core 는 가장 가벼운 의존성만 허용 (FastAPI 같은 웹 프레임워크 금지)
-- providers/analysis/eval 은 필요 라이브러리 의존 가능하나, 인터페이스는 core에 둔다.
+2) **UI 설계(최신본 기준)**  
+   - `26.02.06(금)AI 면접 프로그램 UI 설계 초안.md`  
+   - 핵심: 공통(로그인/회원가입/정보수정), 면접자(시작전/진행중/결과), 관리자(공고/지원자현황/결과조회)
 
----
+3) **질문 태그 설계**
+   - `26.02.05(목)질문태그설계.md`  
+   - 핵심: tag_code 체계(capability/problem_solving/communication/character), 변경/삭제 금지
 
-## 3) Provider 추상화 (API ↔ on-prem 교체 가능)
-
-### 3.1 공통 인터페이스 (Protocol/ABC)
-각 분석 항목은 "인터페이스" + "구현체(API/Local)" 로 나눈다.
-
-- STTProvider
-  - transcribe_file(audio_path) -> Transcript
-  - transcribe_stream(chunks) -> TranscriptStream
-- LLMProvider
-  - generate(messages, options) -> LLMResponse
-  - generate_stream(messages, options) -> AsyncIterator[Token]
-- EmotionProvider
-  - analyze_video(video_path, fps=1) -> EmotionSeries + Summary
-- VisualProvider
-  - analyze_video(video_path, fps=1) -> GazePostureSummary
-- VoiceProvider
-  - analyze_audio(audio_path) -> VoiceMetrics
-
-### 3.2 Streaming 토글(토큰 비용/지연 최적화)
-LLM 입력 전달 방식은 런타임 설정으로 토글한다.
-- MODE_STREAM: 실시간 토큰/부분 STT를 LLM에 전달
-- MODE_BATCH: 응답 완료 후 한 번에 전달(토큰 절약/비용 예측 용이)
-
-설정은 DB 스키마 변경 없이도 바뀌어야 한다.
+4) **정량 평가 루브릭**
+   - `26.02.09(월)정량평가 루브릭 가이드.md`  
+   - 핵심: 평가 항목별 구현 로직(코사인 유사도, AST 분석, STAR 구조, Gaze/Emotion), 직군별 가중치, 평가 JSON 응답 스키마
 
 ---
 
-## 4) Playground (정적 파일 업로드로 빠른 성능 확인)
+## 4. “프로젝트 누락 가능성” 점검 결과 & PLAYBOOK에 추가해야 하는 문서들
 
-### 4.1 목적
-- 실시간 면접 세션 없이도 모델 성능을 빠르게 교체/비교
-- 오디오/비디오 파일 업로드로 즉시 결과 확인
+현재 PLAYBOOK_1에는 **스펙 참조는 존재하지만**, 에이전트가 “어디에 무엇을 기록/결정/추적”해야 하는지 운영 문서가 부족해 누락 위험이 있다.
+따라서 아래 4개 문서를 **docs/**에 “프로젝트 운영 표준”으로 추가한다.
 
-### 4.2 Playground API 최소 엔드포인트(초안)
-- POST /playground/stt        (audio) -> transcript
-- POST /playground/emotion    (video) -> emotion series + summary
-- POST /playground/visual     (video) -> gaze/posture summary
-- POST /playground/voice      (audio) -> voice metrics
-- POST /playground/run        (audio/video + options) -> combined report
+### 4.1 docs/CURRENT_STATE.md (현 상태 스냅샷)
+- 목적: 에이전트가 작업 시작 시 “지금까지 구현된 것 / 미구현 / 깨진 것”을 1페이지로 파악.
+- 최소 포함:
+  - 현재 활성 브랜치/커밋(선택)
+  - 실행 방법(venv, docker 여부)
+  - 동작 확인된 API 목록
+  - 미해결 이슈 Top 5
+  - 다음 Task Queue 링크
 
-반드시 옵션 포함:
-- provider 선택(api/local)
-- stream_mode 선택(stream/batch)
-- fps, 샘플링 설정
-- 결과 저장 여부(store=true/false)
+### 4.2 docs/DECISIONS.md (설계 의사결정 로그)
+- 목적: “왜 이렇게 했는지”를 남겨서 재논의 비용을 줄인다.
+- 반드시 기록할 결정 예시:
+  - `MESSAGES` 제거 → `INTERVIEWS.chat_history(jsonb)` 통합(Join 감소 목적)
+  - 서버는 영상 원본 저장 안 함(결과만 저장)
+  - Redis 세션 vs JWT 선택
+  - provider(api/local) 토글 정책, stream/batch 정책
 
----
+### 4.3 docs/DATA_CONTRACTS.md (JSONB/DTO 계약서)
+- 목적: **jsonb(chat_history, evidence_data)** 가 많아질수록 “형식 붕괴”가 가장 큰 위험.
+- 최소 포함:
+  - `interviews.chat_history` JSON 스키마(필수 키, 타입, timestamp 표준)
+  - `evaluation_scores.evidence_data` JSON 스키마(루브릭 가이드와 일치)
+  - “호환성 규칙”(필드 추가는 가능, 이름 변경/삭제 금지)
 
-## 5) 개발 계획 (공유 모듈 기반 로드맵)
+### 4.4 docs/API_SPEC.md (FastAPI 라우트 계약서)
+- 목적: UI/프론트/테스트가 붙기 전에 API가 흔들리지 않도록 고정.
+- 최소 포함:
+  - Auth: login/register/me
+  - Posting: list/detail/apply(지원)
+  - Interview: create/start/next_turn/finish/result
+  - Admin: postings CRUD, applicants list, applicant detail
+  - Playground: stt/emotion/visual/voice/run (파일 업로드 기반)
 
-### Phase 0: 운영/기록/로그 체계 고정 (가장 먼저)
-- [ ] docs/DEV_LOG.md 생성 (사람용 요약 기록)
-- [ ] logs/agent/, logs/runtime/ 생성
-- [ ] packages/imh_core/logging.py: RotatingFileHandler 기반 로거 구축
-- [ ] 에러는 무조건 logs/*.log에 남기고, DEV_LOG에는 요약 + 경로만 남김
-
-### Phase 1: Core 패키지(imh_core) 먼저 완성
-- [ ] imh_core/config: 환경설정(Provider 선택, stream_mode, fps 등)
-- [ ] imh_core/errors: 커스텀 예외 계층
-- [ ] imh_core/dto: Transcript, EmotionSeries 등 공통 데이터 모델
-- [ ] imh_core/logging: 로거 유틸
-
-### Phase 2: Provider 패키지(imh_providers)
-- [ ] 인터페이스 정의 + 더미(Mock) 구현으로 테스트 가능 상태
-- [ ] API 기반 LLM Provider (OpenAI 등)
-- [ ] Local Provider는 스텁(껍데기)만 먼저, 나중에 on-prem 채움
-
-### Phase 3: Analysis 패키지(imh_analysis)
-- [ ] DeepFace Emotion 분석(파일 기반)
-- [ ] MediaPipe Visual 분석(파일 기반)
-- [ ] Parselmouth Voice 분석(파일 기반)
-
-### Phase 4: apps/api (FastAPI) 연결
-- [ ] /playground/stt 부터 end-to-end 성공
-- [ ] /playground/run 통합 리포트까지 확장
-- [ ] 서버는 원칙적으로 영상 저장 안 함(필요 시 결과만 저장)
-
-### Phase 5: 면접 세션 연동(후순위)
-- [ ] 텍스트 기반 면접 세션 → 동일 DTO/리포트 파이프라인 재사용
-- [ ] 실시간/배치 토글을 실제 면접 플로우에 적용
+> 위 4개 문서는 “스펙(_refs)”이 아니라 “운영 표준(docs)”이다.  
+> 에이전트는 작업 시작 시 **PLAYBOOK + CURRENT_STATE + DECISIONS**를 먼저 읽어야 한다.
 
 ---
 
-## 6) 실행 계획 (에이전트 프롬프트 템플릿)
+## 5. 구현 우선순위 로드맵 (UI → 데이터 → API 순으로 누락 방지)
 
-### 6.1 작업 시작 프롬프트 (허락 전: 계획만)
-너는 IMH 프로젝트의 AI 코딩 에이전트다.
-- 변경 전에는 반드시 "변경 제안서"를 먼저 작성하고 사용자 허락을 받아라.
-- 모든 코드는 IMH/IMH_Interview/ 아래에서만 작성하라.
-- packages/ 중심으로 공유 가능한 모듈로 설계하라.
-- 에러는 logs/*.log에 남기고, docs/DEV_LOG.md에는 요약+경로만 남겨라.
+### [Phase 1] 운영 기반 고정
+- 로깅/예외/환경설정(Provider 선택, MODE_STREAM, fps 등) in `imh_core`
+- `docs/DEV_LOG.md` + `logs/` 파일 기록 루틴 정착
 
-현재 작업: <사용자가 지시한 작업 1개>
+### [Phase 2] 데이터 계층(ERD) 고정 + 마이그레이션
+- ERD 가이드 기반 테이블/컬럼/인덱스 물리화
+- 특히 `interviews.chat_history(jsonb)` / `evaluation_scores.evidence_data(jsonb)` 형식 확정
 
-출력 형식:
-1) 변경 제안서(파일/이유/내용/영향/롤백)
+### [Phase 3] UI 여정 최소 기능 API
+- 면접자:
+  - 공고 목록/선택 → 이력서 업로드 → 환경 테스트(메타) → 면접 시작/진행/종료 → 결과 조회
+- 관리자:
+  - 공고 관리 → 지원자 현황 → 합/불 결과 조회
+
+### [Phase 4] 루브릭 정량 평가 엔진
+- 루브릭 가이드의 구현 로직을 모듈화하여 점수 산출 + 근거(evidence_data) 저장
+
+### [Phase 5] Playground (빠른 모델 비교/성능 검증)
+- 업로드 기반 분석 API + 간단 UI(또는 Swagger 기반)로 모델 교체 테스트 속도 개선
+
+---
+
+## 6. Task Queue 작성 규격 (에이전트 지시용)
+
+> 목표: Task를 “작게, 검증 가능하게, 스펙과 매핑 가능하게”
+
+### 6.1 Task 1개 템플릿
+- **Task ID**: T-YYYYMMDD-###  
+- **Goal(한 줄)**: 무엇을 끝내면 완료인가
+- **Scope**: 포함/제외(명시)
+- **Spec Links(_refs/docs)**: 어떤 문서의 어떤 섹션을 따르는지
+- **Acceptance Criteria**: curl 또는 pytest로 검증 가능한 체크리스트
+- **Files**: 생성/수정 파일 목록
+- **Logging**: 어떤 로그를 남겨야 하는지
+- **Rollback**: 되돌리는 방법
+
+### 6.2 Task 크기 가이드
+- 1 Task는 “**1~2개 엔드포인트**” 또는 “**1개 데이터 계약(JSON 스키마) 확정**” 수준으로 쪼갠다.
+- 긴 Task는 반드시 하위 Task로 분해하여 Queue에 등록한다.
+
+---
+
+## 7. (중요) 스펙 불일치 처리 규칙
+
+스펙 문서끼리 충돌할 때, 에이전트는 아래 우선순위를 따른다.
+
+1) 날짜가 포함된 최신 문서 > 구버전 문서  
+   - UI: `26.02.06`이 우선
+2) ERD 가이드의 “설계 변경 사항” 명시가 있으면 그 내용을 우선 적용  
+   - messages 삭제 → chat_history 통합
+3) 구현이 이미 존재한다면, **DECISIONS.md에 ‘왜 다르게 되었는지’ 기록** 후 정리
+
+---
+
+## 8. 빠진 기능/데이터 관점 체크리스트 (누락 방지용)
+
+UI(26.02.06)에 있고 ERD/Playbook에 반영이 약할 수 있는 항목들:
+- 면접자 “면접 진행도(phase)” 표시용 데이터(예: interviews.current_step / total_questions_planned 는 있으나, **phase 정의/매핑**은 별도 계약 필요)
+- “답변 완료 버튼” → 서버에선 **turn 종료 이벤트**를 명확히 처리해야 함(Interview next_turn endpoint)
+- “코딩테스트/화이트보드” → `whiteboard_notes.content_json` 저장 + 평가 대상화(옵션)
+
+ERD(26.02.05)에 있고 API 스펙에 빠지기 쉬운 항목들:
+- Redis: `interview:{id}:state`, `lock`, `rag:cache:{hash}` 키 규약
+- 로그 공통 필드(timestamp/level/request_id/user_id/latency_ms/status)
+
+루브릭(26.02.09)에 있고 구현에서 빠지기 쉬운 항목들:
+- 평가 결과 JSON 스키마 고정( tag_code / evidence_data 포함 )
+- 직군별 가중치 적용
+
+---
+
+## 9. 에이전트 출력 형식(강제)
+
+### 9.1 작업 시작(승인 전)
+1) 변경 제안서(파일/이유/내용/영향/롤백)  
 2) 사용자 허락 요청
 
-### 6.2 허락 후 구현 프롬프트
-사용자가 허락했다.
-- 제안서대로 구현하라.
-- 구현 후 반드시:
-  - logs에 에러가 남도록 로깅 설정 점검
-  - docs/DEV_LOG.md에 변경 요약/테스트 방법/다음 작업 기록
-
-출력 형식:
-1) 변경 요약
-2) 생성/수정 파일 목록
-3) 로컬 테스트 방법(curl 예시 포함)
-4) DEV_LOG 업데이트 내용 요약
-5) 다음 작업 제안 1~2개
+### 9.2 구현 완료 후(승인 후)
+1) 변경 요약  
+2) 생성/수정 파일 목록  
+3) 로컬 테스트 방법(curl 예시 포함)  
+4) logs 파일 경로(에러/주요 런타임 로그)  
+5) docs/DEV_LOG 업데이트 요약  
+6) 다음 작업 제안 1~2개
 
 ---
 
-## 7) DEV_LOG 기록 규칙 (사람용)
+## 10. 부록: 핵심 스펙 요약(참조용)
 
-DEV_LOG에는 "정리된 내용"만 남긴다.
-- 변경 사항(무엇을 왜 했는지)
-- 테스트 방법/결과
+### 10.1 interviews.chat_history(jsonb) 최소 권장 형태
+- `{role, content, timestamp, question_id?}` 배열 형태(ERD 예시)
+
+### 10.2 evaluation_scores.evidence_data(jsonb) 최소 권장 형태
+- `cosine_similarity`, `keyword_match`, `star_structure` 등 루브릭 가이드가 명시한 근거를 포함
+
+---
+
+### 참고 문서(필수)
+- ERD 가이드: `26.02.05(목)데이터 아키텍쳐,ERD 가이드.md`
+- UI 최신본: `26.02.06(금)AI 면접 프로그램 UI 설계 초안.md`
+- 태그 설계: `26.02.05(목)질문태그설계.md`
+- 루브릭 가이드: `26.02.09(월)정량평가 루브릭 가이드.md`
+
+### 문서 언어 규칙 (Mandatory)
+
+- `docs/` 폴더 내 모든 Markdown 문서는 **한국어로 작성한다**.
+- DEV_LOG, CURRENT_STATE, TASK_QUEUE, DECISIONS 등 운영 문서는
+  사람이 읽는 것을 목적으로 하므로 영어 사용을 금지한다.
+- 단, 코드 블록, 파일명, 클래스명, 함수명, 에러 메시지,
+  로그 파일(.log)의 내용은 영어를 유지한다.
