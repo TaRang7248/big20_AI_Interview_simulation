@@ -2670,9 +2670,10 @@ async def dashboard_page(request: Request):
 
 
 @app.get("/legacy/dashboard")
-async def legacy_dashboard_page():
-    """레거시 대시보드 (정적 HTML 폴백)"""
-    return FileResponse(os.path.join(static_dir, "my_dashboard.html"))
+async def legacy_dashboard_page(request: Request):
+    """레거시 대시보드 → Next.js 대시보드로 리디렉트"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/dashboard", status_code=302)
 
 
 # ========== 면접 이력 조회 API ==========
