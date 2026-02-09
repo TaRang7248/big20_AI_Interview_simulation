@@ -42,7 +42,7 @@ except ImportError:
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
-DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
 # 다이어그램 분석 전용 비전 모델 (이미지 인식 가능)
 DIAGRAM_VISION_MODEL = "qwen3-vl:4b"
 
