@@ -658,6 +658,68 @@ def reply_interview():
     finally:
         if conn: conn.close()
 
+@app.route('/api/interview/result/<interview_number>', methods=['GET'])
+def get_interview_result(interview_number):
+    try:
+        conn = get_db_connection()
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 1. Get all Q&A
+        c.execute('''
+            SELECT Create_Question, Question_answer, Answer_Evaluation 
+            FROM Interview_Progress 
+            WHERE Interview_Number = %s 
+            ORDER BY id ASC
+        ''', (interview_number,))
+        
+        rows = c.fetchall()
+        
+        if not rows:
+             return jsonify({'success': False, 'message': '면접 기록을 찾을 수 없습니다.'}), 404
+
+        # 2. Calculate Mock Score (Simple logic based on evaluation length/keywords)
+        # In real world, LLM would score. Here we randomize slightly biased by answer length.
+        total_score_tech = 0
+        total_score_prob = 0
+        total_score_comm = 0
+        total_score_atti = 0
+        
+        for row in rows:
+            ans = row['question_answer'] or ""
+            # Simple length heuristic
+            score_base = min(len(ans) * 2, 90) + random.randint(0, 10)
+            if score_base > 100: score_base = 100
+            if score_base < 60: score_base = 60
+            
+            total_score_tech += score_base
+            total_score_prob += score_base + random.randint(-5, 5)
+            total_score_comm += score_base + random.randint(-5, 5)
+            total_score_atti += score_base + random.randint(-5, 5)
+
+        count = len(rows)
+        avg_tech = round(total_score_tech / count, 1)
+        avg_prob = round(total_score_prob / count, 1)
+        avg_comm = round(total_score_comm / count, 1)
+        avg_atti = round(total_score_atti / count, 1)
+
+        result_data = {
+            'scores': {
+                'tech': avg_tech,
+                'prob': avg_prob,
+                'comm': avg_comm,
+                'atti': avg_atti
+            },
+            'qa_list': [dict(r) for r in rows]
+        }
+        
+        return jsonify({'success': True, 'result': result_data})
+
+    except Exception as e:
+        print(f"Get Result Error: {e}")
+        return jsonify({'success': False, 'message': '결과 조회 중 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
 
 import webbrowser
 from threading import Timer

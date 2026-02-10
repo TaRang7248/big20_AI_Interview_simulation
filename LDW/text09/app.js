@@ -662,35 +662,108 @@ function submitAnswer(forced) {
         });
 }
 
+// function finishInterview() {
+//     AppState.interview.inProgress = false;
+
+//     // Fetch Real Result from Server
+//     fetch(`/api/interview/result/${AppState.interview.interviewNumber}`)
+//         .then(res => res.json())
+//         .then(data => {
+//             if (data.success) {
+//                 const result = data.result;
+
+//                 // Save to Mock DB (for local session consistency if needed)
+//                 const appRecord = {
+//                     userId: AppState.currentUser.id_name,
+//                     jobId: AppState.currentJobId,
+//                     date: new Date().toLocaleDateString(),
+//                     scores: result.scores,
+//                     interviewNumber: AppState.interview.interviewNumber
+//                 };
+//                 MOCK_DB.applications.push(appRecord);
+
+//                 // Show Result Page
+//                 navigateTo('result-page');
+
+//                 setTimeout(() => {
+//                     $('#score-tech').style.width = `${result.scores.tech}%`;
+//                     $('#score-prob').style.width = `${result.scores.prob}%`;
+//                     $('#score-comm').style.width = `${result.scores.comm}%`;
+//                     $('#score-atti').style.width = `${result.scores.atti}%`;
+
+//                     const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
+//                     $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
+//                     $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
+
+//                     $('#result-desc').innerHTML = `
+//                         수고하셨습니다. 면접 분석 결과입니다.<br>
+//                         평균 점수: <strong>${avg}점</strong><br>
+//                         <br>
+//                         상세 질의응답 분석은 이메일로 발송됩니다.
+//                     `;
+//                 }, 500);
+
+//             } else {
+//                 showToast('결과 생성 중 오류가 발생했습니다.', 'error');
+//             }
+//         })
+//         .catch(err => {
+//             console.error('Result Fetch Error:', err);
+//             showToast('결과 조회 실패', 'error');
+//         });
+// }
+
 function finishInterview() {
     AppState.interview.inProgress = false;
-    // Save to Mock DB
-    const result = {
-        userId: AppState.currentUser.id_name,
-        jobId: AppState.currentJobId,
-        date: new Date().toLocaleDateString(),
-        scores: {
-            tech: Math.floor(Math.random() * 30) + 70, // Mock Score
-            prob: Math.floor(Math.random() * 30) + 70,
-            comm: Math.floor(Math.random() * 30) + 70,
-            atti: Math.floor(Math.random() * 30) + 70
-        }
-    };
-    MOCK_DB.applications.push(result);
 
-    // Show Result Page
-    // Animate bars
-    navigateTo('result-page');
-    setTimeout(() => {
-        $('#score-tech').style.width = `${result.scores.tech}%`;
-        $('#score-prob').style.width = `${result.scores.prob}%`;
-        $('#score-comm').style.width = `${result.scores.comm}%`;
-        $('#score-atti').style.width = `${result.scores.atti}%`;
+    showToast("면접 결과를 분석 중입니다...", "info");
 
-        const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
-        $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
-        $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
-    }, 500);
+    // Fetch Real Result from Server
+    fetch(`/api/interview/result/${AppState.interview.interviewNumber}`)
+        .then(res => res.json())
+        .then(data => {
+            if (data.success) {
+                const result = data.result;
+
+                // Save to Mock DB (for local session consistency if needed)
+                const appRecord = {
+                    userId: AppState.currentUser.id_name,
+                    jobId: AppState.currentJobId,
+                    date: new Date().toLocaleDateString(),
+                    scores: result.scores,
+                    interviewNumber: AppState.interview.interviewNumber
+                };
+                MOCK_DB.applications.push(appRecord);
+
+                // Show Result Page
+                navigateTo('result-page');
+
+                setTimeout(() => {
+                    $('#score-tech').style.width = `${result.scores.tech}%`;
+                    $('#score-prob').style.width = `${result.scores.prob}%`;
+                    $('#score-comm').style.width = `${result.scores.comm}%`;
+                    $('#score-atti').style.width = `${result.scores.atti}%`;
+
+                    const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
+                    $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
+                    $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
+
+                    $('#result-desc').innerHTML = `
+                        수고하셨습니다. 면접 분석 결과입니다.<br>
+                        평균 점수: <strong>${avg}점</strong><br>
+                        <br>
+                        상세 질의응답 분석은 이메일로 발송됩니다.
+                    `;
+                }, 500);
+
+            } else {
+                showToast('결과 생성 중 오류가 발생했습니다.', 'error');
+            }
+        })
+        .catch(err => {
+            console.error('Result Fetch Error:', err);
+            showToast('결과 조회 실패', 'error');
+        });
 }
 
 // --- Admin Section ---
@@ -718,6 +791,184 @@ function initAdmin() {
         }
     });
 
+
+    // --- 4. Helper Functions (Timer, TTS, STT) ---
+
+    // Timer Implementation
+    function startTimer(duration) {
+        if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+
+        AppState.interview.timeLeft = duration;
+        updateTimerDisplay(duration);
+
+        AppState.interview.timer = setInterval(() => {
+            AppState.interview.timeLeft--;
+            updateTimerDisplay(AppState.interview.timeLeft);
+
+            if (AppState.interview.timeLeft <= 0) {
+                clearInterval(AppState.interview.timer);
+                submitAnswer(true); // Forced submission on timeout
+            }
+        }, 1000);
+    }
+
+    function updateTimerDisplay(seconds) {
+        const min = Math.floor(seconds / 60);
+        const sec = seconds % 60;
+        const timeString = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+        const timerDisplay = document.getElementById('timer-display');
+        if (timerDisplay) timerDisplay.textContent = timeString;
+
+        const progressBar = document.getElementById('progress-bar');
+        if (progressBar) {
+            const percentage = (seconds / 60) * 100; // Assuming 60s max
+            progressBar.style.width = `${percentage}%`;
+        }
+    }
+
+    // TTS (Text-to-Speech) Implementation
+    function speakText(text, callback) {
+        if (!window.speechSynthesis) {
+            console.error("TTS not supported");
+            if (callback) callback();
+            return;
+        }
+
+        // Cancel any ongoing speech
+        window.speechSynthesis.cancel();
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = 'ko-KR'; // Korean
+        utterance.rate = 1.0;
+
+        utterance.onend = () => {
+            if (callback) callback();
+        };
+
+        utterance.onerror = (e) => {
+            console.error("TTS Error:", e);
+            if (callback) callback();
+        };
+
+        window.speechSynthesis.speak(utterance);
+    }
+
+    // STT (Speech-to-Text) Implementation
+    let recognition = null;
+
+    function initSpeechRecognition() {
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+        } else if ('SpeechRecognition' in window) {
+            recognition = new SpeechRecognition();
+        } else {
+            console.log("Speech Recognition API not supported in this browser.");
+            return null;
+        }
+
+        recognition.continuous = true; // Keep listening
+        recognition.interimResults = true; // Show interim results
+        recognition.lang = 'ko-KR';
+
+        recognition.onresult = function (event) {
+            let finalTranscript = '';
+            let interimTranscript = '';
+
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    finalTranscript += event.results[i][0].transcript;
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+
+            const answerInput = document.getElementById('user-answer');
+            if (answerInput) {
+                // Append only final results to existing text to avoid overwriting manual edits? 
+                // Actually, usually we just update the value. 
+                // Simple approach: append final to current value if it's new?
+                // Better approach for demo: Just update with what we hear + existing content logic is complex.
+                // We will just set value to finalTranscript if we clear it each time.
+                // OR: We can just let the user see what is being typed.
+
+                // Simple Logic: just display what is recognized in this session.
+                // If user modifies it manually, it might get overwritten by subsequent recognition events if we strictly use `transcript`.
+                // But for this demo, let's just append new final parts.
+
+                if (finalTranscript) {
+                    // Simplistic: Just add to the textarea. 
+                    // Note: This logic might duplicate if `continuous` keeps sending old finals.
+                    // Actually `event.resultIndex` helps processing only new results.
+
+                    // We need to maintain state of what was already added?
+                    // Let's just append the *new* final transcript part.
+
+                    const currentVal = answerInput.value;
+                    answerInput.value = currentVal + (currentVal ? ' ' : '') + finalTranscript;
+                }
+
+                // Show interim in placeholder or separate visual? 
+                // For simplicity, maybe just ignore interim or show in console.
+                // Or update value with interim temporarily? (Complex to undo)
+            }
+        };
+
+        recognition.onerror = function (event) {
+            console.error("Speech Recognition Error:", event.error);
+        };
+
+        return recognition;
+    }
+
+    function startListening() {
+        if (!recognition) {
+            recognition = initSpeechRecognition();
+        }
+
+        if (recognition) {
+            try {
+                recognition.start();
+                console.log("Voice recognition started.");
+            } catch (e) {
+                console.warn("Recognition already started or error:", e);
+            }
+        }
+    }
+
+    function stopListening() {
+        if (recognition) {
+            try {
+                recognition.stop();
+                console.log("Voice recognition stopped.");
+            } catch (e) {
+                console.warn("Error stopping recognition:", e);
+            }
+        }
+    }
+
+    // Helper Toast
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.textContent = message;
+
+        container.appendChild(toast);
+
+        // Animate In
+        setTimeout(() => {
+            toast.classList.add('show');
+        }, 10);
+
+        // Remove after 3s
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                container.removeChild(toast);
+            }, 300);
+        }, 3000);
+    }
     // Show Job Register Page
     $('#btn-add-job').addEventListener('click', () => {
         $('#admin-view-jobs').classList.add('hidden');
@@ -909,21 +1160,12 @@ function renderAdminAppList() {
 }
 
 // --- Input Masking Utilities ---
-// Input Masking removed for split fields (handled by HTML maxlength)
-// Legacy support or specific masking can be re-added here if needed for other fields
-
-
-// --- Utilities ---
-function showToast(msg, type = 'info') {
-    const container = $('#toast-container');
-    const div = document.createElement('div');
-    div.className = `toast ${type}`;
-    div.textContent = msg;
-    container.appendChild(div);
-
-    // Auto remove
-    setTimeout(() => {
-        div.remove();
+function initInputMasking() {
+    // Basic input masking logic can be added here if needed.
+    // Currently acting as a placeholder to prevent ReferenceError.
+    console.log("Input masking initialized.");
+}
+div.remove();
     }, 3000);
 }
 
@@ -996,6 +1238,32 @@ function startListening() {
 function stopListening() {
     if (recognitionInst) {
         recognitionInst.stop();
-        recognitionInst = null;
     }
+}
+
+// --- Timer Utilities ---
+function startTimer(duration) {
+    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+
+    AppState.interview.timeLeft = duration;
+    updateTimerDisplay(duration);
+
+    AppState.interview.timer = setInterval(() => {
+        AppState.interview.timeLeft--;
+        updateTimerDisplay(AppState.interview.timeLeft);
+
+        if (AppState.interview.timeLeft <= 0) {
+            clearInterval(AppState.interview.timer);
+            showToast("답변 시간이 종료되었습니다.", "warning");
+            submitAnswer(true); // Force submit
+        }
+    }, 1000);
+}
+
+function updateTimerDisplay(seconds) {
+    const min = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    const display = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    const timerEl = document.getElementById('timer-display');
+    if (timerEl) timerEl.textContent = display;
 }
