@@ -381,6 +381,15 @@ def update_job(id):
         conn = get_db_connection()
         c = conn.cursor()
         
+        # Verify ownership
+        c.execute("SELECT id_name FROM interview_announcement WHERE id = %s", (id,))
+        row = c.fetchone()
+        if not row:
+             return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        
+        if row[0] != data.get('id_name'):
+             return jsonify({'success': False, 'message': '수정 권한이 없습니다.'}), 403
+
         c.execute('''
             UPDATE interview_announcement
             SET title = %s, job = %s, deadline = %s, content = %s
@@ -388,10 +397,7 @@ def update_job(id):
         ''', (data['title'], data.get('job', ''), data['deadline'], data.get('content', ''), id))
         conn.commit()
         
-        if c.rowcount > 0:
-            return jsonify({'success': True, 'message': '공고가 수정되었습니다.'})
-        else:
-            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        return jsonify({'success': True, 'message': '공고가 수정되었습니다.'})
             
     except Exception as e:
         print(f"Update Job Error: {e}")
@@ -405,13 +411,23 @@ def delete_job(id):
         conn = get_db_connection()
         c = conn.cursor()
         
+        # Check ownership
+        # Try to get id_name from JSON body or Query Params
+        data = request.get_json(silent=True) or request.args
+        requester_id = data.get('id_name')
+
+        c.execute("SELECT id_name FROM interview_announcement WHERE id = %s", (id,))
+        row = c.fetchone()
+        if not row:
+             return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        
+        if row[0] != requester_id:
+             return jsonify({'success': False, 'message': '삭제 권한이 없습니다.'}), 403
+        
         c.execute('DELETE FROM interview_announcement WHERE id = %s', (id,))
         conn.commit()
         
-        if c.rowcount > 0:
-            return jsonify({'success': True, 'message': '공고가 삭제되었습니다.'})
-        else:
-            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        return jsonify({'success': True, 'message': '공고가 삭제되었습니다.'})
             
     except Exception as e:
         print(f"Delete Job Error: {e}")
