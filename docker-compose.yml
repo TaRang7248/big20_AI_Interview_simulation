@@ -32,5 +32,12 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:latest
+    container_name: interview_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
 volumes:
   postgres_data:
