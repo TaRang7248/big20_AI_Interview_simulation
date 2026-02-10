@@ -296,7 +296,7 @@ except ImportError as e:
 
 # RAG 서비스
 try:
-    from resume_rag import ResumeRAG
+    from resume_rag import ResumeRAG, RESUME_TABLE, QA_TABLE
     RAG_AVAILABLE = True
     print("✅ Resume RAG 서비스 활성화됨")
 except ImportError as e:
@@ -1045,9 +1045,9 @@ class AIInterviewer:
             try:
                 connection_string = os.getenv("POSTGRES_CONNECTION_STRING")
                 if connection_string:
-                    self.rag = ResumeRAG(connection_string=connection_string)
+                    self.rag = ResumeRAG(connection_string=connection_string, table_name=RESUME_TABLE)
                     self.retriever = self.rag.get_retriever()
-                    print("✅ RAG 초기화 완료")
+                    print("✅ RAG 초기화 완료 (테이블: resume_embeddings)")
             except Exception as e:
                 print(f"⚠️ RAG 초기화 실패: {e}")
         
@@ -1262,6 +1262,18 @@ class AIInterviewer:
                 except Exception as e:
                     print(f"⚠️ RAG 검색 오류: {e}")
             
+            # ========== 3-1. 면접 Q&A 참조 데이터 검색 (모범 답변 참고용) ==========
+            qa_reference_context = ""
+            if RAG_AVAILABLE and user_answer:
+                try:
+                    qa_rag = ResumeRAG(table_name=QA_TABLE)
+                    qa_docs = await run_in_executor(RAG_EXECUTOR, qa_rag.similarity_search, user_answer, 2)
+                    if qa_docs:
+                        qa_reference_context = "\n".join([d.page_content for d in qa_docs[:2]])
+                        print(f"📖 [Q&A RAG] {len(qa_docs)}개 참조 문서에서 모범 답변 추출")
+                except Exception as e:
+                    print(f"⚠️ Q&A 참조 데이터 검색 오류 (무시): {e}")
+            
             # ========== 4. 대화 기록을 LangChain 메시지로 변환 ==========
             chat_history = session.get("chat_history", [])
             messages = [SystemMessage(content=self.INTERVIEWER_PROMPT)]
@@ -1282,6 +1294,11 @@ class AIInterviewer:
             if resume_context:
                 context_msg = f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n{resume_context}\n------------------------------------------"
                 messages.append(SystemMessage(content=context_msg))
+            
+            # ========== 5-1. 면접 Q&A 참조 데이터 컨텍스트 추가 ==========
+            if qa_reference_context:
+                qa_msg = f"\n--- [RAG System] 면접 참고 자료 (모범 답변 DB) ---\n{qa_reference_context}\n이 참고 자료를 바탕으로 지원자의 답변 수준을 판단하고, 더 깊은 꼬리질문을 만들어주세요.\n------------------------------------------"
+                messages.append(SystemMessage(content=qa_msg))
             
             # ========== 6. 질문 생성 프롬프트 (꼬리질문 정보 포함) ==========
             follow_up_instruction = ""
@@ -2607,15 +2624,13 @@ async def upload_resume(
     chunks_created = 0
     if RAG_AVAILABLE:
         try:
-            # 세션별 고유 컬렉션 이름 사용
-            collection_name = f"resume_{session_id[:16]}"
             connection_string = os.getenv("POSTGRES_CONNECTION_STRING")
             
             if connection_string:
-                # 새 RAG 인스턴스 생성 (세션별)
+                # 이력서 전용 RAG 인스턴스 생성
                 session_rag = ResumeRAG(
-                    connection_string=connection_string,
-                    collection_name=collection_name
+                    table_name=RESUME_TABLE,
+                    connection_string=connection_string
                 )
                 
                 # PDF 인덱싱
@@ -2632,7 +2647,7 @@ async def upload_resume(
                 })
                 
                 chunks_created = num_chunks if num_chunks else 1
-                print(f"✅ RAG 인덱싱 완료: {collection_name}")
+                print(f"✅ RAG 인덱싱 완료: {RESUME_TABLE}")
             else:
                 print("⚠️ POSTGRES_CONNECTION_STRING 미설정, RAG 비활성화")
                 state.update_session(session_id, {
@@ -2705,6 +2720,91 @@ async def delete_resume(session_id: str, current_user: Dict = Depends(get_curren
     })
     
     return {"success": True, "message": "이력서가 삭제되었습니다."}
+
+
+# ========== 면접 Q&A 참조 데이터 인덱싱 API ==========
+
+# 인덱싱 상태 추적
+_qa_index_status = {"status": "idle", "indexed": 0, "total": 0, "error": None}
+
+@app.post("/api/qa-data/index")
+async def index_qa_data(current_user: Dict = Depends(get_current_user)):
+    """
+    Data/data.json 면접 Q&A 데이터를 RAG 시스템에 인덱싱합니다.
+    인덱싱 후 LLM이 면접 시 참조 가능한 모범 답변 데이터베이스가 구축됩니다.
+    (인증 필요, 관리자용)
+    """
+    global _qa_index_status
+    
+    if not RAG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="RAG 서비스가 비활성화 상태입니다.")
+    
+    if _qa_index_status["status"] == "indexing":
+        return {"success": False, "message": "이미 인덱싱이 진행 중입니다.", "status": _qa_index_status}
+    
+    # data.json 경로
+    json_path = os.path.join(root_dir, "Data", "data.json")
+    if not os.path.exists(json_path):
+        raise HTTPException(status_code=404, detail=f"데이터 파일을 찾을 수 없습니다: {json_path}")
+    
+    _qa_index_status = {"status": "indexing", "indexed": 0, "total": 0, "error": None}
+    
+    try:
+        # 별도 컬렉션으로 인덱싱 (이력서 데이터와 분리)
+        rag = ResumeRAG(table_name=QA_TABLE)
+        
+        # 비동기 실행 (대량 데이터이므로 ThreadPool 사용)
+        indexed_count = await run_in_executor(
+            RAG_EXECUTOR,
+            rag.load_and_index_json,
+            json_path,
+            100
+        )
+        
+        _qa_index_status = {"status": "completed", "indexed": indexed_count, "total": indexed_count, "error": None}
+        print(f"✅ 면접 Q&A 데이터 인덱싱 완료: {indexed_count}개 청크")
+        
+        return {
+            "success": True,
+            "message": f"면접 Q&A 데이터 인덱싱 완료: {indexed_count}개 청크가 저장되었습니다.",
+            "chunks_indexed": indexed_count
+        }
+    except Exception as e:
+        _qa_index_status = {"status": "error", "indexed": 0, "total": 0, "error": str(e)}
+        print(f"❌ Q&A 인덱싱 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"인덱싱 실패: {str(e)}")
+
+@app.get("/api/qa-data/status")
+async def qa_data_status():
+    """Q&A 데이터 인덱싱 상태 조회"""
+    return _qa_index_status
+
+@app.get("/api/qa-data/search")
+async def search_qa_data(q: str, k: int = 4):
+    """
+    인덱싱된 면접 Q&A 데이터에서 관련 내용을 검색합니다.
+    질문과 유사한 모범 답변을 반환합니다.
+    """
+    if not RAG_AVAILABLE:
+        raise HTTPException(status_code=503, detail="RAG 서비스가 비활성화 상태입니다.")
+    
+    try:
+        rag = ResumeRAG(table_name=QA_TABLE)
+        results = rag.similarity_search(q, k=k)
+        
+        return {
+            "success": True,
+            "query": q,
+            "results": [
+                {
+                    "content": doc.page_content,
+                    "metadata": doc.metadata,
+                }
+                for doc in results
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"검색 실패: {str(e)}")
 
 
 # ========== 대시보드 페이지 ==========
