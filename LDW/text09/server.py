@@ -2,18 +2,23 @@ import os
 import uuid
 import shutil
 import psycopg2
+import json
+import logging
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 from dotenv import load_dotenv
-import google.generativeai as genai
-import uvicorn
-import webbrowser
+from openai import OpenAI
+from pypdf import PdfReader
 from threading import Timer
+import webbrowser
+
+# Configure Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load .env
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env'))
@@ -25,19 +30,15 @@ DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579")
 DB_PORT = os.getenv("DB_PORT", "5432")
 UPLOAD_FOLDER = 'uploads/resumes'
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+AUDIO_FOLDER = 'uploads/audio'
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Initialize Gemini
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-pro')
-else:
-    print("WARNING: GEMINI_API_KEY not found in .env. LLM features will not work.")
-    model = None
+# Initialize OpenAI Client
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Ensure upload directory exists
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+# Ensure directories exist
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(AUDIO_FOLDER, exist_ok=True)
 
 app = FastAPI()
 
@@ -63,80 +64,8 @@ def get_db_connection():
         )
         return conn
     except psycopg2.OperationalError as e:
-        print(f"DB Connection Failed: {e}")
+        logger.error(f"DB Connection Failed: {e}")
         raise HTTPException(status_code=500, detail="Database connection failed")
-
-def init_db():
-    try:
-        conn = get_db_connection()
-        c = conn.cursor()
-        
-        # Existing tables
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id_name TEXT PRIMARY KEY,
-                pw TEXT NOT NULL,
-                name TEXT NOT NULL,
-                dob TEXT,
-                gender TEXT,
-                email TEXT,
-                address TEXT,
-                phone TEXT,
-                type TEXT DEFAULT 'applicant'
-            )
-        ''')
-
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS interview_announcement (
-                id SERIAL PRIMARY KEY,
-                title TEXT NOT NULL,
-                job TEXT,
-                deadline TEXT,
-                content TEXT,
-                id_name TEXT REFERENCES users(id_name),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS interview_information (
-                id SERIAL PRIMARY KEY,
-                id_name TEXT REFERENCES users(id_name),
-                job TEXT,
-                resume TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS interview_answer (
-                id SERIAL PRIMARY KEY,
-                question TEXT NOT NULL,
-                answer TEXT NOT NULL
-            )
-        ''')
-
-        # NEW: Interview_Progress Table
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS Interview_Progress (
-                id SERIAL PRIMARY KEY,
-                Interview_Number TEXT NOT NULL,
-                Applicant_Name TEXT NOT NULL,
-                Job_Title TEXT,
-                Create_Question TEXT,
-                Question_answer TEXT,
-                answer_time TEXT,
-                Answer_Evaluation TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        
-        conn.commit()
-        print("Database initialized successfully.")
-    except Exception as e:
-        print(f"DB Init Error: {e}")
-    finally:
-        if conn: conn.close()
 
 # --- Pydantic Models ---
 class UserRegister(BaseModel):
@@ -167,7 +96,7 @@ class UserUpdate(BaseModel):
     email: Optional[str]
     phone: Optional[str]
     address: Optional[str]
-
+    
 class JobCreate(BaseModel):
     title: str
     job: Optional[str] = ''
@@ -180,19 +109,110 @@ class JobUpdate(BaseModel):
     job: Optional[str] = ''
     deadline: Optional[str] = ''
     content: Optional[str] = ''
-    id_name: Optional[str] = None # For verification
+    id_name: Optional[str] = None
 
 class StartInterviewRequest(BaseModel):
     id_name: str
     job_title: str
 
-class AnswerSubmission(BaseModel):
-    interview_number: str
-    applicant_name: str
-    job_title: str
-    question: str
-    answer: str
-    answer_time: str
+# --- Helper Functions ---
+
+def extract_text_from_pdf(filepath):
+    try:
+        reader = PdfReader(filepath)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        logger.error(f"PDF Extraction Error: {e}")
+        return ""
+
+def get_job_questions(job_title):
+    """
+    Fetches questions for a job title.
+    If not in pool, selects from interview_answer using LLM and saves to pool.
+    """
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    # 1. Check Pool
+    c.execute("SELECT question_id FROM job_question_pool WHERE job_title = %s", (job_title,))
+    rows = c.fetchall()
+    
+    if rows:
+        # Fetch actual question text
+        question_ids = [row[0] for row in rows]
+        # Dynamically build query for IN clause
+        placeholders = ','.join(['%s'] * len(question_ids))
+        c.execute(f"SELECT question FROM interview_answer WHERE id IN ({placeholders})", tuple(question_ids))
+        questions = [r[0] for r in c.fetchall()]
+        conn.close()
+        return questions
+
+    # 2. If no pool, create one
+    logger.info(f"No pool found for {job_title}. Creating one using LLM...")
+    c.execute("SELECT id, question FROM interview_answer") # Fetch ALL questions
+    all_questions = c.fetchall() # list of (id, question)
+    
+    if not all_questions:
+        conn.close()
+        return ["자기소개를 해주세요."]
+
+    # Convert to JSON for LLM
+    questions_json = [{"id": q[0], "question": q[1]} for q in all_questions]
+    
+    prompt = f"""
+    당신은 채용 담당자입니다.
+    지원 직무: {job_title}
+    
+    아래 전체 면접 질문 리스트에서 해당 직무에 가장 적합한 핵심 질문 5~10개를 선별해주세요.
+    반드시 JSON 형식으로 ID 리스트만 반환해주세요. 예: [1, 5, 10, ...]
+    
+    질문 리스트:
+    {json.dumps(questions_json[:300], ensure_ascii=False)} 
+    (데이터가 많으면 일부만 전송됨)
+    """
+    # Note: Sending all data might be too large. Truncating to 300 for safety if needed, 
+    # but strictly we should probably filter by keyword first if dataset is huge. 
+    # For now assuming data.json size is manageable for GPT-4o context window if it's not massive. 
+    # user said "once", so this is a one-time cost.
+    
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        result = json.loads(completion.choices[0].message.content)
+        selected_ids = result.get("ids", [])
+        
+        # fallback if json structure is different
+        if not selected_ids and "usage" not in result: # just in case
+             # try to parse list if it returned raw list
+             pass
+
+        if not selected_ids:
+             # If LLM fails, pick random 5
+             selected_ids = [q[0] for q in all_questions[:5]]
+
+        # Save to Pool
+        for q_id in selected_ids:
+            c.execute("INSERT INTO job_question_pool (job_title, question_id) VALUES (%s, %s)", (job_title, q_id))
+        
+        conn.commit()
+        
+        # Return text
+        c.execute(f"SELECT question FROM interview_answer WHERE id = ANY(%s)", (selected_ids,))
+        questions = [r[0] for r in c.fetchall()]
+        conn.close()
+        return questions
+
+    except Exception as e:
+        logger.error(f"LLM Pool Creation Error: {e}")
+        conn.close()
+        return ["자기소개를 부탁드립니다.", "성격의 장단점은 무엇인가요?"]
+
 
 # --- API Endpoints ---
 
@@ -212,7 +232,7 @@ def register(user: UserRegister):
         conn.commit()
         return {"success": True, "message": "회원가입 완료"}
     except Exception as e:
-        print(f"Register Error: {e}")
+        logger.error(f"Register Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
@@ -387,6 +407,7 @@ async def upload_resume(resume: UploadFile = File(...), id_name: str = Form(...)
             
         conn = get_db_connection()
         c = conn.cursor()
+        # Delete old resume for this user/job if needed, or just insert new
         c.execute('''
             INSERT INTO interview_information (id_name, job, resume)
             VALUES (%s, %s, %s)
@@ -396,108 +417,213 @@ async def upload_resume(resume: UploadFile = File(...), id_name: str = Form(...)
         
         return {"success": True, "message": "이력서가 업로드되었습니다.", "filepath": filepath}
     except Exception as e:
-        print(f"Upload Error: {e}")
+        logger.error(f"Upload Error: {e}")
         raise HTTPException(status_code=500, detail="파일 업로드 중 오류 발생")
 
-# --- LLM Interview Logic ---
-
+# --- Logic: Start Interview ---
 @app.post("/api/interview/start")
 def start_interview(data: StartInterviewRequest):
     """
-    Starts an interview session.
-    Generates the first question based on the job title.
+    1. Load Resume & Job Info.
+    2. Prepare Pool (Get or Create).
+    3. Generate 1st Question via LLM.
+    4. Save to Interview_Progress.
     """
     interview_number = str(uuid.uuid4())
-    
-    # Simple prompt for the first question
-    prompt = f"당신은 {data.job_title} 직무의 면접관입니다. 지원자에게 할 첫 번째 질문을 한국어로 하나만 만들어주세요."
+    conn = get_db_connection()
+    c = conn.cursor()
     
     try:
-        if model:
-            response = model.generate_content(prompt)
-            question = response.text.strip()
-        else:
-            question = f"{data.job_title} 직무에 지원하게 된 동기는 무엇인가요? (LLM 미설정)"
+        # Get Resume Path
+        c.execute("SELECT resume FROM interview_information WHERE id_name = %s AND job = %s ORDER BY created_at DESC LIMIT 1", (data.id_name, data.job_title))
+        row = c.fetchone()
+        if not row:
+             # Fallback: try finding any resume for this user
+             c.execute("SELECT resume FROM interview_information WHERE id_name = %s ORDER BY created_at DESC LIMIT 1", (data.id_name,))
+             row = c.fetchone()
+             if not row:
+                 return {"success": False, "message": "이력서를 찾을 수 없습니다. 먼저 이력서를 등록해주세요."}
+        
+        resume_path = row[0]
+        resume_text = extract_text_from_pdf(resume_path)
+        
+        # Get Job Questions Pool
+        questions_pool = get_job_questions(data.job_title)
+        
+        # Determine Applicant Name
+        c.execute("SELECT name FROM users WHERE id_name = %s", (data.id_name,))
+        user_row = c.fetchone()
+        applicant_name = user_row[0] if user_row else "지원자"
 
+        # Generate 1st Question
+        prompt = f"""
+        당신은 면접관입니다. 
+        직무: {data.job_title}
+        지원자 이름: {applicant_name}
+        
+        [이력서 내용]
+        {resume_text[:2000]}... (생략)
+        
+        [질문 풀]
+        {questions_pool}
+        
+        위 정보를 바탕으로 면접을 시작하는 첫 번째 질문을 하나만 만들어주세요. 
+        인사말과 함께 자연스럽게 질문해주세요. 한국어로 해주세요.
+        """
+        
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        first_question = completion.choices[0].message.content.strip()
+        
+        # Save to DB
+        c.execute('''
+            INSERT INTO Interview_Progress (
+                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question
+            ) VALUES (%s, %s, %s, %s, %s)
+        ''', (interview_number, applicant_name, data.job_title, resume_text[:1000], first_question))
+        # Note: Saving truncated resume text to avoid huge DB size if text is long.
+        
+        conn.commit()
+        
         return {
             "success": True,
             "interview_number": interview_number,
-            "question": question
+            "question": first_question
         }
-    except Exception as e:
-        print(f"LLM Error: {e}")
-        return {"success": False, "message": "질문 생성 중 오류가 발생했습니다."}
-
-@app.post("/api/interview/answer")
-def submit_answer(data: AnswerSubmission):
-    """
-    Evaluates the answer and generates the next question.
-    Saves everything to Interview_Progress.
-    """
-    
-    # 1. Evaluate current answer
-    eval_prompt = f"""
-    질문: {data.question}
-    지원자 답변: {data.answer}
-    
-    위 답변을 {data.job_title} 직무 지원자로서 평가해주세요.
-    평가 내용은 지원자에게 보이지 않으므로 솔직하고 비판적으로 분석해주세요.
-    점수 (10점 만점)와 구체적인 피드백을 포함해주세요.
-    """
-    
-    # 2. Generate next question
-    next_q_prompt = f"""
-    이전 질문: {data.question}
-    지원자 답변: {data.answer}
-    
-    이전 답변을 바탕으로 {data.job_title} 직무 면접을 이어갈 다음 꼬리 질문을 하나만 만들어주세요. 한국어로 해주세요.
-    """
-
-    try:
-        evaluation = "LLM 미설정으로 인한 평가 불가"
-        next_question = "다음 질문입니다. (LLM 미설정)"
         
-        if model:
-             eval_response = model.generate_content(eval_prompt)
-             evaluation = eval_response.text.strip()
-             
-             next_q_response = model.generate_content(next_q_prompt)
-             next_question = next_q_response.text.strip()
+    except Exception as e:
+        logger.error(f"Start Interview Error: {e}")
+        return {"success": False, "message": "면접 시작 중 오류가 발생했습니다."}
+    finally:
+        conn.close()
 
-        # 3. Save to DB
+# --- Logic: Submit Answer & Next Question ---
+@app.post("/api/interview/answer")
+async def submit_answer(
+    interview_number: str = Form(...),
+    applicant_name: str = Form(...),
+    job_title: str = Form(...),
+    answer_time: str = Form(...),
+    audio: UploadFile = File(...)
+):
+    """
+    1. STT (Whisper).
+    2. Find Previous Question.
+    3. Evaluate Answer.
+    4. Generate Next Question.
+    5. Save & Return.
+    """
+    
+    # Save Audio File
+    audio_filename = f"{interview_number}_{uuid.uuid4()}.webm"
+    audio_path = os.path.join(AUDIO_FOLDER, audio_filename)
+    
+    try:
+        with open(audio_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+            
+        # 1. STT (Whisper)
+        with open(audio_path, "rb") as audio_file:
+            transcript = client.audio.transcriptions.create(
+                model="whisper-1", 
+                file=audio_file,
+                language="ko"
+            )
+        applicant_answer = transcript.text
+        
+        # 2. Find Previous Question (The one with this interview number and NO answer yet)
         conn = get_db_connection()
         c = conn.cursor()
+        
+        # We find the latest row for this interview
+        c.execute("""
+            SELECT id, Create_Question, Resume FROM Interview_Progress 
+            WHERE Interview_Number = %s 
+            ORDER BY id DESC LIMIT 1
+        """, (interview_number,))
+        row = c.fetchone()
+        
+        if not row:
+             # Should not happen
+             logger.error("No active question found.")
+             conn.close()
+             return {"success": False, "message": "진행 중인 면접을 찾을 수 없습니다."}
+             
+        current_row_id = row[0]
+        prev_question = row[1]
+        resume_context = row[2] if row[2] else ""
+        
+        # 3. Evaluate & 4. Next Question
+        prompt = f"""
+        [상황]
+        직무: {job_title}
+        면접자: {applicant_name}
+        
+        [이전 질문]
+        {prev_question}
+        
+        [지원자 답변]
+        {applicant_answer}
+        
+        [작업 1] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
+        [작업 2] 답변 내용을 바탕으로 꼬리 질문을 하거나, 다른 주제로 넘어가는 다음 면접 질문을 하나만 생성해주세요.
+        
+        반드시 JSON 형식으로 반환해주세요.
+        {{
+            "evaluation": "평가 내용...",
+            "next_question": "다음 질문..."
+        }}
+        """
+        
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        
+        result = json.loads(completion.choices[0].message.content)
+        evaluation = result.get("evaluation", "평가 불가")
+        next_question = result.get("next_question", "면접을 마칩니다.")
+        
+        # 5. Update DB (Current Row)
+        c.execute("""
+            UPDATE Interview_Progress 
+            SET Question_answer = %s, answer_time = %s, Answer_Evaluation = %s
+            WHERE id = %s
+        """, (applicant_answer, answer_time, evaluation, current_row_id))
+        
+        # 6. Insert New Row (Next Question)
+        # resume context is copied for simplicity or we can just ignore it for subsequent rows
         c.execute('''
             INSERT INTO Interview_Progress (
-                Interview_Number, Applicant_Name, Job_Title, 
-                Create_Question, Question_answer, answer_time, Answer_Evaluation
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            data.interview_number, data.applicant_name, data.job_title,
-            data.question, data.answer, data.answer_time, evaluation
-        ))
+                Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume
+            ) VALUES (%s, %s, %s, %s, %s)
+        ''', (interview_number, applicant_name, job_title, next_question, resume_context))
+        
         conn.commit()
         conn.close()
         
         return {
             "success": True,
             "next_question": next_question,
-            "evaluation_saved": True
+            "transcript": applicant_answer # Optional: show back to user?
         }
-
+        
     except Exception as e:
-        print(f"Interview Process Error: {e}")
-        return {"success": False, "message": "면접 진행 중 오류가 발생했습니다."}
+        logger.error(f"Answer Submission Error: {e}")
+        return {"success": False, "message": f"오류 발생: {str(e)}"}
 
 
-# --- Static Files (Must be last) ---
+# --- Static Files ---
 app.mount("/", StaticFiles(directory=".", html=True), name="static")
 
 def open_browser():
     webbrowser.open("http://localhost:5000")
 
 if __name__ == "__main__":
-    init_db()
     print("FastAPI Server running on http://localhost:5000")
     Timer(1, open_browser).start()
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5000)

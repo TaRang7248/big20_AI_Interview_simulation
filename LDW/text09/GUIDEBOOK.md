@@ -1,106 +1,126 @@
-# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK)
+# AI 면접 시뮬레이션 (AI Interview Simulation) - 사용자 가이드
 
-## 1. 개요 (Overview)
-본 프로젝트는 **웹 기반 AI 면접 시뮬레이션**입니다. 사용자는 가상의 면접관(AI)과 함께 실제 면접과 유사한 환경에서 질문을 주고받으며 면접 연습을 할 수 있습니다. Google Gemini Pro API를 활용하여 직무에 맞는 질문을 생성하고, 사용자의 답변을 분석하여 꼬리 질문과 피드백을 제공합니다.
+## 1. 프로젝트 개요
+본 프로젝트는 **GPT-4o**와 **Whisper** 기술을 활용하여 실제 면접과 유사한 환경을 제공하는 **AI 면접 시뮬레이션 플랫폼**입니다.
+지원자의 이력서와 채용 공고를 분석하여 맞춤형 면접 질문을 생성하고, 음성 답변을 텍스트로 변환(STT)하여 내용을 평가합니다.
 
----
-
-## 2. 환경 (Environment)
-본 프로젝트는 다음 환경에서 개발 및 테스트되었습니다.
-
-*   **OS**: Windows 10/11
-*   **Language**: Python 3.9+
-*   **Database**: PostgreSQL
-*   **Architecture**: Client-Server (FastAPI + Vanilla JS/HTML/CSS)
+### 주요 기능
+- **AI 맞춤형 질문 생성**: 지원자의 이력서(PDF)와 직무 내용을 분석하여 GPT-4o가 심층 질문을 생성합니다.
+- **음성 인식 인터뷰**: OpenAI Whisper 모델을 사용하여 지원자의 음성 답변을 실시간으로 텍스트로 변환합니다.
+- **자동 평가 시스템**: 답변 내용에 대해 AI가 즉각적으로 점수와 피드백을 생성하여 데이터베이스에 저장합니다.
+- **관리자 모드**: 채용 공고 관리 및 지원자별 면접 결과(질문, 답변, 평가)를 조회할 수 있습니다.
+- **자동화된 환경 테스트**: 카메라와 마이크 연결 상태를 자동으로 점검하여 원활한 면접 진행을 돕습니다.
 
 ---
 
-## 3. 프로그램 실행 방법 (How to Run)
+## 2. 환경 설정 (Environment Setup)
 
-### 3.1. 필수 조건
-1.  **PostgreSQL**이 설치되어 있고 실행 중이어야 합니다.
-2.  `.env` 파일에 데이터베이스 연결 정보(`DB_HOST`, `DB_NAME`, `DB_USER`, `POSTGRES_PASSWORD`, `DB_PORT`)와 `GEMINI_API_KEY`가 올바르게 설정되어 있어야 합니다.
-3.  필요한 라이브러리가 설치되어 있어야 합니다 (아래 `4. 사용 라이브러리` 참고).
+### 필수 요구 사항
+- **OS**: Windows 10/11
+- **Python**: 3.8 이상
+- **Database**: PostgreSQL (기본 포트 5432)
+- **Browser**: Chrome, Edge 등 모던 브라우저 (카메라/마이크 권한 필요)
 
-### 3.2. 실행 명령어
-터미널(CMD 또는 PowerShell)에서 프로젝트 폴더(`text09`)로 이동한 후 다음 명령어를 실행합니다.
+### 라이브러리 설치
+프로젝트 실행을 위해 `requirements.txt`에 명시된 라이브러리를 설치해야 합니다.
+
+```bash
+pip install -r requirements.txt
+```
+
+주요 라이브러리:
+- `fastapi`, `uvicorn`: 웹 서버 프레임워크
+- `psycopg2-binary`: PostgreSQL 데이터베이스 연동
+- `openai`: GPT-4o 및 Whisper API 사용
+- `pypdf`: 이력서(PDF) 텍스트 추출
+- `python-dotenv`: 환경 변수 관리
+
+### 환경 변수 설정 (.env)
+프로젝트 루트 디렉토리에 `.env` 파일을 생성하고 아래 내용을 설정해주세요.
+
+```ini
+# Database Info
+DB_HOST=localhost
+DB_NAME=interview_db
+DB_USER=postgres
+DB_PORT=5432
+POSTGRES_PASSWORD=your_password
+
+# OpenAI API Key
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+---
+
+## 3. 데이터베이스 설정 및 마이그레이션
+
+최초 실행 시 또는 데이터베이스 구조 변경 시 마이그레이션 스크립트를 실행해야 합니다.
+
+```bash
+python migrate_db_v2.py
+```
+
+- **interview_answer**: 기본 면접 질문 데이터셋 저장
+- **job_question_pool**: 직무별로 선별된 질문 풀 저장
+- **Interview_Progress**: 면접 진행 기록 (질문, 답변, 평가) 저장
+
+---
+
+## 4. 프로젝트 실행 (Execution)
+
+서버를 실행하면 자동으로 브라우저가 열리며 애플리케이션이 시작됩니다.
 
 ```bash
 python server.py
 ```
 
-### 3.3. 실행 확인
-*   서버가 정상적으로 실행되면 **1초 뒤에 기본 웹 브라우저가 자동으로 열립니다.**
-*   브라우저 주소창에 `http://localhost:5000`이 입력되어 시뮬레이션 메인 페이지(로그인 화면)가 나타납니다.
+- **서버 주소**: `http://localhost:5000`
+- **API 문서**: `http://localhost:5000/docs` (Swagger UI)
 
 ---
 
-## 4. 사용 라이브러리 (Libraries)
-본 프로젝트는 다음과 같은 Python 라이브러리를 사용합니다. `requirements.txt`에 명시되어 있습니다.
+## 5. 사용 방법 (User Guide)
 
-*   **FastAPI**: 고성능 비동기 웹 프레임워크 (백엔드 서버).
-*   **uvicorn**: ASGI 서버 구현체 (FastAPI 실행을 위해 필요).
-*   **psycopg2 / psycopg2-binary**: PostgreSQL 데이터베이스 어댑터.
-*   **google-generativeai**: Google Gemini API 연동을 위한 클라이언트 라이브러리.
-*   **python-dotenv**: 환경 변수(`.env`) 로드.
-*   **pydantic**: 데이터 유효성 검사 및 설정 관리.
-*   **python-multipart**: 파일 업로드 처리를 위해 필요.
+### 5.1 지원자 (Applicant)
+1. **회원가입/로그인**: 계정을 생성하고 로그인합니다.
+2. **공고 확인**: '지원 가능한 공고' 목록에서 원하는 직무를 선택합니다.
+3. **면접 준비**:
+   - **이력서 업로드**: PDF 형식의 이력서를 업로드합니다.
+   - **환경 점검**: 카메라와 마이크가 자동으로 연결되는지 확인합니다.
+4. **면접 진행**:
+   - AI 면접관이 첫 번째 질문을 합니다 (음성 안내 + 텍스트).
+   - 본인의 답변을 음성으로 말하면 녹음됩니다.
+   - 답변이 끝나면 '답변 제출' 버튼을 누릅니다.
+   - AI가 답변을 분석하고 다음 꼬리 질문을 이어갑니다.
+5. **면접 종료**: 모든 과정이 끝나면 종료 메시지가 표시됩니다.
 
-설치 명령어 예시:
-```bash
-pip install fastapi uvicorn psycopg2-binary google-generativeai python-dotenv pydantic python-multipart
+### 5.2 관리자 (Admin)
+1. **관리자 로그인**: 회원가입 시 '관리자' 유형으로 가입하거나, DB에서 권한을 수정합니다.
+2. **공고 관리**: 새로운 채용 공고를 등록, 수정, 삭제할 수 있습니다.
+3. **결과 조회**: '지원자 현황' 메뉴에서 각 지원자의 면접 상세 기록(질문, 답변 텍스트, AI 평가 결과)을 확인할 수 있습니다.
+
+---
+
+## 6. 파일 구조 (File Structure)
+
+```
+📂 Project Root
+├── 📄 server.py           # FastAPI 백엔드 서버 (API, DB, LLM 로직)
+├── 📄 app.js              # 프론트엔드 로직 (UI 제어, 오디오 녹음, API 호출)
+├── 📄 index.html          # 메인 웹 페이지 구조
+├── 📄 styles.css          # 스타일 시트
+├── 📄 migrate_db_v2.py    # 데이터베이스 초기화 및 마이그레이션 스크립트
+├── 📄 requirements.txt    # 파이썬 의존성 목록
+├── 📄 .env                # 환경 변수 (API Key, DB 접속 정보)
+├── 📂 uploads             # 업로드된 이력서 및 오디오 파일 저장소
+└── 📄 GUIDEBOOK.md        # 프로젝트 가이드북 (본 파일)
 ```
 
 ---
 
-## 5. 주요 기능 사용법 (Key Features)
+## 7. 문제 해결 (Troubleshooting)
 
-### 5.1. 회원가입 및 로그인
-*   **회원가입**: 아이디(이메일 형식 권장), 비밀번호, 이름 등을 입력하여 계정을 생성합니다.
-*   **로그인**: 생성한 계정으로 로그인합니다. 로그인 성공 시 메인 대시보드로 이동합니다.
-
-### 5.2. 공고 관리 (Job Management)
-*   **공고 등록**: '채용 공고 관리' 메뉴에서 제목, 직무, 마감일, 내용을 입력하여 새로운 공고를 등록합니다.
-*   **공고 조회**: 등록된 공고 목록을 확인하고, 상세 내용을 볼 수 있습니다.
-*   **공고 수정/삭제**: 본인이 작성한 공고에 한해 수정 및 삭제가 가능합니다.
-
-### 5.3. 이력서 업로드
-*   '이력서 업로드' 섹션에서 PDF 형식의 이력서를 업로드할 수 있습니다.
-*   업로드된 이력서는 AI가 면접 질문을 생성하는 데 참고 자료로 활용될 수 있습니다 (현재 버전에서는 직무 기반 질문 생성에 집중).
-
-### 5.4. AI 면접 진행 (AI Interview)
-1.  **면접 시작**: 'AI 면접 시작' 메뉴에서 지원할 공고(직무)를 선택하고 '면접 시작하기' 버튼을 누릅니다.
-2.  **질문 생성**: AI가 해당 직무에 적합한 **첫 번째 질문**을 생성하여 화면에 표시하고 음성(TTS)으로 읽어줍니다.
-3.  **답변 녹음**: 사용자는 마이크를 통해 답변을 말합니다. 답변이 끝나면 '답변 제출'을 합니다 (자동/수동).
-4.  **평가 및 꼬리 질문**: AI가 사용자의 답변을 분석하여 **평가(점수 및 피드백)** 를 저장하고, 답변 내용을 바탕으로 **다음 꼬리 질문**을 생성합니다.
-5.  **반복**: 위 과정을 반복하며 심층 면접을 진행합니다.
-
-### 5.5. 마이페이지 (My Page)
-*   사용자 정보를 확인하고 수정할 수 있습니다.
-*   비밀번호 변경 기능을 제공합니다.
-
----
-
-## 6. 파일 구조 설명 (File Structure)
-
-```
-text09/
-├── server.py               # [메인] FastAPI 백엔드 서버 실행 규격
-├── app.js                  # [프론트엔드] 주요 로직 (API 호출, UI 조작)
-├── index.html              # [프론트엔드] 메인 웹 페이지 구조
-├── styles.css              # [프론트엔드] 웹 페이지 스타일링
-├── check_table.py          # 데이터베이스 테이블 구조 확인용 스크립트
-├── create_table.py         # 데이터베이스 테이블 초기 생성 스크립트
-├── diagnose_db.py          # 데이터베이스 연결 진단 스크립트
-├── migrate_db.py           # 데이터베이스 스키마 마이그레이션 스크립트
-├── setup_interview_data.py # 초기 면접 데이터 셋업 스크립트
-├── test_job_api.py         # 공고 API 테스트용 스크립트
-├── requirements.txt        # 필요 라이브러리 목록
-└── uploads/                # 업로드된 파일(이력서 등) 저장 폴더
-    └── resumes/
-```
-
-### 주요 파일 상세
-*   **server.py**: 전체 시스템의 핵심입니다. 데이터베이스 연결, API 엔드포인트 정의(`login`, `register`, `interview/start` 등이), Google Gemini API 호출 로직이 포함되어 있습니다.
-*   **app.js**: 사용자의 브라우저에서 실행됩니다. 버튼 클릭 이벤트 처리, 서버와의 비동기 통신(`fetch`), 화면 갱신(DOM 조작)을 담당합니다.
-*   **create_table.py**: 프로그램 최초 실행 시 필요한 테이블(`users`, `interview_announcement`, `interview_information`, `interview_answer`, `Interview_Progress`)을 생성합니다.
+- **DB 연결 오류**: `.env` 파일의 DB 정보가 정확한지, PostgreSQL 서비스가 실행 중인지 확인하세요.
+- **OpenAI API 오류**: API Key가 유효한지, 잔액이 충분한지 확인하세요.
+- **마이크/카메라 작동 안 함**: 브라우저 주소창 옆의 권한 설정에서 마이크/카메라 허용 여부를 확인하세요. `localhost`가 아닌 경우 HTTPS 환경이 필요할 수 있습니다.
+- **의존성 오류**: `pip install --upgrade -r requirements.txt`로 라이브러리를 최신 버전으로 업데이트하세요.

@@ -11,9 +11,52 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap"
         rel="stylesheet">
+    <style>
+        /* Loading Overlay */
+        #loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+        #loading-overlay.hidden {
+            display: none;
+        }
+        .spinner {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #3498db;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-text {
+            font-size: 1.2rem;
+            color: #333;
+            font-weight: 500;
+        }
+    </style>
 </head>
 
 <body>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="hidden">
+        <div class="spinner"></div>
+        <div class="loading-text" id="loading-text">잠시만 기다려주세요...</div>
+    </div>
 
     <!-- Notification / Toast Container -->
     <div id="toast-container"></div>
@@ -136,7 +179,7 @@
             </div>
         </section>
 
-        <!-- 1.3.2 My Info Screen (Modified) -->
+        <!-- 1.3.2 My Info Screen -->
         <section id="myinfo-page" class="page hidden">
             <div class="container">
                 <h2>회원 정보 수정</h2>
@@ -185,7 +228,7 @@
             </div>
         </section>
 
-        <!-- 1.3.3 Password Change Page (New) -->
+        <!-- 1.3.3 Password Change Page -->
         <section id="password-change-page" class="page hidden">
             <div class="container">
                 <h2>비밀번호 변경</h2>
@@ -206,7 +249,7 @@
             </div>
         </section>
 
-        <!-- 2.1 Applicant Dashboard (Before Interview) -->
+        <!-- 2.1 Applicant Dashboard -->
         <section id="applicant-dashboard-page" class="page hidden">
             <div class="container dashboard-layout">
                 <aside class="sidebar">
@@ -226,7 +269,7 @@
             </div>
         </section>
 
-        <!-- 2.1.1 Job Detail Page (New) -->
+        <!-- 2.1.1 Job Detail Page -->
         <section id="job-detail-page" class="page hidden">
             <div class="container">
                 <h2>공고 상세 정보</h2>
@@ -269,7 +312,7 @@
             </div>
         </section>
 
-        <!-- 2.1 Interview Setup (Detail & Resume & Test) -->
+        <!-- 2.1 Interview Setup (Modified for Automatic Test) -->
         <section id="interview-setup-page" class="page hidden">
             <div class="container setup-container">
                 <h2 id="setup-job-title">공고 제목</h2>
@@ -282,13 +325,15 @@
                     </div>
                     <div class="step-card">
                         <h3>2. 환경 테스트</h3>
+                        <!-- Device check happens automatically -->
                         <div class="device-check">
                             <div class="check-item"><span class="icon">📷</span> 카메라: <span id="cam-status"
-                                    class="status pending">확인 필요</span></div>
+                                    class="status pending">확인 중...</span></div>
                             <div class="check-item"><span class="icon">🎙️</span> 마이크: <span id="mic-status"
-                                    class="status pending">확인 필요</span></div>
+                                    class="status pending">확인 중...</span></div>
                         </div>
-                        <button id="btn-test-devices" class="btn-small">장치 테스트 실행</button>
+                        <p style="font-size: 0.9em; color: gray;">카메라와 마이크가 자동으로 연결됩니다.</p>
+                        <!-- Removed manual button -->
                     </div>
                 </div>
                 <div class="actions">
@@ -304,7 +349,7 @@
                 <div class="interview-header">
                     <div class="timer">남은 시간: <span id="timer-display">00:00</span></div>
                     <div class="progress-bar-container">
-                        <div class="progress-label" id="phase-label">Phase 1: 자기소개</div>
+                        <div class="progress-label" id="phase-label">AI 면접 진행 중</div>
                         <div class="progress-track">
                             <div id="progress-bar" class="progress-fill"></div>
                         </div>
@@ -317,13 +362,13 @@
                         <div class="avatar-wrapper">
                             <div class="ai-avatar">🤖</div> <!-- Placeholder for AI Face -->
                         </div>
-                        <div class="chat-bubble ai" id="ai-message">안녕하세요. 면접을 시작하겠습니다.</div>
+                        <div class="chat-bubble ai" id="ai-message">면접관 연결 중...</div>
                     </div>
 
                     <!-- User Area -->
                     <div class="user-area">
                         <video id="user-video" autoplay playsinline muted></video>
-                        <span class="feed-label" id="feed-label">내 모습 (Camera Loading...)</span>
+                        <span class="feed-label" id="feed-label">내 모습 (Recording...)</span>
                     </div>
                 </div>
 
@@ -333,11 +378,10 @@
                         <!-- History of Q&A -->
                     </div>
                     <div class="input-area">
-                        <div id="coding-board" class="hidden">
-                            <textarea placeholder="// 코드를 작성하거나 설계를 메모하세요 (Whiteboard/IDE Placeholder)"></textarea>
-                        </div>
-                        <textarea id="user-answer" placeholder="답변을 입력하세요... (음성 인식 시뮬레이션)" rows="3"></textarea>
-                        <button id="btn-submit-answer" class="btn-primary">답변 완료</button>
+                        <!-- Removed Code Board for now as request focused on Q&A -->
+                        <!-- Text area for fallback or status, mostly handled by audio -->
+                        <textarea id="user-answer" placeholder="답변을 말씀하시면 음성이 녹음됩니다..." rows="3" disabled></textarea> 
+                        <button id="btn-submit-answer" class="btn-primary">답변 제출 (녹음 종료)</button>
                     </div>
                 </div>
             </div>
@@ -346,38 +390,12 @@
         <!-- 2.3 Interview Result -->
         <section id="result-page" class="page hidden">
             <div class="container result-container">
-                <h2>면접 결과 통지</h2>
+                <h2>면접 종료</h2>
                 <div class="result-card">
-                    <div class="pass-fail-badge" id="pass-fail-badge">심사중</div>
-                    <div class="score-chart">
-                        <h3>영역별 점수</h3>
-                        <div class="score-item">
-                            <span>기술 역량</span>
-                            <div class="bar-bg">
-                                <div class="bar-fill" id="score-tech" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <div class="score-item">
-                            <span>문제 해결</span>
-                            <div class="bar-bg">
-                                <div class="bar-fill" id="score-prob" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <div class="score-item">
-                            <span>의사 소통</span>
-                            <div class="bar-bg">
-                                <div class="bar-fill" id="score-comm" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <div class="score-item">
-                            <span>태도 (비언어)</span>
-                            <div class="bar-bg">
-                                <div class="bar-fill" id="score-atti" style="width: 0%"></div>
-                            </div>
-                        </div>
-                    </div>
                     <p class="result-message" id="result-desc">
-                        수고하셨습니다. 상세 결과는 추후 이메일로 안내됩니다.
+                        면접이 종료되었습니다.<br>
+                        AI 면접관이 답변을 평가하고 있습니다.<br><br>
+                        수고하셨습니다.
                     </p>
                 </div>
                 <button id="btn-go-home" class="btn-primary">홈으로</button>
@@ -396,6 +414,7 @@
                     </ul>
                 </aside>
                 <main class="content">
+                    <!-- Admin Views (Jobs, Applicants) -->
                     <div id="admin-view-jobs">
                         <div class="content-header">
                             <h2>면접 공고 관리</h2>
@@ -417,9 +436,9 @@
                         </table>
                     </div>
 
-                    <!-- Admin: Job Registration Page (New) -->
+                    <!-- Job Register -->
                     <div id="admin-job-register-page" class="hidden">
-                        <h2>공고 등록</h2>
+                         <h2>공고 등록</h2>
                         <div class="profile-card">
                             <form id="admin-job-form">
                                 <div class="form-group">
@@ -444,7 +463,7 @@
                         </div>
                     </div>
 
-                    <!-- Admin: Job Edit Page (New) -->
+                     <!-- Job Edit -->
                     <div id="admin-job-edit-page" class="hidden">
                         <h2>공고 수정</h2>
                         <div class="profile-card">
@@ -473,19 +492,15 @@
                     </div>
 
                     <div id="admin-view-applicants" class="hidden">
-                        <h2>지원자 합격/불합격 현황</h2>
-                        <div class="chart-placeholder">
-                            [지원자 통계 그래프 Placeholder]
-                        </div>
-                        <h3>상세 지원자 목록</h3>
+                        <h2>지원자 현황</h2>
                         <table class="table" id="admin-app-table">
                             <thead>
                                 <tr>
                                     <th>이름</th>
                                     <th>지원 공고</th>
-                                    <th>점수</th>
-                                    <th>결과</th>
-                                    <th>상세</th>
+                                    <th>직무</th>
+                                    <th>면접 일시</th>
+                                    <th>질문/답변 확인</th>
                                 </tr>
                             </thead>
                             <tbody><!-- JS Render --></tbody>
