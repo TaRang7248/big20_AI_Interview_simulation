@@ -165,6 +165,7 @@ try:
         birth_date = Column(String(10), nullable=True)  # DATE 타입이지만 문자열로 처리
         gender = Column(String(10), nullable=True)
         address = Column(String(500), nullable=True)
+        phone = Column(String(20), nullable=True)  # 전화번호 (예: 010-1234-5678)
     
     # 연결 테스트
     with engine.connect() as conn:
@@ -477,6 +478,7 @@ def get_user_by_email(email: str) -> Optional[Dict]:
                         "birth_date": str(user.birth_date) if user.birth_date else None,
                         "address": user.address,
                         "gender": user.gender,
+                        "phone": user.phone,
                         "role": user.role,
                         "created_at": user.created_at.isoformat() if user.created_at else None
                     }
@@ -498,6 +500,7 @@ def create_user(user_data: Dict) -> bool:
                     birth_date=user_data.get("birth_date"),
                     address=user_data.get("address"),
                     gender=user_data.get("gender"),
+                    phone=user_data.get("phone"),
                     role=user_data.get("role", "candidate")  # 기본값: candidate
                 )
                 db.add(new_user)
@@ -531,6 +534,8 @@ def update_user(email: str, update_data: Dict) -> bool:
                         user.address = update_data["address"]
                     if "gender" in update_data:
                         user.gender = update_data["gender"]
+                    if "phone" in update_data:
+                        user.phone = update_data["phone"]
                     if "password_hash" in update_data:
                         user.password_hash = update_data["password_hash"]
                     db.commit()
@@ -1861,6 +1866,7 @@ class UserRegisterRequest(BaseModel):
     birth_date: str  # YYYY-MM-DD 형식
     address: str
     gender: str  # male, female, other
+    phone: Optional[str] = None  # 전화번호 (예: 010-1234-5678)
     role: str = "candidate"  # candidate(지원자), recruiter(면접관)
 
 class UserRegisterResponse(BaseModel):
@@ -2460,6 +2466,7 @@ class UserUpdateRequest(BaseModel):
     birth_date: Optional[str] = None
     address: Optional[str] = None
     gender: Optional[str] = None
+    phone: Optional[str] = None  # 전화번호
     current_password: Optional[str] = None
     new_password: Optional[str] = None
 
@@ -2496,6 +2503,10 @@ async def update_user_info(request: UserUpdateRequest, current_user: Dict = Depe
                 message="올바른 성별을 선택해주세요."
             )
         update_data["gender"] = request.gender
+    
+    # 전화번호 수정
+    if request.phone is not None:
+        update_data["phone"] = request.phone
     
     # 비밀번호 변경
     if request.new_password:
