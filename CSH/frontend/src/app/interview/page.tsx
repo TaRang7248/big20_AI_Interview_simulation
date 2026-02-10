@@ -4,8 +4,9 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import EventToastContainer from "@/components/common/EventToast";
+import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
 import { sessionApi, interviewApi, ttsApi, interventionApi } from "@/lib/api";
-import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2 } from "lucide-react";
+import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2, FileText, Download, LayoutDashboard } from "lucide-react";
 
 /* Web Speech API 타입 (브라우저 전용) */
 type SpeechRecognitionType = typeof window extends { SpeechRecognition: infer T } ? T : unknown;
@@ -49,6 +50,8 @@ export default function InterviewPage() {
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [interviewStarted, setInterviewStarted] = useState(false);
+  const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -63,6 +66,17 @@ export default function InterviewPage() {
   useEffect(() => {
     if (!token) router.push("/");
   }, [token, router]);
+
+  // 리포트 데이터 로드
+  useEffect(() => {
+    if (phase !== "report" || !sessionId) return;
+    setReportLoading(true);
+    interviewApi
+      .getReport(sessionId)
+      .then((data) => setReportData(data as ReportData))
+      .catch((err) => console.error("리포트 로드 실패:", err))
+      .finally(() => setReportLoading(false));
+  }, [phase, sessionId]);
 
   // 채팅 자동 스크롤
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
@@ -423,21 +437,42 @@ export default function InterviewPage() {
 
       {/* 리포트 Phase */}
       {phase === "report" && (
-        <main className="flex-1 flex items-center justify-center p-6">
-          <div className="glass-card max-w-lg text-center">
-            <h2 className="text-2xl font-bold gradient-text mb-4">📊 면접 완료!</h2>
-            <p className="text-[var(--text-secondary)] mb-6">
-              수고하셨습니다. 상세 리포트를 확인해보세요.
-            </p>
-            <div className="flex gap-4 justify-center flex-wrap">
-              <button onClick={() => window.open(`/api/report/${sessionId}`, "_blank")} className="btn-gradient px-8 py-3">
-                리포트 보기
+        <main className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-5xl mx-auto space-y-6">
+            {/* 로딩 상태 */}
+            {reportLoading && (
+              <div className="flex flex-col items-center justify-center py-20">
+                <Loader2 className="w-10 h-10 text-[var(--cyan)] animate-spin mb-4" />
+                <p className="text-[var(--text-secondary)]">리포트를 생성하고 있습니다…</p>
+              </div>
+            )}
+
+            {/* 차트 리포트 */}
+            {!reportLoading && reportData && (
+              <InterviewReportCharts report={reportData} />
+            )}
+
+            {/* 데이터 없을 때 */}
+            {!reportLoading && !reportData && (
+              <div className="glass-card text-center py-12">
+                <h2 className="text-2xl font-bold gradient-text mb-4">📊 면접 완료!</h2>
+                <p className="text-[var(--text-secondary)]">리포트 데이터를 불러올 수 없습니다.</p>
+              </div>
+            )}
+
+            {/* 하단 액션 버튼 */}
+            <div className="flex gap-4 justify-center flex-wrap pb-8">
+              <button
+                onClick={() => window.open(`/api/report/${sessionId}`, "_blank")}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl bg-[rgba(0,217,255,0.15)] border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.25)] transition"
+              >
+                <FileText className="w-4 h-4" /> JSON 원본
               </button>
               <button
                 onClick={() => {
-                  const token = localStorage.getItem("token");
+                  const tk = localStorage.getItem("token");
                   fetch(`/api/report/${sessionId}/pdf`, {
-                    headers: { Authorization: `Bearer ${token}` },
+                    headers: { Authorization: `Bearer ${tk}` },
                   })
                     .then((res) => {
                       if (!res.ok) throw new Error("PDF 생성 실패");
@@ -453,12 +488,15 @@ export default function InterviewPage() {
                     })
                     .catch((err) => alert(err.message));
                 }}
-                className="px-8 py-3 rounded-xl bg-[rgba(0,217,255,0.15)] border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.25)] transition"
+                className="flex items-center gap-2 btn-gradient px-6 py-3"
               >
-                📄 PDF 다운로드
+                <Download className="w-4 h-4" /> PDF 다운로드
               </button>
-              <button onClick={() => router.push("/dashboard")} className="px-8 py-3 rounded-xl border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.1)] transition">
-                대시보드로
+              <button
+                onClick={() => router.push("/dashboard")}
+                className="flex items-center gap-2 px-6 py-3 rounded-xl border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.1)] transition"
+              >
+                <LayoutDashboard className="w-4 h-4" /> 대시보드로
               </button>
             </div>
           </div>
