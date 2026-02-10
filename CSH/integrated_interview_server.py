@@ -512,6 +512,24 @@ except ImportError as e:
     print(f"⚠️ Whisper STT 폴백 비활성화: {e}")
 
 
+# ========== LangGraph 워크플로우 상태머신 ==========
+try:
+    from interview_workflow import (
+        InterviewWorkflow, WorkflowState, InterviewPhase,
+        init_workflow, get_workflow_instance
+    )
+    LANGGRAPH_AVAILABLE = True
+    print("✅ LangGraph 워크플로우 모듈 로드됨")
+except ImportError as e:
+    LANGGRAPH_AVAILABLE = False
+    InterviewWorkflow = None
+    WorkflowState = None
+    InterviewPhase = None
+    init_workflow = None
+    get_workflow_instance = None
+    print(f"⚠️ LangGraph 워크플로우 비활성화: {e}")
+
+
 # ========== 전역 상태 관리 ==========
 
 # 회원 정보 저장소 (DB 연결 실패 시 폴백용)
@@ -1512,7 +1530,30 @@ class AIInterviewer:
         user_input: str,
         use_rag: bool = True
     ) -> str:
-        """사용자 답변을 저장하고 LLM으로 다음 질문 생성"""
+        """사용자 답변을 저장하고 LLM으로 다음 질문 생성
+        
+        LangGraph 워크플로우가 활성화되면 StateGraph를 통해 실행하고,
+        비활성화 시 기존 절차적 로직으로 폴백합니다.
+        """
+        # ========== LangGraph 워크플로우 경로 ==========
+        if interview_workflow is not None:
+            try:
+                result = await interview_workflow.run(
+                    session_id=session_id,
+                    user_input=user_input,
+                    use_rag=use_rag,
+                    celery_available=CELERY_AVAILABLE,
+                    llm_available=LLM_AVAILABLE,
+                )
+                response_text = result.get("response", "")
+                if response_text:
+                    return response_text
+                # response가 빈 경우 폴백
+                print("⚠️ [Workflow] 응답이 비어있음 → 절차적 로직으로 폴백")
+            except Exception as e:
+                print(f"⚠️ [Workflow] 실행 오류 → 절차적 로직으로 폴백: {e}")
+
+        # ========== 절차적 폴백 경로 (기존 로직) ==========
         session = state.get_session(session_id)
         if not session:
             return "세션을 찾을 수 없습니다."
@@ -1676,6 +1717,17 @@ class AIInterviewer:
 
 # AI 면접관 인스턴스
 interviewer = AIInterviewer()
+
+# ========== LangGraph 워크플로우 초기화 ==========
+interview_workflow = None
+if LANGGRAPH_AVAILABLE:
+    try:
+        _eb = event_bus if EVENT_BUS_AVAILABLE else None
+        interview_workflow = init_workflow(state, interviewer, event_bus=_eb)
+        print("✅ LangGraph InterviewWorkflow 초기화 완료")
+    except Exception as e:
+        print(f"⚠️ LangGraph 워크플로우 초기화 실패 (폴백 모드): {e}")
+        interview_workflow = None
 
 
 # ========== 면접 리포트 생성 ==========
@@ -4074,6 +4126,89 @@ async def get_registered_events():
     return {
         "event_types": event_bus.get_registered_events(),
         "handler_count": {k: len(v) for k, v in event_bus._handlers.items() if v},
+    }
+
+
+# ========== LangGraph 워크플로우 시각화/감사 API ==========
+
+@app.get("/api/workflow/status")
+async def get_workflow_status():
+    """LangGraph 워크플로우 서비스 상태"""
+    return {
+        "langgraph_available": LANGGRAPH_AVAILABLE,
+        "workflow_initialized": interview_workflow is not None,
+        "features": {
+            "conditional_branching": True,
+            "loop_control": True,
+            "checkpointing": True,
+            "parallel_processing": True,
+            "visualization": True,
+            "audit_trace": True,
+        } if interview_workflow else {},
+    }
+
+
+@app.get("/api/workflow/graph")
+async def get_workflow_graph():
+    """LangGraph 워크플로우 그래프 다이어그램 (Mermaid)"""
+    if not interview_workflow:
+        raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
+    return {
+        "mermaid": interview_workflow.get_graph_mermaid(),
+        "format": "mermaid",
+    }
+
+
+@app.get("/api/workflow/graph-definition")
+async def get_workflow_graph_definition():
+    """LangGraph 워크플로우 정적 그래프 구조 정보"""
+    if not interview_workflow:
+        raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
+    return interview_workflow.get_graph_definition()
+
+
+@app.get("/api/workflow/{session_id}/trace")
+async def get_workflow_trace(session_id: str):
+    """세션의 LangGraph 실행 추적 이력"""
+    if not interview_workflow:
+        raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
+    traces = interview_workflow.get_execution_trace(session_id)
+    return {
+        "session_id": session_id,
+        "total_turns": len(traces),
+        "traces": traces,
+    }
+
+
+@app.get("/api/workflow/{session_id}/state")
+async def get_workflow_state(session_id: str):
+    """세션의 현재 워크플로우 상태 요약"""
+    if not interview_workflow:
+        raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
+    return interview_workflow.get_current_state_summary(session_id)
+
+
+@app.get("/api/workflow/{session_id}/checkpoint")
+async def get_workflow_checkpoint(session_id: str):
+    """세션의 마지막 체크포인트 정보"""
+    if not interview_workflow:
+        raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
+    checkpoint = interview_workflow.get_checkpoint(session_id)
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="체크포인트를 찾을 수 없습니다.")
+    return checkpoint
+
+
+@app.get("/api/workflow/{session_id}/checkpoints")
+async def list_workflow_checkpoints(session_id: str, limit: int = 10):
+    """세션의 체크포인트 이력 목록"""
+    if not interview_workflow:
+        raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
+    checkpoints = interview_workflow.list_checkpoints(session_id, limit=limit)
+    return {
+        "session_id": session_id,
+        "total": len(checkpoints),
+        "checkpoints": checkpoints,
     }
 
 
