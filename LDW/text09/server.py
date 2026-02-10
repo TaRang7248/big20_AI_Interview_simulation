@@ -529,9 +529,18 @@ async def submit_answer(
             transcript = client.audio.transcriptions.create(
                 model="whisper-1", 
                 file=audio_file,
-                language="ko"
+                language="ko",
+                prompt="이것은 면접 지원자의 답변입니다. 절대로 추측하지 마세요. ai 개인적인 생각을 넣지 마세요. 오직 지원자의 명확한 답변 내용만 텍스트로 변환해 주세요."
             )
         applicant_answer = transcript.text.strip()
+        
+        # Hallucination Filtering Removed as per request
+        # hallucination_phrases logic was here
+        
+        # Check if answer is too short to be a valid answer (e.g. just punctuation)
+        if len(applicant_answer) < 2:
+            logger.info(f"Filtered Short Noise: {applicant_answer}")
+            applicant_answer = ""
         
         # Handle Empty Answer
         if not applicant_answer:
