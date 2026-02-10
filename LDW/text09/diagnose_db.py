@@ -21,11 +21,11 @@ try:
     )
     cur = conn.cursor()
     
-    # Check columns in users table
-    cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'users';")
+    # Check columns in Interview_Progress table
+    cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'interview_progress';")
     columns = cur.fetchall()
     
-    print("Columns in 'users' table:")
+    print("Columns in 'interview_progress' table:")
     for col in columns:
         print(f"- {col[0]} ({col[1]})")
         

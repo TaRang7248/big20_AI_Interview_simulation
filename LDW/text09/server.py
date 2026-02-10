@@ -138,6 +138,25 @@ def init_db():
         if not c.fetchone():
             c.execute("ALTER TABLE interview_announcement ADD COLUMN job TEXT")
             print("Migrated interview_announcement table: Added job column")
+
+        # --- FIX: Interview_Progress Migration ---
+        # 1. Check for Interview_Number
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='interview_number'")
+        if not c.fetchone():
+            c.execute("ALTER TABLE interview_progress ADD COLUMN Interview_Number TEXT")
+            print("Migrated Interview_Progress: Added Interview_Number")
+        
+        # 2. Check for Applicant_Name
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='applicant_name'")
+        if not c.fetchone():
+            c.execute("ALTER TABLE interview_progress ADD COLUMN Applicant_Name TEXT")
+            print("Migrated Interview_Progress: Added Applicant_Name")
+
+        # 3. Check for job
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='job'")
+        if not c.fetchone():
+            c.execute("ALTER TABLE interview_progress ADD COLUMN job TEXT")
+            print("Migrated Interview_Progress: Added job")
             
         conn.commit()
     except Exception as e:
