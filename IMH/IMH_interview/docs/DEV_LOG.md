@@ -112,5 +112,20 @@
         - 비정상 `.txt` 파일 -> 400 Bad Request.
     - **로그 확인**: `logs/agent/agent.log`에 요청 정보(UUID 파일명, 사이즈) 및 처리 결과 기록 확인.
 - **로그 파일**:
-    - 실행 로그: `logs/agent/agent.log`
     - 런타임 로그: `logs/runtime/runtime.log`
+
+### TASK-006 Playground PDF → Text (문서 업로드)
+- **요약**: `pypdf` 기반 PDF 텍스트 추출 API 구현 (`/pdf-text`). 안정성 제약(페이지 수, 용량) 적용.
+- **변경 사항**:
+    - `packages/imh_core/dto.py`: `PDFExtractionResultDTO`, `PDFPageDTO` 추가.
+    - `packages/imh_providers/pdf/`: `IPDFProvider` 인터페이스 및 `LocalPDFProvider` 구현.
+    - `IMH/api/dependencies.py`: `get_pdf_provider` 추가.
+    - `IMH/api/playground.py`: `POST /pdf-text` 엔드포인트 구현 (50페이지/10MB 제한).
+    - `requirements.txt`: `pypdf` 의존성 확인.
+    - `scripts/verify_task_006.py`: 검증 스크립트 작성.
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_006.py` (Verify Environment: interview_env)
+        - Invalid Ext (.txt) -> 400 OK
+        - Page Limit (51 pages) -> 400 OK
+        - No Text (Blank PDF) -> 422 OK
+    - **로그 확인**: `logs/agent/agent.log`에 페이지 수, 글자 수, Latency 기록 확인.

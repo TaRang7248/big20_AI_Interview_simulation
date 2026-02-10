@@ -1,3 +1,4 @@
+from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 class BaseDTO(BaseModel):
@@ -68,3 +69,16 @@ class VoiceResultDTO(BaseDTO):
     jitter: float | None = None
     shimmer: float | None = None
     hnr: float | None = None  # Harmonics-to-Noise Ratio
+
+
+# -------------------------------------------------------------------------
+# PDF Provider DTOs
+# -------------------------------------------------------------------------
+class PDFPageDTO(BaseDTO):
+    page_number: int
+    text: str
+
+class PDFExtractionResultDTO(BaseDTO):
+    full_text: str
+    pages: list[PDFPageDTO]
+    metadata: dict[str, Any]

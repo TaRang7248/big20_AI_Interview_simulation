@@ -4,6 +4,8 @@ from typing import AsyncGenerator
 from packages.imh_core.config import IMHConfig
 from packages.imh_providers.stt.base import ISTTProvider
 from packages.imh_providers.stt.mock import MockSTTProvider
+from packages.imh_providers.pdf.base import IPDFProvider
+from packages.imh_providers.pdf.local_provider import LocalPDFProvider
 
 @lru_cache
 def get_config() -> IMHConfig:
@@ -18,4 +20,13 @@ async def get_stt_provider() -> AsyncGenerator[ISTTProvider, None]:
     config = get_config()
     # In the future: if config.STT_PROVIDER == "whisper": return FasterWhisperProvider(...)
     provider = MockSTTProvider(config)
+    yield provider
+
+async def get_pdf_provider() -> AsyncGenerator[IPDFProvider, None]:
+    """
+    Dependency to get an instance of the PDF Provider.
+    Currently returns LocalPDFProvider (pypdf).
+    """
+    # config = get_config() # Can be used for limits configuration later
+    provider = LocalPDFProvider()
     yield provider
