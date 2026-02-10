@@ -460,6 +460,8 @@ $('#btn-apply-job').addEventListener('click', () => {
 
 // --- Interview Flow ---
 // Step 1: Setup
+// --- Interview Flow ---
+// Step 1: Setup
 window.startInterviewSetup = (jobId) => {
     AppState.currentJobId = jobId;
     const job = MOCK_DB.jobs.find(j => j.id === jobId);
@@ -477,43 +479,70 @@ window.startInterviewSetup = (jobId) => {
     $('#mic-status').textContent = '확인 필요';
     $('#btn-start-interview').disabled = true;
 
+    // Hide preview area initially
+    const setupPreviewArea = document.getElementById('setup-preview-area');
+    if (setupPreviewArea) setupPreviewArea.classList.add('hidden');
+
     navigateTo('interview-setup-page');
 };
-
-$('#btn-test-devices').addEventListener('click', async () => {
-    // 1. Camera & Mic Permission
-    showToast('카메라/마이크 권한을 요청합니다...', 'info');
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-        // Connect to Video Element
-        const video = document.getElementById('user-video');
-        if (video) {
-            video.srcObject = stream;
-            document.getElementById('feed-label').textContent = '내 모습 (Camera On)';
-        }
-
-        $('#cam-status').className = 'status ok';
-        $('#cam-status').textContent = '정상 (연결됨)';
-        $('#mic-status').className = 'status ok';
-        $('#mic-status').textContent = '정상 (연결됨)';
-        $('#btn-start-interview').disabled = false;
-
-        showToast('장치가 정상적으로 연결되었습니다.', 'success');
-
-    } catch (err) {
-        console.error("Device Access Error:", err);
-        $('#cam-status').className = 'status error';
-        $('#cam-status').textContent = '오류 (권한 거부됨)';
-        $('#mic-status').className = 'status error';
-        $('#mic-status').textContent = '오류 (권한 거부됨)';
-        showToast('카메라/마이크 접근 권한이 필요합니다.', 'error');
-    }
-});
 
 $('#btn-cancel-interview').addEventListener('click', () => {
     navigateTo('applicant-dashboard-page');
 });
+
+function initInterview() {
+    console.log("Initializing Interview Module...");
+
+    const btnTestDevices = $('#btn-test-devices');
+    if (btnTestDevices) {
+        console.log("Setting up Device Test Button Event...");
+
+        // cloneNode 사용 대신 onclick 속성 직접 할당으로 변경하여 이벤트 바인딩 보장
+        btnTestDevices.onclick = async () => {
+            console.log("Device test initiated...");
+
+            // 1. Camera & Mic Permission
+            showToast('카메라/마이크 권한을 요청합니다...', 'info');
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+                // Connect to Video Element (Main Interview Page)
+                const video = document.getElementById('user-video');
+                if (video) {
+                    video.srcObject = stream;
+                    document.getElementById('feed-label').textContent = '내 모습 (Camera On)';
+                }
+
+                // Connect to Setup Preview Video Element (New)
+                const setupVideo = document.getElementById('setup-video-preview');
+                const setupPreviewArea = document.getElementById('setup-preview-area');
+                if (setupVideo && setupPreviewArea) {
+                    setupPreviewArea.classList.remove('hidden');
+                    setupVideo.srcObject = stream;
+                    console.log("Preview video stream set.");
+                }
+
+                $('#cam-status').className = 'status ok';
+                $('#cam-status').textContent = '정상 (연결됨)';
+                $('#mic-status').className = 'status ok';
+                $('#mic-status').textContent = '정상 (연결됨)';
+                $('#btn-start-interview').disabled = false;
+
+                showToast('장치가 정상적으로 연결되었습니다.', 'success');
+
+            } catch (err) {
+                console.error("Device Access Error:", err);
+                $('#cam-status').className = 'status error';
+                $('#cam-status').textContent = '오류 (권한 거부됨)';
+                $('#mic-status').className = 'status error';
+                $('#mic-status').textContent = '오류 (권한 거부됨)';
+                showToast('카메라/마이크 접근 권한이 필요합니다. 브라우저 설정에서 허용해주세요.', 'error');
+            }
+        });
+    } else {
+        console.error("Test Device Button not found!");
+    }
+}
 
 // Step 2: Main Interview Logic (Modified for Upload)
 // Step 2: Main Interview Logic (Connected to Server)
@@ -1042,8 +1071,6 @@ function initAdmin() {
             const response = await fetch(`/api/jobs/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, job: jobVal, content, deadline })
             });
             const result = await response.json();
@@ -1062,12 +1089,10 @@ function initAdmin() {
         }
     });
 
-    initInterview(); // Ensure interview init is called if valid
+    // initInterview(); // Called in DOMContentLoaded, defined above.
 }
 
-function initInterview() {
-    // Placeholder if extra init needed
-}
+// function initInterview() { } // Removed duplicate
 
 function renderAdminJobList() {
     const tbody = $('#admin-job-table tbody');

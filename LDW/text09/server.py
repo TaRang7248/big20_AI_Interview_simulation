@@ -11,6 +11,7 @@ try:
 except ImportError:
     PdfReader = None
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 # Load .env from project root
@@ -188,12 +189,15 @@ def register():
         if c.fetchone():
             return jsonify({'success': False, 'message': '이미 존재하는 아이디입니다.'}), 400
             
+        # Hash the password
+        hashed_pw = generate_password_hash(data['pw'])
+
         c.execute('''
             INSERT INTO users (id_name, pw, name, dob, gender, email, address, phone, type)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             data['id_name'], 
-            data['pw'], 
+            hashed_pw, 
             data['name'], 
             data.get('dob'), 
             data.get('gender'), 
@@ -218,15 +222,26 @@ def login():
         c = conn.cursor(cursor_factory=RealDictCursor)
         
         # User lookup logic
-        # Note: In production, password should be hashed. Plain text for this demo.
-        c.execute('SELECT * FROM users WHERE id_name = %s AND pw = %s', (data['id_name'], data['pw']))
+        c.execute('SELECT * FROM users WHERE id_name = %s', (data['id_name'],))
 
         row = c.fetchone()
         
         if row:
-            # pyscopg2 RealDictCursor returns a dict-like object
             user = dict(row)
-            return jsonify({'success': True, 'user': user})
+            # Check password (handle both hash and legacy plain text)
+            if check_password_hash(user['pw'], data['pw']) or user['pw'] == data['pw']:
+                # If it was plain text, we should probably update it to hash (Auto-migration)
+                if user['pw'] == data['pw']:
+                     try:
+                        new_hash = generate_password_hash(data['pw'])
+                        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (new_hash, user['id_name']))
+                        conn.commit()
+                     except:
+                        pass # Ignore migration errors for now
+
+                return jsonify({'success': True, 'user': user})
+            else:
+                return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
         else:
             return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
             
@@ -248,7 +263,14 @@ def verify_password():
 
         row = c.fetchone()
         
-        if row and row[0] == data['pw']:
+        # Determine if match
+        match = False
+        if row:
+             stored_pw = row[0]
+             if check_password_hash(stored_pw, data['pw']) or stored_pw == data['pw']:
+                  match = True
+
+        if match:
              return jsonify({'success': True})
         else:
              return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
@@ -295,7 +317,9 @@ def update_user_info(id_name):
         if not row:
              return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
         
-        if row[0] != data['pw']:
+        stored_pw = row[0]
+        # Check if match (Hash or Plain)
+        if not (check_password_hash(stored_pw, data['pw']) or stored_pw == data['pw']):
             return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
 
         # 2. Update Info
@@ -323,7 +347,8 @@ def change_password():
         c = conn.cursor()
         
         # Update Password
-        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (data['new_pw'], data['id_name']))
+        new_hashed_pw = generate_password_hash(data['new_pw'])
+        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (new_hashed_pw, data['id_name']))
 
         conn.commit()
         
