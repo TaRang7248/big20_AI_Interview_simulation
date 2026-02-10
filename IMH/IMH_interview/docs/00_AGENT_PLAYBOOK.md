@@ -271,11 +271,26 @@ ERD(26.02.05)에 있고 API 스펙에 빠지기 쉬운 항목들:
 - 단, 코드 블록, 파일명, 클래스명, 함수명, 에러 메시지,
   로그 파일(.log)의 내용은 영어를 유지한다.
   
-### Python 실행 환경 규칙 (Mandatory)
+### Python 실행 환경 규칙 (Mandatory – 강화)
 
-- 본 프로젝트는 Python 가상환경(venv)을 사용한다.
+- 본 프로젝트는 단일 Python 가상환경(venv)만을 사용한다.
 - 가상환경 이름: interview_env
-- 모든 pip install, python 실행은
-  반드시 해당 가상환경 활성화 상태에서만 수행한다.
-- 글로벌 Python 환경에 대한 패키지 설치는 금지된다.
-- 위 규칙을 어긴 작업 결과는 무효 처리될 수 있다.
+
+- interview_env는 이미 다음 경로에 **존재하는 것으로 고정**한다.
+  - C:\big20\big20_AI_Interview_simulation\interview_env
+
+- 에이전트는 다음 행위를 **절대 수행해서는 안 된다**.
+  - interview_env를 새로 생성하는 행위
+  - 다른 이름의 venv를 생성하거나 사용하는 행위
+  - IMH/IMH_Interview 하위 또는 그 외 위치에 venv를 추가 생성하는 행위
+  - 전역 Python / 전역 pip 사용
+
+- 모든 python / pip / uvicorn 실행은
+  반드시 아래 실행 파일을 기준으로 수행한다.
+  - C:\big20\big20_AI_Interview_simulation\interview_env\Scripts\python.exe
+
+- pip 명령은 반드시 다음 형식만 허용된다.
+  - python -m pip ...
+
+- 위 규칙을 위반한 작업 결과는
+  **사전 경고 없이 무효 처리**될 수 있다.

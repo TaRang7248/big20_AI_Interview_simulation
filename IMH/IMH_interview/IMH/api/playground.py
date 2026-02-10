@@ -325,6 +325,11 @@ async def analyze_emotion(
         )
     finally:
         # 4. Cleanup
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                logger.info(f"Temporary Emotion file deleted: {temp_file_path} [RequestID: {request_id}]")
+            except Exception as e:
                 logger.error(f"Failed to delete temporary Emotion file: {temp_file_path}. Error: {e} [RequestID: {request_id}]")
 
 @router.post("/voice", response_model=VoiceResultDTO)
