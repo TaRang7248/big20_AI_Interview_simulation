@@ -1,106 +1,70 @@
-# 웹 기반 AI 면접 시뮬레이션 가이드북 (GUIDEBOOK)
-
-본 문서는 웹 기반 AI 면접 시뮬레이션 프로그램의 설치, 실행 및 사용 방법에 대한 상세 가이드를 제공합니다.
+# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK.md)
 
 ## 1. 개요 (Overview)
-이 프로젝트는 **Flask** 기반의 웹 애플리케이션으로, 사용자가 온라인 환경에서 모의 면접을 진행하고 AI를 통해 면접 준비를 할 수 있도록 돕는 시뮬레이션 프로그램입니다. 관리자는 채용 공고를 관리하고, 지원자는 이력서를 등록하거나 면접 질문을 학습할 수 있습니다.
+본 프로젝트는 **웹 기반 AI 면접 시뮬레이션**입니다. 지원자는 원하는 직무에 지원하고, 이력서(PDF)를 업로드한 뒤, AI와 실시간으로 면접을 진행할 수 있습니다. LLM(Large Language Model) 기술을 활용하여 지원자의 이력서와 직무에 맞는 맞춤형 질문을 생성하고, 답변을 평가합니다.
 
 ## 2. 환경 설정 (Environment Setup)
+본 프로그램은 Python Flask 서버와 Vanilla JS 프론트엔드로 구성되어 있습니다.
 
-### 2.1 필수 요구 사항
-- **Python 3.8 이상**
-- **Git** (소스 코드 관리용)
+### 필수 요구 사항
+- **Python 3.8+**
+- **Node.js** (선택 사항, 개발 편의용)
 - **PostgreSQL** (데이터베이스)
 
-### 2.2 설치 방법
-1. **저장소 클론 (Clone Repository)**
+### 설치 방법
+1. **필수 라이브러리 설치**:
    ```bash
-   git clone [레포지토리 주소]
-   cd C:\big20\big20_AI_Interview_simulation\LDW\text09
+   pip install flask psycopg2-binary python-dotenv pypdf werkzeug
    ```
-
-2. **가상 환경 생성 및 활성화 (선택 사항)**
-   ```bash
-   python -m venv venv
-   # Windows
-   venv\Scripts\activate
-   # Mac/Linux
-   source venv/bin/activate
-   ```
-
-3. **필수 라이브러리 설치**
-   아래 명령어로 필요한 패키지를 설치합니다.
-   ```bash
-   pip install flask psycopg2-binary werkzeug python-dotenv
-   ```
-
-4. **환경 변수 설정 (.env)**
-   프로젝트 루트 디렉토리 또는 상위 디렉토리에 `.env` 파일을 생성하고 데이터베이스 비밀번호를 설정합니다. (기본값: `013579`)
-   ```env
-   POSTGRES_PASSWORD=your_password
-   ```
+2. **데이터베이스 설정**:
+   - PostgreSQL이 설치되어 있어야 하며, `interview_db` 데이터베이스를 생성해야 합니다.
+   - `.env` 파일 또는 환경 변수에 `POSTGRES_PASSWORD`를 설정하세요. (기본값: server.py 참조)
 
 ## 3. 프로그램 실행 방법 (Execution)
+1. 터미널(PowerShell 또는 CMD)을 엽니다.
+2. 프로젝트 디렉토리로 이동합니다.
+   ```bash
+   cd C:\big20\big20_AI_Interview_simulation\LDW\text09
+   ```
+3. 서버를 실행합니다.
+   ```bash
+   python server.py
+   ```
+4. 웹 브라우저가 자동으로 열리며 `http://localhost:5000`에 접속됩니다.
 
-### 3.1 데이터베이스 초기화 및 데이터 로드
-최초 실행 시, 면접 질문 데이터를 데이터베이스에 적재해야 합니다.
-```bash
-python setup_interview_data.py
+## 4. 주요 기능 사용법 (Features)
+
+### [지원자] 면접 진행
+1. **로그인/회원가입**: 계정이 없다면 회원가입 후 로그인합니다.
+2. **공고 확인**: '지원 가능한 공고' 목록에서 원하는 공고의 '확인하기' 버튼을 클릭합니다.
+3. **상세 정보 및 지원**: 공고 내용을 확인하고 '지원하기' 버튼을 클릭합니다.
+4. **이력서 업로드**: PDF 형식의 이력서를 업로드합니다.
+5. **장치 테스트**: 카메라와 마이크가 정상 작동하는지 테스트합니다.
+6. **면접 시작**: '면접 시작' 버튼을 누르면 AI 면접관이 질문을 시작합니다.
+7. **답변 하기**: 질문을 듣고(또는 읽고) 답변을 입력하거나 말한 뒤 '답변 완료'를 누릅니다.
+8. **결과 확인**: 모든 질문이 끝나면 면접 결과(합격/불합격 예측 등)를 봅니다.
+
+### [관리자] 공고 및 지원자 관리
+1. **관리자 로그인**: 관리자 계정으로 로그인합니다.
+2. **공고 등록**: '공고 관리' 메뉴에서 새 채용 공고를 등록합니다.
+3. **지원자 현황**: 지원자들의 면접 진행 상황과 점수를 확인합니다.
+
+## 5. 파일 구조 설명 (File Structure)
 ```
-* 위 스크립트는 `data.json` 파일을 읽어 `interview_answer` 테이블에 데이터를 삽입합니다.
-
-### 3.2 서버 실행
-다음 명령어로 웹 서버를 실행합니다.
-```bash
-python server.py
-```
-* 서버가 시작되면 브라우저가 자동으로 열립니다. (http://localhost:5000)
-* 만약 열리지 않는다면 브라우저 주소창에 직접 입력하여 접속하세요.
-
-## 4. 사용 라이브러리 (Libraries Used)
-
-| 라이브러리 | 용도 |
-| --- | --- |
-| **Flask** | 웹 프레임워크 (서버 구축) |
-| **psycopg2** | PostgreSQL 데이터베이스 어댑터 |
-| **Werkzeug** | 파일 업로드 보안 및 유틸리티 |
-| **python-dotenv** | 환경 변수 관리 |
-
-## 5. 주요 기능 사용법 (Key Features)
-
-### 5.1 회원가입 및 로그인
-- **회원가입**: ID, 비밀번호, 이름, 생년월일 등을 입력하여 계정을 생성합니다.
-- **로그인**: 생성한 계정으로 로그인하여 서비스를 이용합니다.
-
-### 5.2 채용 공고 관리 (관리자 기능)
-- **공고 등록**: 제목, 직무, 마감일, 내용을 입력하여 새로운 채용 공고를 게시합니다.
-- **공고 수정/삭제**: 등록된 공고를 수정하거나 삭제할 수 있습니다.
-- **작성자 표시**: 공고 목록에서 해당 공고를 작성한 관리자의 ID를 확인할 수 있습니다.
-
-### 5.3 면접 준비 및 시뮬레이션
-- **이력서 업로드**: 지원하고자 하는 공고에 맞춰 PDF 형식의 이력서를 업로드할 수 있습니다.
-- **면접 질문 학습**: `interview_answer` 테이블에 저장된 방대한 면접 질문과 모범 답안 데이터를 통해 학습할 수 있습니다.
-
-## 6. 파일 구조 설명 (File Structure)
-
-```
-C:\big20\big20_AI_Interview_simulation\LDW\text09\
-│
-├── server.py                # 메인 Flask 서버 파일 (API 및 라우팅 처리)
-├── setup_interview_data.py  # 데이터베이스 초기화 및 데이터 로드 스크립트
-├── data.json                # 면접 질문/답변 원본 데이터
-├── index.html               # 메인 프론트엔드 HTML 파일
-├── app.js                   # 프론트엔드 로직 (API 호출, UI 제어)
-├── styles.css               # 스타일 시트
-├── GUIDEBOOK.md             # 프로젝트 가이드북 (본 문서)
-└── uploads/                 # 업로드된 파일 저장소
-    └── resumes/             # 이력서 파일 저장 폴더
+C:\big20\big20_AI_Interview_simulation\LDW\text09
+├── server.py           # Backend 서버 (Flask, DB 연결, API, Mock LLM)
+├── app.js              # Frontend 로직 (UI 제어, API 호출, 면접 흐름)
+├── index.html          # 메인 웹 페이지 (SPA 구조)
+├── styles.css          # 스타일시트
+├── GUIDEBOOK.md        # 사용자 가이드북 (본 파일)
+└── uploads/            # 업로드된 이력서 저장 폴더
 ```
 
-## 7. 문제 해결 (Troubleshooting)
-- **DB 연결 오류**: `server.py` 내의 `DB_NAME`, `DB_USER`, `DB_PASS` 설정이 로컬 PostgreSQL 설정과 일치하는지 확인하세요.
-- **포트 충돌**: 5000번 포트가 이미 사용 중이라면 `server.py` 하단의 `app.run(port=5000)`에서 포트 번호를 변경하세요.
+## 6. 사용 라이브러리 (Libraries)
+- **Flask**: 웹 서버 프레임워크
+- **psycopg2**: PostgreSQL 데이터베이스 연동
+- **pypdf**: PDF 이력서 텍스트 추출
+- **werkzeug**: 파일 업로드 및 보안 유틸리티
 
 ---
-**작성일**: 2026년 2월 9일
-**버전**: 1.0.0
+© 2026 AI Interview Simulation Project.
