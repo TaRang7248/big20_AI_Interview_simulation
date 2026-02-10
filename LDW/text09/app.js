@@ -85,8 +85,8 @@ function initAuth() {
     // Login
     $('#login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const id = $('#login-id').value.trim();
-        const pw = $('#login-pw').value.trim();
+        const id = $('#login-id').value;
+        const pw = $('#login-pw').value;
 
         try {
             const response = await fetch('/api/login', {
@@ -113,8 +113,8 @@ function initAuth() {
         e.preventDefault();
 
         const newUser = {
-            id_name: $('#reg-id').value.trim(),
-            pw: $('#reg-pw').value.trim(),
+            id_name: $('#reg-id').value,
+            pw: $('#reg-pw').value,
             name: $('#reg-name').value,
             dob: `${$('#reg-dob-year').value}-${$('#reg-dob-month').value.padStart(2, '0')}-${$('#reg-dob-day').value.padStart(2, '0')}`,
             gender: $('#reg-gender').value,
@@ -460,8 +460,6 @@ $('#btn-apply-job').addEventListener('click', () => {
 
 // --- Interview Flow ---
 // Step 1: Setup
-// --- Interview Flow ---
-// Step 1: Setup
 window.startInterviewSetup = (jobId) => {
     AppState.currentJobId = jobId;
     const job = MOCK_DB.jobs.find(j => j.id === jobId);
@@ -479,73 +477,45 @@ window.startInterviewSetup = (jobId) => {
     $('#mic-status').textContent = '확인 필요';
     $('#btn-start-interview').disabled = true;
 
-    // Hide preview area initially
-    const setupPreviewArea = document.getElementById('setup-preview-area');
-    if (setupPreviewArea) setupPreviewArea.classList.add('hidden');
-
     navigateTo('interview-setup-page');
 };
+
+$('#btn-test-devices').addEventListener('click', async () => {
+    // 1. Camera & Mic Permission
+    showToast('카메라/마이크 권한을 요청합니다...', 'info');
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+
+        // Connect to Video Element
+        const video = document.getElementById('user-video');
+        if (video) {
+            video.srcObject = stream;
+            document.getElementById('feed-label').textContent = '내 모습 (Camera On)';
+        }
+
+        $('#cam-status').className = 'status ok';
+        $('#cam-status').textContent = '정상 (연결됨)';
+        $('#mic-status').className = 'status ok';
+        $('#mic-status').textContent = '정상 (연결됨)';
+        $('#btn-start-interview').disabled = false;
+
+        showToast('장치가 정상적으로 연결되었습니다.', 'success');
+
+    } catch (err) {
+        console.error("Device Access Error:", err);
+        $('#cam-status').className = 'status error';
+        $('#cam-status').textContent = '오류 (권한 거부됨)';
+        $('#mic-status').className = 'status error';
+        $('#mic-status').textContent = '오류 (권한 거부됨)';
+        showToast('카메라/마이크 접근 권한이 필요합니다.', 'error');
+    }
+});
 
 $('#btn-cancel-interview').addEventListener('click', () => {
     navigateTo('applicant-dashboard-page');
 });
 
-function initInterview() {
-    console.log("Initializing Interview Module...");
-
-    const btnTestDevices = $('#btn-test-devices');
-    if (btnTestDevices) {
-        console.log("Setting up Device Test Button Event...");
-
-        // cloneNode 사용 대신 onclick 속성 직접 할당으로 변경하여 이벤트 바인딩 보장
-        btnTestDevices.onclick = async () => {
-            console.log("Device test initiated...");
-
-            // 1. Camera & Mic Permission
-            showToast('카메라/마이크 권한을 요청합니다...', 'info');
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-
-                // Connect to Video Element (Main Interview Page)
-                const video = document.getElementById('user-video');
-                if (video) {
-                    video.srcObject = stream;
-                    document.getElementById('feed-label').textContent = '내 모습 (Camera On)';
-                }
-
-                // Connect to Setup Preview Video Element (New)
-                const setupVideo = document.getElementById('setup-video-preview');
-                const setupPreviewArea = document.getElementById('setup-preview-area');
-                if (setupVideo && setupPreviewArea) {
-                    setupPreviewArea.classList.remove('hidden');
-                    setupVideo.srcObject = stream;
-                    console.log("Preview video stream set.");
-                }
-
-                $('#cam-status').className = 'status ok';
-                $('#cam-status').textContent = '정상 (연결됨)';
-                $('#mic-status').className = 'status ok';
-                $('#mic-status').textContent = '정상 (연결됨)';
-                $('#btn-start-interview').disabled = false;
-
-                showToast('장치가 정상적으로 연결되었습니다.', 'success');
-
-            } catch (err) {
-                console.error("Device Access Error:", err);
-                $('#cam-status').className = 'status error';
-                $('#cam-status').textContent = '오류 (권한 거부됨)';
-                $('#mic-status').className = 'status error';
-                $('#mic-status').textContent = '오류 (권한 거부됨)';
-                showToast('카메라/마이크 접근 권한이 필요합니다. 브라우저 설정에서 허용해주세요.', 'error');
-            }
-        };
-    } else {
-        console.error("Test Device Button not found!");
-    }
-}
-
 // Step 2: Main Interview Logic (Modified for Upload)
-// Step 2: Main Interview Logic (Connected to Server)
 $('#btn-start-interview').addEventListener('click', async () => {
     // Check if resume is uploaded
     const fileInput = $('#resume-upload');
@@ -565,7 +535,7 @@ $('#btn-start-interview').addEventListener('click', async () => {
     formData.append('job_title', job ? job.job : 'Unknown');
 
     try {
-        showToast('이력서 업로드 및 면접 준비 중...', 'info');
+        showToast('이력서 업로드 중...', 'info');
         const response = await fetch('/api/upload/resume', {
             method: 'POST',
             body: formData
@@ -577,56 +547,69 @@ $('#btn-start-interview').addEventListener('click', async () => {
             return;
         }
 
-        // Call API to Start Interview
-        const startResponse = await fetch('/api/interview/start', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                id_name: AppState.currentUser.id_name,
-                job_id: AppState.currentJobId
-            })
-        });
-        const startResult = await startResponse.json();
-
-        if (startResult.success) {
-            // Init Interview State
-            AppState.interview = {
-                inProgress: true,
-                interviewNumber: startResult.interview_number,
-                currentQId: startResult.q_id,
-                currentQuestion: startResult.question,
-                questionCount: 1,
-                timeLeft: 60,
-                timer: null
-            };
-
-            showToast('면접을 시작합니다.', 'success');
-
-            // Clear UI
-            $('#chat-log').innerHTML = '';
-            $('#user-answer').value = '';
-            $('#coding-board').classList.add('hidden');
-
-            navigateTo('interview-page');
-            displayCurrentQuestion();
-
-        } else {
-            showToast(startResult.message || '면접 시작 실패', 'error');
-        }
+        showToast('이력서 업로드 완료. 면접을 시작합니다.', 'success');
 
     } catch (error) {
-        console.error('Interview Start Error:', error);
-        showToast('서버 연결 실패', 'error');
+        console.error('Resume Upload Error:', error);
+        showToast('서버 연결 실패 (이력서 업로드)', 'error');
         return;
     }
+
+
+    // Init Interview State
+    AppState.interview = {
+        inProgress: true,
+        phase: 1, // Start with Intro
+        questionIndex: 0,
+        logs: [],
+        timeLeft: 60 // 60s per question
+    };
+
+    // Clear UI
+    $('#chat-log').innerHTML = '';
+    $('#user-answer').value = '';
+    $('#coding-board').classList.add('hidden');
+
+    navigateTo('interview-page');
+    runInterviewPhase();
 });
 
-function displayCurrentQuestion() {
+function runInterviewPhase() {
     if (!AppState.interview.inProgress) return;
 
+    // Check Phase
+    let questions = [];
+    let phaseName = '';
+
+    if (AppState.interview.phase === 1) {
+        questions = MOCK_DB.interviewQuestions['phase1'];
+        phaseName = 'Phase 1: 자기소개';
+    } else if (AppState.interview.phase === 2) {
+        questions = MOCK_DB.interviewQuestions['phase2'];
+        phaseName = 'Phase 2: 역량 검증';
+    } else if (AppState.interview.phase === 3) {
+        questions = MOCK_DB.interviewQuestions['coding'];
+        phaseName = 'Phase 3: 기술 문제';
+        $('#coding-board').classList.remove('hidden');
+    } else {
+        // Finish
+        finishInterview();
+        return;
+    }
+
+    // Check Question Index
+    if (AppState.interview.questionIndex >= questions.length) {
+        // Next Phase
+        AppState.interview.phase++;
+        AppState.interview.questionIndex = 0;
+        // Recursive call for next phase
+        runInterviewPhase();
+        return;
+    }
+
     // Update UI
-    $('#phase-label').textContent = `질문 ${AppState.interview.questionCount}`;
-    const currentQ = AppState.interview.currentQuestion;
+    $('#phase-label').textContent = phaseName;
+    const currentQ = questions[AppState.interview.questionIndex];
 
     // AI Speaking (TTS)
     $('#ai-message').textContent = '...';
@@ -642,157 +625,98 @@ function displayCurrentQuestion() {
             // After speaking finishes:
             startTimer(60); // Start Timer
             startListening(); // Start STT
-            $('#user-answer').focus();
         });
     }, 500);
 }
 
+function startTimer(seconds) {
+    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+
+    AppState.interview.timeLeft = seconds;
+    updateTimerDisplay();
+
+    AppState.interview.timer = setInterval(() => {
+        AppState.interview.timeLeft--;
+        updateTimerDisplay();
+
+        if (AppState.interview.timeLeft <= 0) {
+            clearInterval(AppState.interview.timer);
+            submitAnswer(true); // Force submit
+        }
+    }, 1000);
+}
+
+function updateTimerDisplay() {
+    const min = Math.floor(AppState.interview.timeLeft / 60);
+    const sec = AppState.interview.timeLeft % 60;
+    $('#timer-display').textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+    // Progress Bar simulation (just visual)
+    const totalTime = 60;
+    const pct = ((totalTime - AppState.interview.timeLeft) / totalTime) * 100;
+    $('#progress-bar').style.width = `${pct}%`;
+}
+
+function addChatLog(sender, text) {
+    const div = document.createElement('div');
+    div.className = `chat-msg ${sender.toLowerCase()}`;
+    div.innerHTML = `<strong>${sender}:</strong> ${text}`;
+    $('#chat-log').appendChild(div);
+    $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
+}
+
+$('#btn-submit-answer').addEventListener('click', () => submitAnswer(false));
 
 function submitAnswer(forced) {
     if (AppState.interview.timer) clearInterval(AppState.interview.timer);
     stopListening(); // Stop STT on submit
 
     const answer = $('#user-answer').value.trim() || (forced ? '(시간 초과)' : '(답변 없음)');
-    const timeTaken = 60 - AppState.interview.timeLeft;
-
     addChatLog('User', answer);
+
+    // Save Log
+    AppState.interview.logs.push({
+        phase: AppState.interview.phase,
+        qIndex: AppState.interview.questionIndex,
+        answer: answer
+    });
+
     $('#user-answer').value = '';
 
-    // Send Answer to Server
-    fetch('/api/interview/reply', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            interview_number: AppState.interview.interviewNumber,
-            q_id: AppState.interview.currentQId,
-            answer: answer,
-            time_taken: timeTaken
-        })
-    })
-        .then(res => res.json())
-        .then(result => {
-            if (result.success) {
-                if (result.finished) {
-                    finishInterview();
-                } else {
-                    // Next Question
-                    AppState.interview.currentQId = result.q_id;
-                    AppState.interview.currentQuestion = result.question;
-                    AppState.interview.questionCount++;
-                    displayCurrentQuestion();
-                }
-            } else {
-                showToast(result.message || '답변 제출 실패', 'error');
-            }
-        })
-        .catch(err => {
-            console.error('Reply Error:', err);
-            showToast('서버 통신 오류', 'error');
-        });
+    // Move next
+    AppState.interview.questionIndex++;
+    runInterviewPhase();
 }
-
-// function finishInterview() {
-//     AppState.interview.inProgress = false;
-
-//     // Fetch Real Result from Server
-//     fetch(`/api/interview/result/${AppState.interview.interviewNumber}`)
-//         .then(res => res.json())
-//         .then(data => {
-//             if (data.success) {
-//                 const result = data.result;
-
-//                 // Save to Mock DB (for local session consistency if needed)
-//                 const appRecord = {
-//                     userId: AppState.currentUser.id_name,
-//                     jobId: AppState.currentJobId,
-//                     date: new Date().toLocaleDateString(),
-//                     scores: result.scores,
-//                     interviewNumber: AppState.interview.interviewNumber
-//                 };
-//                 MOCK_DB.applications.push(appRecord);
-
-//                 // Show Result Page
-//                 navigateTo('result-page');
-
-//                 setTimeout(() => {
-//                     $('#score-tech').style.width = `${result.scores.tech}%`;
-//                     $('#score-prob').style.width = `${result.scores.prob}%`;
-//                     $('#score-comm').style.width = `${result.scores.comm}%`;
-//                     $('#score-atti').style.width = `${result.scores.atti}%`;
-
-//                     const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
-//                     $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
-//                     $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
-
-//                     $('#result-desc').innerHTML = `
-//                         수고하셨습니다. 면접 분석 결과입니다.<br>
-//                         평균 점수: <strong>${avg}점</strong><br>
-//                         <br>
-//                         상세 질의응답 분석은 이메일로 발송됩니다.
-//                     `;
-//                 }, 500);
-
-//             } else {
-//                 showToast('결과 생성 중 오류가 발생했습니다.', 'error');
-//             }
-//         })
-//         .catch(err => {
-//             console.error('Result Fetch Error:', err);
-//             showToast('결과 조회 실패', 'error');
-//         });
-// }
 
 function finishInterview() {
     AppState.interview.inProgress = false;
+    // Save to Mock DB
+    const result = {
+        userId: AppState.currentUser.id_name,
+        jobId: AppState.currentJobId,
+        date: new Date().toLocaleDateString(),
+        scores: {
+            tech: Math.floor(Math.random() * 30) + 70, // Mock Score
+            prob: Math.floor(Math.random() * 30) + 70,
+            comm: Math.floor(Math.random() * 30) + 70,
+            atti: Math.floor(Math.random() * 30) + 70
+        }
+    };
+    MOCK_DB.applications.push(result);
 
-    showToast("면접 결과를 분석 중입니다...", "info");
+    // Show Result Page
+    // Animate bars
+    navigateTo('result-page');
+    setTimeout(() => {
+        $('#score-tech').style.width = `${result.scores.tech}%`;
+        $('#score-prob').style.width = `${result.scores.prob}%`;
+        $('#score-comm').style.width = `${result.scores.comm}%`;
+        $('#score-atti').style.width = `${result.scores.atti}%`;
 
-    // Fetch Real Result from Server
-    fetch(`/api/interview/result/${AppState.interview.interviewNumber}`)
-        .then(res => res.json())
-        .then(data => {
-            if (data.success) {
-                const result = data.result;
-
-                // Save to Mock DB (for local session consistency if needed)
-                const appRecord = {
-                    userId: AppState.currentUser.id_name,
-                    jobId: AppState.currentJobId,
-                    date: new Date().toLocaleDateString(),
-                    scores: result.scores,
-                    interviewNumber: AppState.interview.interviewNumber
-                };
-                MOCK_DB.applications.push(appRecord);
-
-                // Show Result Page
-                navigateTo('result-page');
-
-                setTimeout(() => {
-                    $('#score-tech').style.width = `${result.scores.tech}%`;
-                    $('#score-prob').style.width = `${result.scores.prob}%`;
-                    $('#score-comm').style.width = `${result.scores.comm}%`;
-                    $('#score-atti').style.width = `${result.scores.atti}%`;
-
-                    const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
-                    $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
-                    $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
-
-                    $('#result-desc').innerHTML = `
-                        수고하셨습니다. 면접 분석 결과입니다.<br>
-                        평균 점수: <strong>${avg}점</strong><br>
-                        <br>
-                        상세 질의응답 분석은 이메일로 발송됩니다.
-                    `;
-                }, 500);
-
-            } else {
-                showToast('결과 생성 중 오류가 발생했습니다.', 'error');
-            }
-        })
-        .catch(err => {
-            console.error('Result Fetch Error:', err);
-            showToast('결과 조회 실패', 'error');
-        });
+        const avg = (result.scores.tech + result.scores.prob + result.scores.comm + result.scores.atti) / 4;
+        $('#pass-fail-badge').textContent = avg >= 80 ? '합격 예측' : '불합격 예측';
+        $('#pass-fail-badge').style.color = avg >= 80 ? 'green' : 'red';
+    }, 500);
 }
 
 // --- Admin Section ---
@@ -820,184 +744,6 @@ function initAdmin() {
         }
     });
 
-
-    // --- 4. Helper Functions (Timer, TTS, STT) ---
-
-    // Timer Implementation
-    function startTimer(duration) {
-        if (AppState.interview.timer) clearInterval(AppState.interview.timer);
-
-        AppState.interview.timeLeft = duration;
-        updateTimerDisplay(duration);
-
-        AppState.interview.timer = setInterval(() => {
-            AppState.interview.timeLeft--;
-            updateTimerDisplay(AppState.interview.timeLeft);
-
-            if (AppState.interview.timeLeft <= 0) {
-                clearInterval(AppState.interview.timer);
-                submitAnswer(true); // Forced submission on timeout
-            }
-        }, 1000);
-    }
-
-    function updateTimerDisplay(seconds) {
-        const min = Math.floor(seconds / 60);
-        const sec = seconds % 60;
-        const timeString = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-
-        const timerDisplay = document.getElementById('timer-display');
-        if (timerDisplay) timerDisplay.textContent = timeString;
-
-        const progressBar = document.getElementById('progress-bar');
-        if (progressBar) {
-            const percentage = (seconds / 60) * 100; // Assuming 60s max
-            progressBar.style.width = `${percentage}%`;
-        }
-    }
-
-    // TTS (Text-to-Speech) Implementation
-    function speakText(text, callback) {
-        if (!window.speechSynthesis) {
-            console.error("TTS not supported");
-            if (callback) callback();
-            return;
-        }
-
-        // Cancel any ongoing speech
-        window.speechSynthesis.cancel();
-
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'ko-KR'; // Korean
-        utterance.rate = 1.0;
-
-        utterance.onend = () => {
-            if (callback) callback();
-        };
-
-        utterance.onerror = (e) => {
-            console.error("TTS Error:", e);
-            if (callback) callback();
-        };
-
-        window.speechSynthesis.speak(utterance);
-    }
-
-    // STT (Speech-to-Text) Implementation
-    let recognition = null;
-
-    function initSpeechRecognition() {
-        if ('webkitSpeechRecognition' in window) {
-            recognition = new webkitSpeechRecognition();
-        } else if ('SpeechRecognition' in window) {
-            recognition = new SpeechRecognition();
-        } else {
-            console.log("Speech Recognition API not supported in this browser.");
-            return null;
-        }
-
-        recognition.continuous = true; // Keep listening
-        recognition.interimResults = true; // Show interim results
-        recognition.lang = 'ko-KR';
-
-        recognition.onresult = function (event) {
-            let finalTranscript = '';
-            let interimTranscript = '';
-
-            for (let i = event.resultIndex; i < event.results.length; ++i) {
-                if (event.results[i].isFinal) {
-                    finalTranscript += event.results[i][0].transcript;
-                } else {
-                    interimTranscript += event.results[i][0].transcript;
-                }
-            }
-
-            const answerInput = document.getElementById('user-answer');
-            if (answerInput) {
-                // Append only final results to existing text to avoid overwriting manual edits? 
-                // Actually, usually we just update the value. 
-                // Simple approach: append final to current value if it's new?
-                // Better approach for demo: Just update with what we hear + existing content logic is complex.
-                // We will just set value to finalTranscript if we clear it each time.
-                // OR: We can just let the user see what is being typed.
-
-                // Simple Logic: just display what is recognized in this session.
-                // If user modifies it manually, it might get overwritten by subsequent recognition events if we strictly use `transcript`.
-                // But for this demo, let's just append new final parts.
-
-                if (finalTranscript) {
-                    // Simplistic: Just add to the textarea. 
-                    // Note: This logic might duplicate if `continuous` keeps sending old finals.
-                    // Actually `event.resultIndex` helps processing only new results.
-
-                    // We need to maintain state of what was already added?
-                    // Let's just append the *new* final transcript part.
-
-                    const currentVal = answerInput.value;
-                    answerInput.value = currentVal + (currentVal ? ' ' : '') + finalTranscript;
-                }
-
-                // Show interim in placeholder or separate visual? 
-                // For simplicity, maybe just ignore interim or show in console.
-                // Or update value with interim temporarily? (Complex to undo)
-            }
-        };
-
-        recognition.onerror = function (event) {
-            console.error("Speech Recognition Error:", event.error);
-        };
-
-        return recognition;
-    }
-
-    function startListening() {
-        if (!recognition) {
-            recognition = initSpeechRecognition();
-        }
-
-        if (recognition) {
-            try {
-                recognition.start();
-                console.log("Voice recognition started.");
-            } catch (e) {
-                console.warn("Recognition already started or error:", e);
-            }
-        }
-    }
-
-    function stopListening() {
-        if (recognition) {
-            try {
-                recognition.stop();
-                console.log("Voice recognition stopped.");
-            } catch (e) {
-                console.warn("Error stopping recognition:", e);
-            }
-        }
-    }
-
-    // Helper Toast
-    function showToast(message, type = 'success') {
-        const container = document.getElementById('toast-container');
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.textContent = message;
-
-        container.appendChild(toast);
-
-        // Animate In
-        setTimeout(() => {
-            toast.classList.add('show');
-        }, 10);
-
-        // Remove after 3s
-        setTimeout(() => {
-            toast.classList.remove('show');
-            setTimeout(() => {
-                container.removeChild(toast);
-            }, 300);
-        }, 3000);
-    }
     // Show Job Register Page
     $('#btn-add-job').addEventListener('click', () => {
         $('#admin-view-jobs').classList.add('hidden');
@@ -1071,6 +817,8 @@ function initAdmin() {
             const response = await fetch(`/api/jobs/${id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, job: jobVal, content, deadline })
             });
             const result = await response.json();
@@ -1089,10 +837,12 @@ function initAdmin() {
         }
     });
 
-    // initInterview(); // Called in DOMContentLoaded, defined above.
+    initInterview(); // Ensure interview init is called if valid
 }
 
-// function initInterview() { } // Removed duplicate
+function initInterview() {
+    // Placeholder if extra init needed
+}
 
 function renderAdminJobList() {
     const tbody = $('#admin-job-table tbody');
@@ -1185,7 +935,93 @@ function renderAdminAppList() {
 }
 
 // --- Input Masking Utilities ---
-function initInputMasking() {
-    console.log("Input masking initialized.");
+// Input Masking removed for split fields (handled by HTML maxlength)
+// Legacy support or specific masking can be re-added here if needed for other fields
+
+
+// --- Utilities ---
+function showToast(msg, type = 'info') {
+    const container = $('#toast-container');
+    const div = document.createElement('div');
+    div.className = `toast ${type}`;
+    div.textContent = msg;
+    container.appendChild(div);
+
+    // Auto remove
+    setTimeout(() => {
+        div.remove();
+    }, 3000);
 }
 
+// --- Audio Utilities ---
+
+// TTS
+function speakText(text, callback) {
+    if (!('speechSynthesis' in window)) {
+        console.warn("TTS not supported.");
+        if (callback) callback();
+        return;
+    }
+
+    // Stop previous
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ko-KR';
+    utterance.rate = 1.0;
+
+    // Voices check (optional)
+    const voices = window.speechSynthesis.getVoices();
+    // Try to find a Korean voice
+    const korVoice = voices.find(v => v.lang.includes('ko'));
+    if (korVoice) utterance.voice = korVoice;
+
+    utterance.onend = () => {
+        if (callback) callback();
+    };
+
+    window.speechSynthesis.speak(utterance);
+}
+
+// STT
+let recognitionInst = null;
+
+function startListening() {
+    $('#user-answer').value = ''; // Reset input
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        $('#user-answer').placeholder = "이 브라우저는 음성 인식을 지원하지 않습니다.";
+        return;
+    }
+
+    recognitionInst = new SpeechRecognition();
+    recognitionInst.lang = 'ko-KR';
+    recognitionInst.interimResults = true;
+    recognitionInst.continuous = true;
+
+    recognitionInst.onstart = () => {
+        $('#user-answer').placeholder = "듣고 있습니다... 답변해주세요.";
+        showToast("답변을 말씀해주세요 (음성 인식 중)", "info");
+    };
+
+    recognitionInst.onresult = (event) => {
+        const transcript = Array.from(event.results)
+            .map(result => result[0].transcript)
+            .join('');
+        $('#user-answer').value = transcript;
+    };
+
+    recognitionInst.onerror = (event) => {
+        console.error("STT Error:", event.error);
+    };
+
+    recognitionInst.start();
+}
+
+function stopListening() {
+    if (recognitionInst) {
+        recognitionInst.stop();
+        recognitionInst = null;
+    }
+}

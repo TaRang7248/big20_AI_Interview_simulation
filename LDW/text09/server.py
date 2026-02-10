@@ -2,16 +2,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from flask import Flask, request, jsonify, send_from_directory
 import os
-import uuid
-import json
-import random
-from datetime import datetime
-try:
-    from pypdf import PdfReader
-except ImportError:
-    PdfReader = None
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 # Load .env from project root
@@ -103,21 +94,6 @@ def init_db():
             answer TEXT NOT NULL
         )
     ''')
-    
-    # Create Interview_Progress table if not exists
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS Interview_Progress (
-            id SERIAL PRIMARY KEY,
-            Interview_Number TEXT NOT NULL,
-            Applicant_Name TEXT,
-            job TEXT,
-            Create_Question TEXT,
-            Question_answer TEXT,
-            answer_time TEXT,
-            Answer_Evaluation TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
 
     
     # Migration: Rename columns if they exist with old names
@@ -139,25 +115,6 @@ def init_db():
         if not c.fetchone():
             c.execute("ALTER TABLE interview_announcement ADD COLUMN job TEXT")
             print("Migrated interview_announcement table: Added job column")
-
-        # --- FIX: Interview_Progress Migration ---
-        # 1. Check for Interview_Number
-        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='interview_number'")
-        if not c.fetchone():
-            c.execute("ALTER TABLE interview_progress ADD COLUMN Interview_Number TEXT")
-            print("Migrated Interview_Progress: Added Interview_Number")
-        
-        # 2. Check for Applicant_Name
-        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='applicant_name'")
-        if not c.fetchone():
-            c.execute("ALTER TABLE interview_progress ADD COLUMN Applicant_Name TEXT")
-            print("Migrated Interview_Progress: Added Applicant_Name")
-
-        # 3. Check for job
-        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='job'")
-        if not c.fetchone():
-            c.execute("ALTER TABLE interview_progress ADD COLUMN job TEXT")
-            print("Migrated Interview_Progress: Added job")
             
         conn.commit()
     except Exception as e:
@@ -189,15 +146,12 @@ def register():
         if c.fetchone():
             return jsonify({'success': False, 'message': '이미 존재하는 아이디입니다.'}), 400
             
-        # Hash the password
-        hashed_pw = generate_password_hash(data['pw'])
-
         c.execute('''
             INSERT INTO users (id_name, pw, name, dob, gender, email, address, phone, type)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             data['id_name'], 
-            hashed_pw, 
+            data['pw'], 
             data['name'], 
             data.get('dob'), 
             data.get('gender'), 
@@ -222,26 +176,15 @@ def login():
         c = conn.cursor(cursor_factory=RealDictCursor)
         
         # User lookup logic
-        c.execute('SELECT * FROM users WHERE id_name = %s', (data['id_name'],))
+        # Note: In production, password should be hashed. Plain text for this demo.
+        c.execute('SELECT * FROM users WHERE id_name = %s AND pw = %s', (data['id_name'], data['pw']))
 
         row = c.fetchone()
         
         if row:
+            # pyscopg2 RealDictCursor returns a dict-like object
             user = dict(row)
-            # Check password (handle both hash and legacy plain text)
-            if check_password_hash(user['pw'], data['pw']) or user['pw'] == data['pw']:
-                # If it was plain text, we should probably update it to hash (Auto-migration)
-                if user['pw'] == data['pw']:
-                     try:
-                        new_hash = generate_password_hash(data['pw'])
-                        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (new_hash, user['id_name']))
-                        conn.commit()
-                     except:
-                        pass # Ignore migration errors for now
-
-                return jsonify({'success': True, 'user': user})
-            else:
-                return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
+            return jsonify({'success': True, 'user': user})
         else:
             return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
             
@@ -263,14 +206,7 @@ def verify_password():
 
         row = c.fetchone()
         
-        # Determine if match
-        match = False
-        if row:
-             stored_pw = row[0]
-             if check_password_hash(stored_pw, data['pw']) or stored_pw == data['pw']:
-                  match = True
-
-        if match:
+        if row and row[0] == data['pw']:
              return jsonify({'success': True})
         else:
              return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
@@ -317,9 +253,7 @@ def update_user_info(id_name):
         if not row:
              return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
         
-        stored_pw = row[0]
-        # Check if match (Hash or Plain)
-        if not (check_password_hash(stored_pw, data['pw']) or stored_pw == data['pw']):
+        if row[0] != data['pw']:
             return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
 
         # 2. Update Info
@@ -347,8 +281,7 @@ def change_password():
         c = conn.cursor()
         
         # Update Password
-        new_hashed_pw = generate_password_hash(data['new_pw'])
-        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (new_hashed_pw, data['id_name']))
+        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (data['new_pw'], data['id_name']))
 
         conn.commit()
         
@@ -507,244 +440,6 @@ def upload_resume():
 
     else:
         return jsonify({'success': False, 'message': '허용되지 않는 파일 형식입니다. (PDF만 가능)'}), 400
-
-# --- AI Interview Logic (Mock LLM) ---
-
-def extract_text_from_pdf(filepath):
-    if not PdfReader:
-        return "[PDF 라이브러리 미설치로 텍스트 추출 실패]"
-    try:
-        reader = PdfReader(filepath)
-        text = ""
-        for page in reader.pages:
-            text += page.extract_text() + "\n"
-        return text.strip()
-    except Exception as e:
-        print(f"PDF Extraction Error: {e}")
-        return "[PDF 텍스트 추출 중 오류]"
-
-def mock_llm_generate_question(job_title, resume_text, history_count):
-    # Simulate LLM generating questions based on context
-    templates = [
-        f"{job_title} 직무에 지원하게 된 동기가 무엇인가요?",
-        f"이력서에 기재하신 프로젝트 경험 중 가장 기억에 남는 것은 무엇인가요?",
-        f"{job_title}로서 갖춰야 할 중요 역량이 무엇이라고 생각하시나요?",
-        f"팀 내 갈등 상황이 발생했을 때 어떻게 대처하시나요?",
-        f"본인의 장점과 단점에 대해 말씀해 주세요.",
-        f"향후 5년 뒤 본인의 모습을 그려본다면 어떤 모습일까요?"
-    ]
-    
-    # Simple logic: If text extracted, mention it (Mock)
-    context_prefix = ""
-    if resume_text and len(resume_text) > 20:
-         context_prefix = "(이력서 기반) "
-
-    # Select based on history count to simulate progression
-    index = history_count % len(templates)
-    return context_prefix + templates[index]
-
-def mock_llm_evaluate_answer(question, answer):
-    # Simulate Evaluation
-    length_score = len(answer)
-    evaluation = ""
-    if length_score < 10:
-        evaluation = "답변이 너무 짧습니다. 구체적인 예시를 들어주세요."
-    elif length_score < 50:
-        evaluation = "적절한 답변이지만 조금 더 상세한 설명이 필요합니다."
-    else:
-        evaluation = "논리적이고 구체적인 답변입니다. 직무에 대한 이해도가 높습니다."
-    return evaluation
-
-
-@app.route('/api/interview/start', methods=['POST'])
-def start_interview():
-    data = request.json
-    id_name = data.get('id_name')
-    job_id = data.get('job_id')
-
-    try:
-        conn = get_db_connection()
-        c = conn.cursor(cursor_factory=RealDictCursor)
-
-        # 1. Get Applicant Info
-        c.execute("SELECT name FROM users WHERE id_name = %s", (id_name,))
-        user_row = c.fetchone()
-        applicant_name = user_row['name'] if user_row else "Unknown"
-
-        # 2. Get Job Info
-        c.execute("SELECT job FROM interview_announcement WHERE id = %s", (job_id,))
-        job_row = c.fetchone()
-        job_title = job_row['job'] if job_row else "General"
-
-        # 3. Get Resume Path
-        c.execute("SELECT resume FROM interview_information WHERE id_name = %s ORDER BY created_at DESC LIMIT 1", (id_name,))
-        resume_row = c.fetchone()
-        resume_path = resume_row['resume'] if resume_row else None
-        
-        resume_text = ""
-        if resume_path and os.path.exists(resume_path):
-            resume_text = extract_text_from_pdf(resume_path)
-
-        # 4. Generate Interview Number
-        interview_number = str(uuid.uuid4())
-
-        # 5. Generate First Question
-        first_question = mock_llm_generate_question(job_title, resume_text, 0)
-
-        # 6. Insert into Interview_Progress
-        c.execute('''
-            INSERT INTO Interview_Progress 
-            (Interview_Number, Applicant_Name, job, Create_Question)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id
-        ''', (interview_number, applicant_name, job_title, first_question))
-        
-        new_id = c.fetchone()['id']
-        conn.commit()
-
-        return jsonify({
-            'success': True, 
-            'interview_number': interview_number,
-            'question': first_question,
-            'q_id': new_id
-        })
-
-    except Exception as e:
-        print(f"Start Interview Error: {e}")
-        return jsonify({'success': False, 'message': '면접 시작 중 오류가 발생했습니다.'}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/api/interview/reply', methods=['POST'])
-def reply_interview():
-    data = request.json
-    interview_number = data.get('interview_number')
-    q_id = data.get('q_id') # ID of the question row being answered
-    answer = data.get('answer')
-    time_taken = data.get('time_taken') # in seconds/string
-
-    try:
-        conn = get_db_connection()
-        c = conn.cursor(cursor_factory=RealDictCursor)
-
-        # 1. Get Current Question Context
-        c.execute("SELECT Create_Question, job, Applicant_Name FROM Interview_Progress WHERE id = %s", (q_id,))
-        current_row = c.fetchone()
-        
-        if not current_row:
-             return jsonify({'success': False, 'message': '질문 정보를 찾을 수 없습니다.'}), 404
-
-        question_text = current_row['create_question']
-        job_title = current_row['job']
-        applicant_name = current_row['applicant_name']
-
-        # 2. Evaluate Answer
-        evaluation = mock_llm_evaluate_answer(question_text, answer)
-
-        # 3. Update Current Row with Answer and Evaluation
-        c.execute('''
-            UPDATE Interview_Progress
-            SET Question_answer = %s, answer_time = %s, Answer_Evaluation = %s
-            WHERE id = %s
-        ''', (answer, str(time_taken), evaluation, q_id))
-        conn.commit()
-
-        # 4. Check if we should stop (Limit questions, e.g., 5)
-        c.execute("SELECT COUNT(*) as cnt FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
-        count = c.fetchone()['cnt']
-        
-        if count >= 5:
-             return jsonify({'success': True, 'finished': True, 'message': '면접이 종료되었습니다.'})
-
-        # 5. Generate Next Question
-        next_question = mock_llm_generate_question(job_title, "", count) # Resume text omitted for brevity in next Qs
-
-        # 6. Insert Next Question
-        c.execute('''
-            INSERT INTO Interview_Progress 
-            (Interview_Number, Applicant_Name, job, Create_Question)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id
-        ''', (interview_number, applicant_name, job_title, next_question))
-        
-        new_q_id = c.fetchone()['id']
-        conn.commit()
-
-        return jsonify({
-            'success': True, 
-            'finished': False,
-            'question': next_question, 
-            'q_id': new_q_id
-        })
-
-    except Exception as e:
-        print(f"Reply Interview Error: {e}")
-        return jsonify({'success': False, 'message': '답변 제출 중 오류가 발생했습니다.'}), 500
-    finally:
-        if conn: conn.close()
-
-@app.route('/api/interview/result/<interview_number>', methods=['GET'])
-def get_interview_result(interview_number):
-    try:
-        conn = get_db_connection()
-        c = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # 1. Get all Q&A
-        c.execute('''
-            SELECT Create_Question, Question_answer, Answer_Evaluation 
-            FROM Interview_Progress 
-            WHERE Interview_Number = %s 
-            ORDER BY id ASC
-        ''', (interview_number,))
-        
-        rows = c.fetchall()
-        
-        if not rows:
-             return jsonify({'success': False, 'message': '면접 기록을 찾을 수 없습니다.'}), 404
-
-        # 2. Calculate Mock Score (Simple logic based on evaluation length/keywords)
-        # In real world, LLM would score. Here we randomize slightly biased by answer length.
-        total_score_tech = 0
-        total_score_prob = 0
-        total_score_comm = 0
-        total_score_atti = 0
-        
-        for row in rows:
-            ans = row['question_answer'] or ""
-            # Simple length heuristic
-            score_base = min(len(ans) * 2, 90) + random.randint(0, 10)
-            if score_base > 100: score_base = 100
-            if score_base < 60: score_base = 60
-            
-            total_score_tech += score_base
-            total_score_prob += score_base + random.randint(-5, 5)
-            total_score_comm += score_base + random.randint(-5, 5)
-            total_score_atti += score_base + random.randint(-5, 5)
-
-        count = len(rows)
-        avg_tech = round(total_score_tech / count, 1)
-        avg_prob = round(total_score_prob / count, 1)
-        avg_comm = round(total_score_comm / count, 1)
-        avg_atti = round(total_score_atti / count, 1)
-
-        result_data = {
-            'scores': {
-                'tech': avg_tech,
-                'prob': avg_prob,
-                'comm': avg_comm,
-                'atti': avg_atti
-            },
-            'qa_list': [dict(r) for r in rows]
-        }
-        
-        return jsonify({'success': True, 'result': result_data})
-
-    except Exception as e:
-        print(f"Get Result Error: {e}")
-        return jsonify({'success': False, 'message': '결과 조회 중 오류가 발생했습니다.'}), 500
-    finally:
-        if conn: conn.close()
-
 
 import webbrowser
 from threading import Timer
