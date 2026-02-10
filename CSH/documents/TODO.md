@@ -10,13 +10,12 @@
 | 1 | 프론트엔드 | React, Next.js, Recharts | 순수 **Vanilla HTML/CSS/JS** | ❌ 불일치 |
 | 2 | API Gateway | NGINX / Traefik | **없음** — FastAPI 직접 서빙 | ❌ 미구현 |
 | 3 | 미디어 서버 | aiortc / GStreamer | aiortc만 사용, **녹화·트랜스코딩 없음** | 🟡 부분 |
-| 4 | STT | Deepgram / Whisper 이중 엔진 | **Deepgram만** 사용 (Whisper 미구현) | 🟡 부분 |
-| 5 | LLM 오케스트레이션 | LangChain + LangGraph | LangChain ✔, **LangGraph 미구현** (주석 처리) | 🟡 부분 |
-| 6 | 감정 분석 엔진 | DeepFace + Hume AI | DeepFace ✔, **Hume는 TTS 전용** (감정분석 아님) | 🟡 부분 |
-| 7 | 벡터 DB | Pinecone / pgvector | **pgvector만** 사용 (Pinecone 없음) | 🟡 부분 |
-| 8 | 객체 저장소 | GCP Cloud Storage | **없음** — 로컬 파일시스템 | ❌ 미구현 |
-| 9 | SFU 아키텍처 | 서버 사이드 미디어 포킹 | 오디오→STT, 비디오→DeepFace 포크 ✔, **다자간 포워딩 없음** | 🟡 부분 |
-| 10 | 비동기 파이프라인 태스크 | 리포트·비디오 인코딩·배치 | 리포트·배치 ✔, **비디오 인코딩 없음** | ✅ 구현 |
+| 4 | LLM 오케스트레이션 | LangChain + LangGraph | LangChain ✔, **LangGraph 미구현** (주석 처리) | 🟡 부분 |
+| 5 | 감정 분석 엔진 | DeepFace + Hume AI | DeepFace ✔, **Hume는 TTS 전용** (감정분석 아님) | 🟡 부분 |
+| 6 | 벡터 DB | Pinecone / pgvector | **pgvector만** 사용 (Pinecone 없음) | 🟡 부분 |
+| 7 | 객체 저장소 | GCP Cloud Storage | **없음** — 로컬 파일시스템 | ❌ 미구현 |
+| 8 | SFU 아키텍처 | 서버 사이드 미디어 포킹 | 오디오→STT, 비디오→DeepFace 포크 ✔, **다자간 포워딩 없음** | 🟡 부분 |
+| 9 | 비동기 파이프라인 태스크 | 리포트·비디오 인코딩·배치 | 리포트·배치 ✔, **비디오 인코딩 없음** | ✅ 구현 |
 
 ---
 
@@ -45,7 +44,7 @@
 | 🔴 **Major** | SAD-3 API Gateway | NGINX/Traefik/SSL 없음 |
 | 🟠 **High** | REQ-N-002 확장성 | Dockerfile·K8s 없음, 수평 확장 불가 |
 |  **Medium** | SAD-10 Oracle→PostgreSQL | 의도적 변경 가능, 설계서 업데이트 필요 |
-| 🟡 **Medium** | SAD-6 Whisper STT | Deepgram만 구현, 오프라인 폴백 없음 |
+
 | 🟡 **Medium** | SAD-7 LangGraph | 워크플로우 상태머신 미구현 |
 | 🟢 **Low** | REQ-F-002 감정 피드백 | 감정 데이터는 수집되나 면접 흐름 피드백 미연동 |
 | 🟢 **Low** | REQ-N-004 공정성 | 학술 프로젝트 단계에서는 후순위 |
