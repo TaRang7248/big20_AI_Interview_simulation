@@ -848,7 +848,19 @@ function renderAdminJobList() {
     const tbody = $('#admin-job-table tbody');
     tbody.innerHTML = '';
     MOCK_DB.jobs.forEach(job => {
+        const isOwner = AppState.currentUser && AppState.currentUser.id_name === job.id_name;
         const tr = document.createElement('tr');
+        
+        let actionButtons = '';
+        if (isOwner) {
+            actionButtons = `
+                <button class="btn-small" onclick="openEditJob(${job.id})">수정</button>
+                <button class="btn-small btn-secondary" onclick="deleteJob(${job.id})">삭제</button>
+            `;
+        } else {
+            actionButtons = `<span style="color: #999; font-size: 0.9em;">권한 없음</span>`;
+        }
+
         tr.innerHTML = `
             <td>${job.id}</td>
             <td>${job.job || '-'}</td>
@@ -856,10 +868,7 @@ function renderAdminJobList() {
             <td>${job.id_name || 'Unknown'}</td>
             <td>${job.created_at}</td>
             <td>${job.deadline}</td>
-            <td>
-                <button class="btn-small" onclick="openEditJob(${job.id})">수정</button>
-                <button class="btn-small btn-secondary" onclick="deleteJob(${job.id})">삭제</button>
-            </td>
+            <td>${actionButtons}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -897,7 +906,9 @@ async function deleteJob(jobId) {
 
     try {
         const response = await fetch(`/api/jobs/${jobId}`, {
-            method: 'DELETE'
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id_name: AppState.currentUser.id_name })
         });
         const result = await response.json();
 

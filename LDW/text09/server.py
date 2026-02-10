@@ -23,21 +23,38 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # DB Connection settings
-DB_HOST = "127.0.0.1"
-DB_NAME = "interview_db"
-DB_USER = "postgres"
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_NAME = os.getenv("DB_NAME", "interview_db")
+DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579") # Default fallback or from env
-DB_PORT = "5432"
+DB_PORT = os.getenv("DB_PORT", "5432")
 
 def get_db_connection():
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        database=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS,
-        port=DB_PORT
-    )
-    return conn
+    hosts = [DB_HOST, "127.0.0.1", "localhost"]
+    last_error = None
+    
+    for host in hosts:
+        try:
+            print(f"Attempting to connect to DB at {host}...")
+            conn = psycopg2.connect(
+                host=host,
+                database=DB_NAME,
+                user=DB_USER,
+                password=DB_PASS,
+                port=DB_PORT,
+                connect_timeout=3
+            )
+            print(f"Successfully connected to DB at {host}")
+            return conn
+        except psycopg2.OperationalError as e:
+            last_error = e
+            print(f"Failed to connect to {host}: {e}")
+            
+    print(f"All connection attempts failed. Last error: {last_error}")
+    print(f"Connection Details: Host={DB_HOST}, DB={DB_NAME}, User={DB_USER}, Port={DB_PORT}")
+    raise last_error
+
+
 
 def init_db():
     conn = get_db_connection()
@@ -364,6 +381,15 @@ def update_job(id):
         conn = get_db_connection()
         c = conn.cursor()
         
+        # Verify ownership
+        c.execute("SELECT id_name FROM interview_announcement WHERE id = %s", (id,))
+        row = c.fetchone()
+        if not row:
+             return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        
+        if row[0] != data.get('id_name'):
+             return jsonify({'success': False, 'message': '수정 권한이 없습니다.'}), 403
+
         c.execute('''
             UPDATE interview_announcement
             SET title = %s, job = %s, deadline = %s, content = %s
@@ -371,10 +397,7 @@ def update_job(id):
         ''', (data['title'], data.get('job', ''), data['deadline'], data.get('content', ''), id))
         conn.commit()
         
-        if c.rowcount > 0:
-            return jsonify({'success': True, 'message': '공고가 수정되었습니다.'})
-        else:
-            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        return jsonify({'success': True, 'message': '공고가 수정되었습니다.'})
             
     except Exception as e:
         print(f"Update Job Error: {e}")
@@ -388,13 +411,23 @@ def delete_job(id):
         conn = get_db_connection()
         c = conn.cursor()
         
+        # Check ownership
+        # Try to get id_name from JSON body or Query Params
+        data = request.get_json(silent=True) or request.args
+        requester_id = data.get('id_name')
+
+        c.execute("SELECT id_name FROM interview_announcement WHERE id = %s", (id,))
+        row = c.fetchone()
+        if not row:
+             return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        
+        if row[0] != requester_id:
+             return jsonify({'success': False, 'message': '삭제 권한이 없습니다.'}), 403
+        
         c.execute('DELETE FROM interview_announcement WHERE id = %s', (id,))
         conn.commit()
         
-        if c.rowcount > 0:
-            return jsonify({'success': True, 'message': '공고가 삭제되었습니다.'})
-        else:
-            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+        return jsonify({'success': True, 'message': '공고가 삭제되었습니다.'})
             
     except Exception as e:
         print(f"Delete Job Error: {e}")
