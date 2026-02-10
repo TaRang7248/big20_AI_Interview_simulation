@@ -85,8 +85,8 @@ function initAuth() {
     // Login
     $('#login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
-        const id = $('#login-id').value;
-        const pw = $('#login-pw').value;
+        const id = $('#login-id').value.trim();
+        const pw = $('#login-pw').value.trim();
 
         try {
             const response = await fetch('/api/login', {
@@ -113,8 +113,8 @@ function initAuth() {
         e.preventDefault();
 
         const newUser = {
-            id_name: $('#reg-id').value,
-            pw: $('#reg-pw').value,
+            id_name: $('#reg-id').value.trim(),
+            pw: $('#reg-pw').value.trim(),
             name: $('#reg-name').value,
             dob: `${$('#reg-dob-year').value}-${$('#reg-dob-month').value.padStart(2, '0')}-${$('#reg-dob-day').value.padStart(2, '0')}`,
             gender: $('#reg-gender').value,
@@ -1161,109 +1161,6 @@ function renderAdminAppList() {
 
 // --- Input Masking Utilities ---
 function initInputMasking() {
-    // Basic input masking logic can be added here if needed.
-    // Currently acting as a placeholder to prevent ReferenceError.
     console.log("Input masking initialized.");
 }
-div.remove();
-    }, 3000);
-}
 
-// --- Audio Utilities ---
-
-// TTS
-function speakText(text, callback) {
-    if (!('speechSynthesis' in window)) {
-        console.warn("TTS not supported.");
-        if (callback) callback();
-        return;
-    }
-
-    // Stop previous
-    window.speechSynthesis.cancel();
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ko-KR';
-    utterance.rate = 1.0;
-
-    // Voices check (optional)
-    const voices = window.speechSynthesis.getVoices();
-    // Try to find a Korean voice
-    const korVoice = voices.find(v => v.lang.includes('ko'));
-    if (korVoice) utterance.voice = korVoice;
-
-    utterance.onend = () => {
-        if (callback) callback();
-    };
-
-    window.speechSynthesis.speak(utterance);
-}
-
-// STT
-let recognitionInst = null;
-
-function startListening() {
-    $('#user-answer').value = ''; // Reset input
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-        $('#user-answer').placeholder = "이 브라우저는 음성 인식을 지원하지 않습니다.";
-        return;
-    }
-
-    recognitionInst = new SpeechRecognition();
-    recognitionInst.lang = 'ko-KR';
-    recognitionInst.interimResults = true;
-    recognitionInst.continuous = true;
-
-    recognitionInst.onstart = () => {
-        $('#user-answer').placeholder = "듣고 있습니다... 답변해주세요.";
-        showToast("답변을 말씀해주세요 (음성 인식 중)", "info");
-    };
-
-    recognitionInst.onresult = (event) => {
-        const transcript = Array.from(event.results)
-            .map(result => result[0].transcript)
-            .join('');
-        $('#user-answer').value = transcript;
-    };
-
-    recognitionInst.onerror = (event) => {
-        console.error("STT Error:", event.error);
-    };
-
-    recognitionInst.start();
-}
-
-function stopListening() {
-    if (recognitionInst) {
-        recognitionInst.stop();
-    }
-}
-
-// --- Timer Utilities ---
-function startTimer(duration) {
-    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
-
-    AppState.interview.timeLeft = duration;
-    updateTimerDisplay(duration);
-
-    AppState.interview.timer = setInterval(() => {
-        AppState.interview.timeLeft--;
-        updateTimerDisplay(AppState.interview.timeLeft);
-
-        if (AppState.interview.timeLeft <= 0) {
-            clearInterval(AppState.interview.timer);
-            showToast("답변 시간이 종료되었습니다.", "warning");
-            submitAnswer(true); // Force submit
-        }
-    }, 1000);
-}
-
-function updateTimerDisplay(seconds) {
-    const min = Math.floor(seconds / 60);
-    const sec = seconds % 60;
-    const display = `${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-    const timerEl = document.getElementById('timer-display');
-    if (timerEl) timerEl.textContent = display;
-}
