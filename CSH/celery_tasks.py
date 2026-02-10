@@ -1146,6 +1146,141 @@ def save_session_to_redis_task(
         }
 
 
+# ========== 미디어 트랜스코딩 태스크 ==========
+
+@celery_app.task(
+    bind=True,
+    name="celery_tasks.transcode_recording_task",
+    soft_time_limit=600,
+    time_limit=660,
+    max_retries=2,
+    default_retry_delay=30,
+)
+def transcode_recording_task(
+    self,
+    session_id: str,
+    video_path: str,
+    audio_path: str,
+    target_bitrate: int = 2000,
+    target_audio_bitrate: int = 128,
+) -> Dict:
+    """
+    면접 녹화 영상을 웹 최적화 포맷으로 트랜스코딩합니다.
+    GStreamer 우선, FFmpeg 폴백 하이브리드 방식.
+    
+    워크플로우:
+    1. raw 비디오 + raw 오디오 → 먹싱 (Muxing)
+    2. H.264 + AAC 트랜스코딩
+    3. 썸네일 생성
+    4. 원본 raw 파일 삭제
+    5. 이벤트 발행 → 프론트엔드 알림
+    
+    Args:
+        session_id: 면접 세션 ID
+        video_path: raw 비디오 파일 경로
+        audio_path: raw 오디오 파일 경로 (WAV)
+        target_bitrate: 비디오 비트레이트 (kbps)
+        target_audio_bitrate: 오디오 비트레이트 (kbps)
+    
+    Returns:
+        트랜스코딩 결과 (출력 경로, 파일 크기, 길이 등)
+    """
+    task_id = self.request.id or "unknown"
+    print(f"🎬 [Task {task_id}] 트랜스코딩 시작: {session_id[:8]}...")
+    
+    _publish_event(
+        "recording.transcoding_started",
+        session_id=session_id,
+        data={"task_id": task_id, "video_path": video_path},
+    )
+    
+    try:
+        from media_recording_service import MediaRecordingService
+        
+        result = MediaRecordingService.transcode(
+            session_id=session_id,
+            video_path=video_path,
+            audio_path=audio_path,
+            target_codec="h264",
+            target_bitrate=target_bitrate,
+            target_audio_bitrate=target_audio_bitrate,
+        )
+        
+        _publish_event(
+            "recording.transcoding_completed",
+            session_id=session_id,
+            data={
+                "task_id": task_id,
+                "output_path": result.get("output_path"),
+                "thumbnail_path": result.get("thumbnail_path"),
+                "duration_sec": result.get("duration_sec", 0),
+                "file_size_mb": round(result.get("file_size_bytes", 0) / 1024 / 1024, 2),
+            },
+        )
+        
+        print(f"✅ [Task {task_id}] 트랜스코딩 완료: {session_id[:8]}...")
+        return {
+            "session_id": session_id,
+            "status": "completed",
+            "task_id": task_id,
+            **result,
+        }
+    
+    except FileNotFoundError as e:
+        print(f"❌ [Task {task_id}] 파일 없음: {e}")
+        _publish_event(
+            "recording.transcoding_failed",
+            session_id=session_id,
+            data={"task_id": task_id, "error": str(e)},
+        )
+        return {"session_id": session_id, "status": "error", "error": str(e)}
+    
+    except Exception as e:
+        print(f"❌ [Task {task_id}] 트랜스코딩 오류: {e}")
+        _publish_event(
+            "recording.transcoding_failed",
+            session_id=session_id,
+            data={"task_id": task_id, "error": str(e)},
+        )
+        # 재시도
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=e)
+        return {"session_id": session_id, "status": "error", "error": str(e)}
+
+
+@celery_app.task(
+    bind=True,
+    name="celery_tasks.cleanup_recording_task",
+    soft_time_limit=60,
+    time_limit=90,
+)
+def cleanup_recording_task(
+    self,
+    session_id: str,
+    file_paths: List[str],
+) -> Dict:
+    """
+    녹화 관련 파일들을 정리 (삭제)합니다.
+    세션 만료 또는 사용자 요청 시 호출됩니다.
+    """
+    removed = []
+    errors = []
+    for path in file_paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+                removed.append(os.path.basename(path))
+            except Exception as e:
+                errors.append(f"{os.path.basename(path)}: {e}")
+    
+    return {
+        "session_id": session_id,
+        "removed": removed,
+        "errors": errors,
+        "status": "completed" if not errors else "partial",
+    }
+
+
 # ========== 헬퍼 함수 ==========
 
 def run_async(coro):

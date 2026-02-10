@@ -512,6 +512,26 @@ except ImportError as e:
     print(f"⚠️ Whisper STT 폴백 비활성화: {e}")
 
 
+# ========== 미디어 녹화/트랜스코딩 서비스 (aiortc + GStreamer 하이브리드) ==========
+try:
+    from media_recording_service import (
+        MediaRecordingService, recording_service,
+        RecordingStatus, RecordingMetadata,
+        GSTREAMER_AVAILABLE as _GST, FFMPEG_AVAILABLE as _FFM, MEDIA_TOOL,
+    )
+    RECORDING_AVAILABLE = recording_service.available
+    if RECORDING_AVAILABLE:
+        _tool_name = "GStreamer" if _GST else "FFmpeg"
+        print(f"✅ 미디어 녹화 서비스 활성화됨 (도구: {_tool_name})")
+    else:
+        print("⚠️ 미디어 녹화: GStreamer/FFmpeg 미설치 — 녹화 비활성화")
+except ImportError as e:
+    recording_service = None
+    RECORDING_AVAILABLE = False
+    RecordingStatus = None
+    print(f"⚠️ 미디어 녹화 서비스 비활성화: {e}")
+
+
 # ========== LangGraph 워크플로우 상태머신 ==========
 try:
     from interview_workflow import (
@@ -3684,23 +3704,18 @@ async def webrtc_offer(offer: Offer):
         async def on_track(track):
             if track.kind == "video":
                 pc.addTrack(track)
-                asyncio.create_task(analyze_emotions(track, session_id))
+                # 녹화 서비스 시작 (GStreamer/FFmpeg 파이프라인)
+                if RECORDING_AVAILABLE and recording_service:
+                    try:
+                        recording_service.start_recording(session_id, width=640, height=480, fps=15)
+                    except Exception as e:
+                        print(f"⚠️ [Recording] 녹화 시작 실패: {e}")
+                # 감정 분석 + 녹화 통합 루프
+                asyncio.create_task(_video_pipeline(track, session_id))
             else:
                 # 오디오 트랙 STT 라우팅: Deepgram(우선) → Whisper(폴백) → 소비만
-                if DEEPGRAM_AVAILABLE:
-                    asyncio.create_task(_process_audio_with_stt(track, session_id))
-                elif WHISPER_AVAILABLE and whisper_service:
-                    # Deepgram 비활성화 시 Whisper 오프라인 폴백
-                    print(f"🔄 [STT] 세션 {session_id[:8]}... Whisper 오프라인 폴백 사용")
-                    asyncio.create_task(process_audio_with_whisper(
-                        track, session_id, whisper_service,
-                        broadcast_stt_result,
-                        speech_service=speech_service if SPEECH_ANALYSIS_AVAILABLE else None,
-                    ))
-                else:
-                    # STT 엔진 없으면 MediaBlackhole로 소비
-                    bh = MediaBlackhole()
-                    asyncio.create_task(_consume_audio(track, bh))
+                # + 녹화 오디오 파이프
+                asyncio.create_task(_audio_pipeline(track, session_id))
         
         await pc.setRemoteDescription(RTCSessionDescription(sdp=offer.sdp, type=offer.type))
         answer = await pc.createAnswer()
@@ -3725,6 +3740,274 @@ async def _consume_audio(track, sink: MediaBlackhole):
             sink.write(frame)
     except Exception:
         pass
+
+
+async def _video_pipeline(track, session_id: str):
+    """
+    비디오 트랙 통합 파이프라인:
+    1. 모든 프레임을 GStreamer/FFmpeg 녹화 파이프에 전송
+    2. 감정 분석 주기(1초)마다 DeepFace 처리
+    """
+    sample_period = 1.0
+    batch_sample_period = 10.0
+    last_ts = 0.0
+    last_batch_ts = 0.0
+    recording_active = RECORDING_AVAILABLE and recording_service and \
+                        recording_service.get_recording(session_id) is not None
+
+    try:
+        while True:
+            frame = await track.recv()
+            now = time.monotonic()
+
+            try:
+                img = frame.to_ndarray(format="bgr24")
+            except Exception:
+                continue
+
+            # ── 녹화: 모든 프레임을 파이프에 쓰기 ──
+            if recording_active:
+                try:
+                    await recording_service.write_video_frame(session_id, img.tobytes())
+                except Exception:
+                    pass
+
+            # ── 감정 분석: sample_period 마다 ──
+            if not EMOTION_AVAILABLE or now - last_ts < sample_period:
+                continue
+            last_ts = now
+
+            try:
+                res = await run_deepface_async(img, actions=["emotion"])
+                item = res[0] if isinstance(res, list) else res
+                scores = item.get("emotion", {})
+
+                # 시선 추적
+                if GAZE_TRACKING_AVAILABLE and gaze_service:
+                    try:
+                        face_region = item.get("region")
+                        if face_region:
+                            frame_h, frame_w = img.shape[:2]
+                            gaze_service.add_face_detection(
+                                session_id, face_region, frame_w, frame_h
+                            )
+                    except Exception as e:
+                        print(f"[GazeTracking] 데이터 전달 오류: {e}")
+
+                keys_map = {
+                    "happy": "happy", "sad": "sad", "angry": "angry",
+                    "surprise": "surprise", "fear": "fear",
+                    "disgust": "disgust", "neutral": "neutral"
+                }
+                raw = {k: float(scores.get(src, 0.0)) for k, src in keys_map.items()}
+                total = sum(raw.values()) or 1.0
+                probabilities = {k: (v / total) for k, v in raw.items()}
+
+                data = {
+                    "dominant_emotion": item.get("dominant_emotion"),
+                    "probabilities": probabilities,
+                    "raw_scores": raw
+                }
+
+                async with state.emotion_lock:
+                    state.last_emotion = data
+
+                ts_ms = int(time.time() * 1000)
+                for emo, prob in probabilities.items():
+                    key = f"emotion:{session_id}:{emo}"
+                    push_timeseries(key, ts_ms, prob, {"session_id": session_id})
+
+                if now - last_batch_ts >= batch_sample_period:
+                    last_batch_ts = now
+
+                # WebSocket 브로드캐스트
+                if session_id in state.websocket_connections:
+                    msg = {"type": "emotion_update", **data, "timestamp": time.time()}
+                    for ws in list(state.websocket_connections[session_id]):
+                        try:
+                            await ws.send_json(msg)
+                        except Exception:
+                            pass
+
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+
+
+async def _audio_pipeline(track, session_id: str):
+    """
+    오디오 트랙 통합 파이프라인:
+    1. STT 처리 (Deepgram/Whisper)
+    2. GStreamer/FFmpeg 녹화 파이프에 오디오 프레임 전송
+    """
+    import numpy as np
+    recording_active = RECORDING_AVAILABLE and recording_service and \
+                        recording_service.get_recording(session_id) is not None
+
+    # ── STT 없이 녹화만 필요한 경우 ──
+    if not DEEPGRAM_AVAILABLE and not (WHISPER_AVAILABLE and whisper_service):
+        try:
+            while True:
+                frame = await track.recv()
+                if recording_active:
+                    try:
+                        audio_data = frame.to_ndarray()
+                        pcm = audio_data.astype(np.int16).tobytes()
+                        await recording_service.write_audio_frame(session_id, pcm)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return
+
+    # ── Deepgram STT + 녹화 ──
+    if DEEPGRAM_AVAILABLE:
+        # _process_audio_with_stt 에 녹화 쓰기를 위임하지 않고
+        # 별도로 호출 → 프레임은 공유 불가이므로 실제로는
+        # _process_audio_with_stt_and_recording 을 사용
+        await _process_audio_with_stt_and_recording(track, session_id, recording_active)
+    elif WHISPER_AVAILABLE and whisper_service:
+        print(f"🔄 [STT] 세션 {session_id[:8]}... Whisper 오프라인 폴백 사용")
+        await process_audio_with_whisper(
+            track, session_id, whisper_service,
+            broadcast_stt_result,
+            speech_service=speech_service if SPEECH_ANALYSIS_AVAILABLE else None,
+        )
+
+
+async def _process_audio_with_stt_and_recording(track, session_id: str, recording_active: bool):
+    """Deepgram STT + GStreamer/FFmpeg 녹화 통합 오디오 처리"""
+    if not DEEPGRAM_AVAILABLE or not deepgram_client:
+        return
+
+    import numpy as np
+    try:
+        with deepgram_client.listen.v1.connect(
+            model="nova-3",
+            language="ko",
+            smart_format=True,
+            encoding="linear16",
+            sample_rate=16000,
+            punctuate=True,
+            interim_results=True,
+            vad_events=True,
+            endpointing=300,
+        ) as dg_connection:
+
+            def on_message(message) -> None:
+                try:
+                    transcript = None
+                    is_final = False
+                    words_list = None
+                    confidence = None
+
+                    if hasattr(message, 'results') and getattr(message.results, 'channels', None):
+                        is_final = getattr(message.results, 'is_final', False)
+                        alts = message.results.channels[0].alternatives
+                        if alts:
+                            transcript = alts[0].transcript
+                            confidence = getattr(alts[0], 'confidence', None)
+                            raw_words = getattr(alts[0], 'words', None)
+                            if raw_words:
+                                words_list = [
+                                    {"word": getattr(w, 'word', getattr(w, 'punctuated_word', '')),
+                                     "start": getattr(w, 'start', 0.0),
+                                     "end": getattr(w, 'end', 0.0),
+                                     "confidence": getattr(w, 'confidence', 0.0)}
+                                    for w in raw_words
+                                ]
+                    elif hasattr(message, 'channel') and getattr(message.channel, 'alternatives', None):
+                        is_final = getattr(message, 'is_final', True)
+                        alts = message.channel.alternatives
+                        if alts:
+                            transcript = alts[0].transcript
+                            confidence = getattr(alts[0], 'confidence', None)
+                            raw_words = getattr(alts[0], 'words', None)
+                            if raw_words:
+                                words_list = [
+                                    {"word": getattr(w, 'word', getattr(w, 'punctuated_word', '')),
+                                     "start": getattr(w, 'start', 0.0),
+                                     "end": getattr(w, 'end', 0.0),
+                                     "confidence": getattr(w, 'confidence', 0.0)}
+                                    for w in raw_words
+                                ]
+
+                    if transcript:
+                        if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+                            try:
+                                speech_service.add_stt_result(
+                                    session_id, transcript, is_final,
+                                    confidence=confidence, words=words_list
+                                )
+                            except Exception as e:
+                                print(f"[SpeechAnalysis] 데이터 전달 오류: {e}")
+
+                        if is_final and SPACING_CORRECTION_AVAILABLE and _spacing_corrector:
+                            corrected = _spacing_corrector.correct(transcript)
+                            if corrected and corrected.strip():
+                                transcript = corrected
+
+                        asyncio.create_task(broadcast_stt_result(session_id, {
+                            "type": "stt_result",
+                            "transcript": transcript,
+                            "is_final": is_final,
+                            "timestamp": time.time()
+                        }))
+
+                except Exception as e:
+                    print(f"[STT] 메시지 처리 오류: {e}")
+
+            def on_error(error) -> None:
+                print(f"[STT] Deepgram 오류: {error}")
+
+            dg_connection.on(EventType.OPEN, lambda _: print(f"[STT] 세션 {session_id} Deepgram 연결됨"))
+            dg_connection.on(EventType.MESSAGE, on_message)
+            dg_connection.on(EventType.CLOSE, lambda _: print(f"[STT] 세션 {session_id} Deepgram 연결 종료"))
+            dg_connection.on(EventType.ERROR, on_error)
+
+            state.stt_connections[session_id] = dg_connection
+            print(f"[STT] 세션 {session_id} 오디오 처리 시작")
+
+            try:
+                while True:
+                    frame = await track.recv()
+                    try:
+                        audio_data = frame.to_ndarray()
+                        if audio_data.dtype == np.float32 or audio_data.dtype == np.float64:
+                            audio_bytes = (audio_data * 32767).astype(np.int16).tobytes()
+                        else:
+                            audio_bytes = audio_data.astype(np.int16).tobytes()
+
+                        # → Deepgram STT 전송
+                        from deepgram.extensions.types.sockets import ListenV1MediaMessage
+                        dg_connection.send_media(ListenV1MediaMessage(audio_bytes))
+
+                        # → 녹화 파이프 전송
+                        if recording_active:
+                            try:
+                                await recording_service.write_audio_frame(session_id, audio_bytes)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"[STT] 오디오 처리 종료: {e}")
+            finally:
+                state.stt_connections.pop(session_id, None)
+
+    except Exception as e:
+        print(f"[STT] Deepgram 연결 실패: {e}")
+        if WHISPER_AVAILABLE and whisper_service:
+            print(f"🔄 [STT] 세션 {session_id[:8]}... Deepgram 실패 → Whisper 폴백 전환")
+            await process_audio_with_whisper(
+                track, session_id, whisper_service,
+                broadcast_stt_result,
+                speech_service=speech_service if SPEECH_ANALYSIS_AVAILABLE else None,
+            )
+        else:
+            print(f"⚠️ [STT] 세션 {session_id[:8]}... Whisper 폴백도 불가 — STT 비활성화")
 
 
 async def _process_audio_with_stt(track, session_id: str):
@@ -3883,6 +4166,118 @@ async def broadcast_stt_result(session_id: str, data: dict):
     # 끊어진 연결 제거
     for ws in dead_connections:
         state.websocket_connections[session_id].remove(ws)
+
+
+# ========== 녹화 / 트랜스코딩 API ==========
+
+@app.post("/api/recording/{session_id}/start")
+async def start_recording(session_id: str, current_user=Depends(get_current_user)):
+    """면접 녹화 시작"""
+    if not RECORDING_AVAILABLE or not recording_service:
+        raise HTTPException(status_code=503, detail="녹화 서비스 비활성화 (GStreamer/FFmpeg 미설치)")
+    try:
+        meta = recording_service.start_recording(session_id)
+        return {"status": "recording", "recording_id": meta.recording_id, "session_id": session_id}
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/recording/{session_id}/stop")
+async def stop_recording(session_id: str, current_user=Depends(get_current_user)):
+    """
+    면접 녹화 중지 + 비동기 트랜스코딩 태스크 시작.
+    GStreamer/FFmpeg 파이프를 닫고 Celery를 통해 먹싱+트랜스코딩합니다.
+    """
+    if not RECORDING_AVAILABLE or not recording_service:
+        raise HTTPException(status_code=503, detail="녹화 서비스 비활성화")
+
+    try:
+        meta = await recording_service.stop_recording(session_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    # Celery 트랜스코딩 태스크 비동기 실행
+    task_result = None
+    if CELERY_AVAILABLE and meta.raw_video_path:
+        try:
+            from celery_tasks import transcode_recording_task
+            task = transcode_recording_task.delay(
+                session_id=session_id,
+                video_path=meta.raw_video_path,
+                audio_path=meta.raw_audio_path or "",
+            )
+            task_result = {"task_id": task.id, "status": "queued"}
+            print(f"📤 [Recording] 트랜스코딩 태스크 전송: {task.id}")
+        except Exception as e:
+            print(f"⚠️ [Recording] Celery 태스크 전송 실패: {e}")
+            task_result = {"error": str(e)}
+
+    return {
+        **meta.to_dict(),
+        "transcode_task": task_result,
+    }
+
+
+@app.get("/api/recording/{session_id}")
+async def get_recording_info(session_id: str, current_user=Depends(get_current_user)):
+    """녹화 상태 및 메타데이터 조회"""
+    if not RECORDING_AVAILABLE or not recording_service:
+        raise HTTPException(status_code=503, detail="녹화 서비스 비활성화")
+
+    meta = recording_service.get_recording(session_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="녹화 정보 없음")
+    return meta.to_dict()
+
+
+@app.get("/api/recording/{session_id}/download")
+async def download_recording(session_id: str, current_user=Depends(get_current_user)):
+    """트랜스코딩 완료된 녹화 파일 다운로드"""
+    if not RECORDING_AVAILABLE or not recording_service:
+        raise HTTPException(status_code=503, detail="녹화 서비스 비활성화")
+
+    meta = recording_service.get_recording(session_id)
+    if not meta:
+        raise HTTPException(status_code=404, detail="녹화 정보 없음")
+
+    # 트랜스코딩 완료 파일 확인
+    file_path = meta.transcoded_path or meta.raw_video_path
+    if not file_path or not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="녹화 파일 없음 (트랜스코딩 미완료)")
+
+    filename = f"interview_{session_id[:8]}.mp4"
+    return FileResponse(
+        path=file_path,
+        filename=filename,
+        media_type="video/mp4",
+    )
+
+
+@app.delete("/api/recording/{session_id}")
+async def delete_recording(session_id: str, current_user=Depends(get_current_user)):
+    """녹화 파일 삭제"""
+    if not RECORDING_AVAILABLE or not recording_service:
+        raise HTTPException(status_code=503, detail="녹화 서비스 비활성화")
+
+    deleted = recording_service.delete_recording(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="녹화 정보 없음")
+    return {"status": "deleted", "session_id": session_id}
+
+
+@app.get("/api/recording/status")
+async def get_recording_service_status():
+    """녹화 서비스 상태 확인"""
+    return {
+        "available": RECORDING_AVAILABLE,
+        "media_tool": MEDIA_TOOL if RECORDING_AVAILABLE else None,
+        "gstreamer": _GST if RECORDING_AVAILABLE else False,
+        "ffmpeg": _FFM if RECORDING_AVAILABLE else False,
+        "active_recordings": len([
+            m for m in (recording_service.get_all_recordings() if RECORDING_AVAILABLE and recording_service else [])
+            if m.get("status") == "recording"
+        ]),
+    }
 
 
 # ========== WebSocket API (실시간 STT/이벤트) ==========
@@ -4711,6 +5106,11 @@ async def on_shutdown():
     await asyncio.gather(*coros, return_exceptions=True)
     state.pcs.clear()
     
+    # 녹화 프로세스 정리
+    if RECORDING_AVAILABLE and recording_service:
+        await recording_service.cleanup()
+        print("✅ [Shutdown] 녹화 프로세스 정리 완료")
+    
     # ThreadPoolExecutor 정리
     print("🔄 [Shutdown] ThreadPoolExecutor 종료 중...")
     LLM_EXECUTOR.shutdown(wait=False)
@@ -4759,6 +5159,8 @@ if __name__ == "__main__":
     print(f"    - 감정분석: {'✅ 활성화' if EMOTION_AVAILABLE else '❌ 비활성화'}")
     print(f"    - Redis: {'✅ 활성화' if REDIS_AVAILABLE else '❌ 비활성화'}")
     print(f"    - Celery: {'✅ 활성화' if CELERY_AVAILABLE else '❌ 비활성화'}")
+    _rec_tool = MEDIA_TOOL.upper() if RECORDING_AVAILABLE else "미설치"
+    print(f"    - 녹화: {'✅ ' + _rec_tool if RECORDING_AVAILABLE else '❌ 비활성화 (GStreamer/FFmpeg 필요)'}")
     print("=" * 70)
     print("  📋 Celery Worker 시작 명령어 (별도 터미널에서 실행):")
     print("     # 모든 큐 처리")

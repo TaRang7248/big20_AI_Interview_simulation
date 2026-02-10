@@ -8,12 +8,10 @@
 | # | SAD 설계 항목 | 설계 기술 | 실제 구현 | 판정 |
 |---|---|---|---|---|
 | 1 | API Gateway | NGINX / Traefik | **없음** — FastAPI 직접 서빙 | ❌ 미구현 |
-| 2 | 미디어 서버 | aiortc / GStreamer | aiortc만 사용, **녹화·트랜스코딩 없음** | 🟡 부분 |
-| 3 | 감정 분석 엔진 | DeepFace + Hume AI | DeepFace ✔, **Hume는 TTS 전용** (감정분석 아님) | 🟡 부분 |
-| 4 | 벡터 DB | Pinecone / pgvector | **pgvector만** 사용 (Pinecone 없음) | 🟡 부분 |
-| 5 | 객체 저장소 | GCP Cloud Storage | **없음** — 로컬 파일시스템 | ❌ 미구현 |
-| 6 | SFU 아키텍처 | 서버 사이드 미디어 포킹 | 오디오→STT, 비디오→DeepFace 포크 ✔, **다자간 포워딩 없음** | 🟡 부분 |
-| 7 | 비동기 파이프라인 태스크 | 리포트·비디오 인코딩·배치 | 리포트·배치 ✔, **비디오 인코딩 없음** | ✅ 구현 |
+| 2 | 감정 분석 엔진 | DeepFace + Hume AI | DeepFace ✔, **Hume는 TTS 전용** (감정분석 아님) | 🟡 부분 |
+| 3 | 객체 저장소 | GCP Cloud Storage | **없음** — 로컬 파일시스템 | ❌ 미구현 |
+| 4 | SFU 아키텍처 | 서버 사이드 미디어 포킹 | 오디오→STT, 비디오→DeepFace 포크 ✔, 녹화 분기 ✔, **다자간 포워딩 없음** (1:1 면접 전용) | ✅ 해결 |
+| 5 | 비동기 파이프라인 태스크 | 리포트·비디오 인코딩·배치 | 리포트·배치 ✔, 비디오 인코딩(Celery+GStreamer) ✔ | ✅ 구현 |
 
 ---
 
