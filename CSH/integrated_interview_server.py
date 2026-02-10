@@ -462,6 +462,37 @@ except ImportError as e:
     print(f"⚠️ 이벤트 버스 비활성화: {e}")
 
 
+# ========== REQ-F-006: 발화 분석 / 시선 추적 / PDF 리포트 ==========
+try:
+    from speech_analysis_service import SpeechAnalysisService
+    speech_service = SpeechAnalysisService()
+    SPEECH_ANALYSIS_AVAILABLE = True
+    print("✅ 발화 분석 서비스 (SpeechAnalysisService) 활성화됨")
+except ImportError as e:
+    speech_service = None
+    SPEECH_ANALYSIS_AVAILABLE = False
+    print(f"⚠️ 발화 분석 서비스 비활성화: {e}")
+
+try:
+    from gaze_tracking_service import GazeTrackingService
+    gaze_service = GazeTrackingService()
+    GAZE_TRACKING_AVAILABLE = True
+    print("✅ 시선 추적 서비스 (GazeTrackingService) 활성화됨")
+except ImportError as e:
+    gaze_service = None
+    GAZE_TRACKING_AVAILABLE = False
+    print(f"⚠️ 시선 추적 서비스 비활성화: {e}")
+
+try:
+    from pdf_report_service import generate_pdf_report
+    PDF_REPORT_AVAILABLE = True
+    print("✅ PDF 리포트 서비스 활성화됨")
+except ImportError as e:
+    generate_pdf_report = None
+    PDF_REPORT_AVAILABLE = False
+    print(f"⚠️ PDF 리포트 서비스 비활성화: {e}")
+
+
 # ========== 전역 상태 관리 ==========
 
 # 회원 정보 저장소 (DB 연결 실패 시 폴백용)
@@ -1827,6 +1858,18 @@ async def analyze_emotions(track, session_id: str):
                 item = res[0] if isinstance(res, list) else res
                 scores = item.get("emotion", {})
                 
+                # 시선 추적: DeepFace의 face region 활용
+                if GAZE_TRACKING_AVAILABLE and gaze_service:
+                    try:
+                        face_region = item.get("region")
+                        if face_region:
+                            frame_h, frame_w = img.shape[:2]
+                            gaze_service.add_face_detection(
+                                session_id, face_region, frame_w, frame_h
+                            )
+                    except Exception as e:
+                        print(f"[GazeTracking] 데이터 전달 오류: {e}")
+                
                 keys_map = {
                     "happy": "happy", "sad": "sad", "angry": "angry",
                     "surprise": "surprise", "fear": "fear", 
@@ -3180,6 +3223,20 @@ async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_us
     # 사용자 턴 종료 처리 (개입 시스템)
     turn_stats = intervention_manager.end_user_turn(request.session_id)
     
+    # 발화 분석 턴 종료
+    if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+        try:
+            speech_service.end_turn(request.session_id, request.message)
+        except Exception as e:
+            print(f"[SpeechAnalysis] 턴 종료 오류: {e}")
+    
+    # 시선 추적 턴 종료
+    if GAZE_TRACKING_AVAILABLE and gaze_service:
+        try:
+            gaze_service.end_turn(request.session_id)
+        except Exception as e:
+            print(f"[GazeTracking] 턴 종료 오류: {e}")
+    
     # AI 응답 생성
     response = await interviewer.generate_response(
         request.session_id,
@@ -3191,6 +3248,22 @@ async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_us
     if not response.startswith("면접이 종료"):
         keywords = intervention_manager.extract_question_keywords(response)
         intervention_manager.start_user_turn(request.session_id, keywords)
+        
+        # 발화 분석 턴 시작
+        if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+            try:
+                turn_idx = session.get("current_question_idx", 0)
+                speech_service.start_turn(request.session_id, turn_idx)
+            except Exception as e:
+                print(f"[SpeechAnalysis] 턴 시작 오류: {e}")
+        
+        # 시선 추적 턴 시작
+        if GAZE_TRACKING_AVAILABLE and gaze_service:
+            try:
+                turn_idx = session.get("current_question_idx", 0)
+                gaze_service.start_turn(request.session_id, turn_idx)
+            except Exception as e:
+                print(f"[GazeTracking] 턴 시작 오류: {e}")
     
     # TTS 생성 (선택적)
     audio_url = None
@@ -3234,6 +3307,18 @@ async def chat_with_intervention(request: ChatRequestWithIntervention, current_u
     # 사용자 턴 종료 처리
     turn_stats = intervention_manager.end_user_turn(request.session_id)
     
+    # 발화 분석 / 시선 추적 턴 종료
+    if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+        try:
+            speech_service.end_turn(request.session_id, request.message)
+        except Exception:
+            pass
+    if GAZE_TRACKING_AVAILABLE and gaze_service:
+        try:
+            gaze_service.end_turn(request.session_id)
+        except Exception:
+            pass
+    
     # 개입으로 인한 강제 종료인 경우 로깅
     if request.was_interrupted:
         print(f"⚡ [Chat] 세션 {request.session_id[:8]}... 개입으로 인한 답변 종료 ({request.intervention_type})")
@@ -3250,6 +3335,20 @@ async def chat_with_intervention(request: ChatRequestWithIntervention, current_u
     if not response.startswith("면접이 종료"):
         question_keywords = intervention_manager.extract_question_keywords(response)
         intervention_manager.start_user_turn(request.session_id, question_keywords)
+        
+        # 발화 분석 / 시선 추적 턴 시작
+        if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+            try:
+                turn_idx = session.get("current_question_idx", 0)
+                speech_service.start_turn(request.session_id, turn_idx)
+            except Exception:
+                pass
+        if GAZE_TRACKING_AVAILABLE and gaze_service:
+            try:
+                turn_idx = session.get("current_question_idx", 0)
+                gaze_service.start_turn(request.session_id, turn_idx)
+            except Exception:
+                pass
     
     # TTS 생성
     audio_url = None
@@ -3311,7 +3410,98 @@ async def get_report(session_id: str, current_user: Dict = Depends(get_current_u
             "all_evaluations": evaluations
         }
     
+    # REQ-F-006: 발화 분석 데이터 추가
+    if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+        try:
+            speech_stats = speech_service.get_session_stats(session_id)
+            if speech_stats:
+                report["speech_analysis"] = speech_stats.to_dict()
+        except Exception as e:
+            print(f"[Report] 발화 분석 데이터 조회 오류: {e}")
+    
+    # REQ-F-006: 시선 추적 데이터 추가
+    if GAZE_TRACKING_AVAILABLE and gaze_service:
+        try:
+            gaze_stats = gaze_service.get_session_stats(session_id)
+            if gaze_stats:
+                report["gaze_analysis"] = gaze_stats.to_dict()
+        except Exception as e:
+            print(f"[Report] 시선 추적 데이터 조회 오류: {e}")
+    
     return report
+
+
+# ========== PDF Report Download API ==========
+
+@app.get("/api/report/{session_id}/pdf")
+async def get_report_pdf(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """면접 리포트 PDF 다운로드"""
+    if not PDF_REPORT_AVAILABLE or not generate_pdf_report:
+        raise HTTPException(status_code=501, detail="PDF 리포트 서비스가 비활성화되어 있습니다.")
+    
+    # 기존 리포트 생성 로직 재사용
+    session = state.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    generator = InterviewReportGenerator()
+    emotion_stats = None
+    if state.last_emotion:
+        emotion_stats = state.last_emotion
+    
+    report = generator.generate_report(session_id, emotion_stats)
+    
+    # 평가 결과 포함
+    evaluations = session.get("evaluations", [])
+    if evaluations:
+        avg_scores = {
+            "specificity": 0, "logic": 0, "technical": 0, "star": 0, "communication": 0
+        }
+        for ev in evaluations:
+            for key in avg_scores:
+                avg_scores[key] += ev.get("scores", {}).get(key, 0)
+        if len(evaluations) > 0:
+            for key in avg_scores:
+                avg_scores[key] = round(avg_scores[key] / len(evaluations), 1)
+        report["llm_evaluation"] = {
+            "answer_count": len(evaluations),
+            "average_scores": avg_scores,
+            "total_average": round(sum(avg_scores.values()) / 5, 1),
+            "all_evaluations": evaluations
+        }
+    
+    # 발화 분석 데이터 추가
+    if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+        try:
+            speech_stats = speech_service.get_session_stats(session_id)
+            if speech_stats:
+                report["speech_analysis"] = speech_stats.to_dict()
+        except Exception:
+            pass
+    
+    # 시선 추적 데이터 추가
+    if GAZE_TRACKING_AVAILABLE and gaze_service:
+        try:
+            gaze_stats = gaze_service.get_session_stats(session_id)
+            if gaze_stats:
+                report["gaze_analysis"] = gaze_stats.to_dict()
+        except Exception:
+            pass
+    
+    try:
+        pdf_bytes = generate_pdf_report(report)
+        
+        from fastapi.responses import Response
+        filename = f"interview_report_{session_id[:8]}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PDF 생성 오류: {str(e)}")
 
 
 # ========== Evaluate API (LLM 기반 답변 평가) ==========
@@ -3485,19 +3675,56 @@ async def _process_audio_with_stt(track, session_id: str):
                 try:
                     transcript = None
                     is_final = False
+                    words_list = None
+                    confidence = None
                     
                     if hasattr(message, 'results') and getattr(message.results, 'channels', None):
                         is_final = getattr(message.results, 'is_final', False)
                         alts = message.results.channels[0].alternatives
                         if alts:
                             transcript = alts[0].transcript
+                            confidence = getattr(alts[0], 'confidence', None)
+                            # word-level 타이밍/confidence 추출
+                            raw_words = getattr(alts[0], 'words', None)
+                            if raw_words:
+                                words_list = [
+                                    {
+                                        "word": getattr(w, 'word', getattr(w, 'punctuated_word', '')),
+                                        "start": getattr(w, 'start', 0.0),
+                                        "end": getattr(w, 'end', 0.0),
+                                        "confidence": getattr(w, 'confidence', 0.0),
+                                    }
+                                    for w in raw_words
+                                ]
                     elif hasattr(message, 'channel') and getattr(message.channel, 'alternatives', None):
                         is_final = getattr(message, 'is_final', True)
                         alts = message.channel.alternatives
                         if alts:
                             transcript = alts[0].transcript
+                            confidence = getattr(alts[0], 'confidence', None)
+                            raw_words = getattr(alts[0], 'words', None)
+                            if raw_words:
+                                words_list = [
+                                    {
+                                        "word": getattr(w, 'word', getattr(w, 'punctuated_word', '')),
+                                        "start": getattr(w, 'start', 0.0),
+                                        "end": getattr(w, 'end', 0.0),
+                                        "confidence": getattr(w, 'confidence', 0.0),
+                                    }
+                                    for w in raw_words
+                                ]
                     
                     if transcript:
+                        # 발화 분석 서비스에 STT 결과 전달
+                        if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+                            try:
+                                speech_service.add_stt_result(
+                                    session_id, transcript, is_final,
+                                    confidence=confidence, words=words_list
+                                )
+                            except Exception as e:
+                                print(f"[SpeechAnalysis] 데이터 전달 오류: {e}")
+                        
                         # 최종 결과에 한국어 띄어쓰기 보정 적용
                         if is_final and SPACING_CORRECTION_AVAILABLE and _spacing_corrector:
                             corrected = _spacing_corrector.correct(transcript)
