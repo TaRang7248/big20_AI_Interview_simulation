@@ -493,6 +493,25 @@ except ImportError as e:
     print(f"⚠️ PDF 리포트 서비스 비활성화: {e}")
 
 
+# ========== Whisper 오프라인 STT 폴백 ==========
+try:
+    from whisper_stt_service import (
+        WhisperSTTService, is_whisper_available, process_audio_with_whisper
+    )
+    if is_whisper_available():
+        whisper_service = WhisperSTTService()
+        WHISPER_AVAILABLE = True
+        print("✅ Whisper 오프라인 STT 폴백 활성화됨")
+    else:
+        whisper_service = None
+        WHISPER_AVAILABLE = False
+        print("⚠️ Whisper 모델 미설치 (faster-whisper 또는 openai-whisper 필요)")
+except ImportError as e:
+    whisper_service = None
+    WHISPER_AVAILABLE = False
+    print(f"⚠️ Whisper STT 폴백 비활성화: {e}")
+
+
 # ========== 전역 상태 관리 ==========
 
 # 회원 정보 저장소 (DB 연결 실패 시 폴백용)
@@ -3615,11 +3634,19 @@ async def webrtc_offer(offer: Offer):
                 pc.addTrack(track)
                 asyncio.create_task(analyze_emotions(track, session_id))
             else:
-                # 오디오 트랙을 Deepgram STT로 라우팅
+                # 오디오 트랙 STT 라우팅: Deepgram(우선) → Whisper(폴백) → 소비만
                 if DEEPGRAM_AVAILABLE:
                     asyncio.create_task(_process_audio_with_stt(track, session_id))
+                elif WHISPER_AVAILABLE and whisper_service:
+                    # Deepgram 비활성화 시 Whisper 오프라인 폴백
+                    print(f"🔄 [STT] 세션 {session_id[:8]}... Whisper 오프라인 폴백 사용")
+                    asyncio.create_task(process_audio_with_whisper(
+                        track, session_id, whisper_service,
+                        broadcast_stt_result,
+                        speech_service=speech_service if SPEECH_ANALYSIS_AVAILABLE else None,
+                    ))
                 else:
-                    # Deepgram 없으면 MediaBlackhole로 소비
+                    # STT 엔진 없으면 MediaBlackhole로 소비
                     bh = MediaBlackhole()
                     asyncio.create_task(_consume_audio(track, bh))
         
@@ -3777,6 +3804,16 @@ async def _process_audio_with_stt(track, session_id: str):
                 
     except Exception as e:
         print(f"[STT] Deepgram 연결 실패: {e}")
+        # Deepgram 런타임 실패 시 Whisper 폴백 시도
+        if WHISPER_AVAILABLE and whisper_service:
+            print(f"🔄 [STT] 세션 {session_id[:8]}... Deepgram 실패 → Whisper 폴백 전환")
+            await process_audio_with_whisper(
+                track, session_id, whisper_service,
+                broadcast_stt_result,
+                speech_service=speech_service if SPEECH_ANALYSIS_AVAILABLE else None,
+            )
+        else:
+            print(f"⚠️ [STT] 세션 {session_id[:8]}... Whisper 폴백도 불가 — STT 비활성화")
 
 
 async def broadcast_stt_result(session_id: str, data: dict):
@@ -3970,6 +4007,7 @@ async def get_status():
             "llm": LLM_AVAILABLE,
             "tts": TTS_AVAILABLE,
             "stt": DEEPGRAM_AVAILABLE,
+            "stt_whisper_fallback": WHISPER_AVAILABLE,
             "stt_spacing_correction": SPACING_CORRECTION_AVAILABLE,
             "rag": RAG_AVAILABLE,
             "emotion": EMOTION_AVAILABLE,
@@ -3982,6 +4020,29 @@ async def get_status():
         "celery_status": check_celery_status() if CELERY_AVAILABLE else {"status": "disabled"},
         "event_bus_stats": event_bus.get_stats() if EVENT_BUS_AVAILABLE and event_bus else {"status": "disabled"},
     }
+
+
+@app.get("/api/stt/status")
+async def get_stt_status():
+    """STT 서비스 상태 상세 조회"""
+    status = {
+        "primary": {
+            "engine": "Deepgram (Nova-3)",
+            "available": DEEPGRAM_AVAILABLE,
+            "type": "cloud",
+            "language": "ko",
+        },
+        "fallback": {
+            "engine": "Whisper (offline)",
+            "available": WHISPER_AVAILABLE,
+            "type": "local",
+        },
+        "active_engine": "deepgram" if DEEPGRAM_AVAILABLE else ("whisper" if WHISPER_AVAILABLE else "none"),
+        "spacing_correction": SPACING_CORRECTION_AVAILABLE,
+    }
+    if WHISPER_AVAILABLE and whisper_service:
+        status["fallback"].update(whisper_service.get_status())
+    return status
 
 
 # ========== 이벤트 버스 모니터링 API ==========
