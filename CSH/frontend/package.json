@@ -3,10 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev\" \"celery -A your_app worker --loglevel=info\"",
+    "dev": "concurrently \"next dev\" \"cd .. && celery -A celery_app worker --loglevel=info -P solo\"",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "next lint"
   },
   "dependencies": {
     "@monaco-editor/react": "^4.7.0",
