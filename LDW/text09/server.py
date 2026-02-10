@@ -1,489 +1,497 @@
+import os
+import uuid
+import shutil
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from flask import Flask, request, jsonify, send_from_directory
-import os
-from werkzeug.utils import secure_filename
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import Optional, List
 from dotenv import load_dotenv
+import google.generativeai as genai
+import uvicorn
 
-# Load .env from project root
+# Load .env
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env'))
 
-app = Flask(__name__, static_url_path='', static_folder='.')
-
-# Upload Configuration
-UPLOAD_FOLDER = 'uploads/resumes'
-ALLOWED_EXTENSIONS = {'pdf'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
-
-def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# DB Connection settings
+# Configuration
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_NAME = os.getenv("DB_NAME", "interview_db")
 DB_USER = os.getenv("DB_USER", "postgres")
-DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579") # Default fallback or from env
+DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579")
 DB_PORT = os.getenv("DB_PORT", "5432")
+UPLOAD_FOLDER = 'uploads/resumes'
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Initialize Gemini
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel('gemini-pro')
+else:
+    print("WARNING: GEMINI_API_KEY not found in .env. LLM features will not work.")
+    model = None
+
+# Ensure upload directory exists
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+app = FastAPI()
+
+# CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --- Database Helper ---
 def get_db_connection():
-    hosts = [DB_HOST, "127.0.0.1", "localhost"]
-    last_error = None
-    
-    for host in hosts:
-        try:
-            print(f"Attempting to connect to DB at {host}...")
-            conn = psycopg2.connect(
-                host=host,
-                database=DB_NAME,
-                user=DB_USER,
-                password=DB_PASS,
-                port=DB_PORT,
-                connect_timeout=3
-            )
-            print(f"Successfully connected to DB at {host}")
-            return conn
-        except psycopg2.OperationalError as e:
-            last_error = e
-            print(f"Failed to connect to {host}: {e}")
-            
-    print(f"All connection attempts failed. Last error: {last_error}")
-    print(f"Connection Details: Host={DB_HOST}, DB={DB_NAME}, User={DB_USER}, Port={DB_PORT}")
-    raise last_error
-
-
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASS,
+            port=DB_PORT,
+            connect_timeout=3
+        )
+        return conn
+    except psycopg2.OperationalError as e:
+        print(f"DB Connection Failed: {e}")
+        raise HTTPException(status_code=500, detail="Database connection failed")
 
 def init_db():
-    conn = get_db_connection()
-    c = conn.cursor()
-    # Create users table if not exists
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id_name TEXT PRIMARY KEY,
-            pw TEXT NOT NULL,
-            name TEXT NOT NULL,
-            dob TEXT,
-            gender TEXT,
-            email TEXT,
-            address TEXT,
-            phone TEXT,
-            type TEXT DEFAULT 'applicant'
-        )
-    ''')
-
-    print(f"Database initialized/connected to {DB_NAME} at {DB_HOST}")
-    
-    # Create interview_announcement table if not exists
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS interview_announcement (
-            id SERIAL PRIMARY KEY,
-            title TEXT NOT NULL,
-            job TEXT,
-            deadline TEXT,
-            content TEXT,
-            id_name TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (id_name) REFERENCES users(id_name)
-        )
-    ''')
-    
-    
-    # Create interview_information table if not exists
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS interview_information (
-            id SERIAL PRIMARY KEY,
-            id_name TEXT,
-            job TEXT,
-            resume TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (id_name) REFERENCES users(id_name)
-        )
-    ''')
-
-    # Create interview_answer table if not exists
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS interview_answer (
-            id SERIAL PRIMARY KEY,
-            question TEXT NOT NULL,
-            answer TEXT NOT NULL
-        )
-    ''')
-
-    
-    # Migration: Rename columns if they exist with old names
-    try:
-        # Check if 'id' exists in users and rename to 'id_name'
-        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='users' AND column_name='id'")
-        if c.fetchone():
-            c.execute("ALTER TABLE users RENAME COLUMN id TO id_name")
-            print("Migrated users table: id -> id_name")
-
-        # Check if 'writer_id' exists in interview_announcement and rename to 'id_name'
-        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_announcement' AND column_name='writer_id'")
-        if c.fetchone():
-            c.execute("ALTER TABLE interview_announcement RENAME COLUMN writer_id TO id_name")
-            print("Migrated interview_announcement table: writer_id -> id_name")
-
-        # Check if 'job' exists in interview_announcement
-        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_announcement' AND column_name='job'")
-        if not c.fetchone():
-            c.execute("ALTER TABLE interview_announcement ADD COLUMN job TEXT")
-            print("Migrated interview_announcement table: Added job column")
-            
-        conn.commit()
-    except Exception as e:
-        print(f"Migration Warning: {e}")
-        conn.rollback()
-
-    conn.commit()
-    conn.close()
-
-
-@app.route('/')
-def home():
-    return send_from_directory('.', 'index.html')
-
-@app.route('/<path:path>')
-def serve_static(path):
-    return send_from_directory('.', path)
-
-@app.route('/api/register', methods=['POST'])
-def register():
-    data = request.json
     try:
         conn = get_db_connection()
         c = conn.cursor()
         
-        # Check if ID exists
-        c.execute('SELECT id_name FROM users WHERE id_name = %s', (data['id_name'],))
+        # Existing tables
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id_name TEXT PRIMARY KEY,
+                pw TEXT NOT NULL,
+                name TEXT NOT NULL,
+                dob TEXT,
+                gender TEXT,
+                email TEXT,
+                address TEXT,
+                phone TEXT,
+                type TEXT DEFAULT 'applicant'
+            )
+        ''')
 
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS interview_announcement (
+                id SERIAL PRIMARY KEY,
+                title TEXT NOT NULL,
+                job TEXT,
+                deadline TEXT,
+                content TEXT,
+                id_name TEXT REFERENCES users(id_name),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS interview_information (
+                id SERIAL PRIMARY KEY,
+                id_name TEXT REFERENCES users(id_name),
+                job TEXT,
+                resume TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS interview_answer (
+                id SERIAL PRIMARY KEY,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL
+            )
+        ''')
+
+        # NEW: Interview_Progress Table
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS Interview_Progress (
+                id SERIAL PRIMARY KEY,
+                Interview_Number TEXT NOT NULL,
+                Applicant_Name TEXT NOT NULL,
+                Job_Title TEXT,
+                Create_Question TEXT,
+                Question_answer TEXT,
+                answer_time TEXT,
+                Answer_Evaluation TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        print("Database initialized successfully.")
+    except Exception as e:
+        print(f"DB Init Error: {e}")
+    finally:
+        if conn: conn.close()
+
+# --- Pydantic Models ---
+class UserRegister(BaseModel):
+    id_name: str
+    pw: str
+    name: str
+    dob: Optional[str] = None
+    gender: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    type: str = 'applicant'
+
+class UserLogin(BaseModel):
+    id_name: str
+    pw: str
+
+class PasswordVerify(BaseModel):
+    id_name: str
+    pw: str
+
+class PasswordChange(BaseModel):
+    id_name: str
+    new_pw: str
+
+class UserUpdate(BaseModel):
+    pw: str
+    email: Optional[str]
+    phone: Optional[str]
+    address: Optional[str]
+
+class JobCreate(BaseModel):
+    title: str
+    job: Optional[str] = ''
+    deadline: Optional[str] = ''
+    content: Optional[str] = ''
+    id_name: Optional[str] = None
+
+class JobUpdate(BaseModel):
+    title: str
+    job: Optional[str] = ''
+    deadline: Optional[str] = ''
+    content: Optional[str] = ''
+    id_name: Optional[str] = None # For verification
+
+class StartInterviewRequest(BaseModel):
+    id_name: str
+    job_title: str
+
+class AnswerSubmission(BaseModel):
+    interview_number: str
+    applicant_name: str
+    job_title: str
+    question: str
+    answer: str
+    answer_time: str
+
+# --- API Endpoints ---
+
+@app.post("/api/register")
+def register(user: UserRegister):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT id_name FROM users WHERE id_name = %s', (user.id_name,))
         if c.fetchone():
-            return jsonify({'success': False, 'message': '이미 존재하는 아이디입니다.'}), 400
-            
+            raise HTTPException(status_code=400, detail="이미 존재하는 아이디입니다.")
+        
         c.execute('''
             INSERT INTO users (id_name, pw, name, dob, gender, email, address, phone, type)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            data['id_name'], 
-            data['pw'], 
-            data['name'], 
-            data.get('dob'), 
-            data.get('gender'), 
-            data.get('email'), 
-            data.get('address'), 
-            data.get('phone'), 
-            data.get('type', 'applicant')
-        ))
+        ''', (user.id_name, user.pw, user.name, user.dob, user.gender, user.email, user.address, user.phone, user.type))
         conn.commit()
-        return jsonify({'success': True, 'message': '회원가입 완료'})
+        return {"success": True, "message": "회원가입 완료"}
     except Exception as e:
         print(f"Register Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+        raise HTTPException(status_code=500, detail=str(e))
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/login', methods=['POST'])
-def login():
-    data = request.json
+@app.post("/api/login")
+def login(user: UserLogin):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # User lookup logic
-        # Note: In production, password should be hashed. Plain text for this demo.
-        c.execute('SELECT * FROM users WHERE id_name = %s AND pw = %s', (data['id_name'], data['pw']))
-
+        c.execute('SELECT * FROM users WHERE id_name = %s AND pw = %s', (user.id_name, user.pw))
         row = c.fetchone()
-        
         if row:
-            # pyscopg2 RealDictCursor returns a dict-like object
-            user = dict(row)
-            return jsonify({'success': True, 'user': user})
+            return {"success": True, "user": dict(row)}
         else:
-            return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
-            
-    except Exception as e:
-        print(f"Login Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+            raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 일치하지 않습니다.")
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/verify-password', methods=['POST'])
-def verify_password():
-    data = request.json
+@app.post("/api/verify-password")
+def verify_password(data: PasswordVerify):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor()
-        
-        # Verify Password
-        c.execute('SELECT pw FROM users WHERE id_name = %s', (data['id_name'],))
-
+        c.execute('SELECT pw FROM users WHERE id_name = %s', (data.id_name,))
         row = c.fetchone()
-        
-        if row and row[0] == data['pw']:
-             return jsonify({'success': True})
+        if row and row[0] == data.pw:
+            return {"success": True}
         else:
-             return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
-
-    except Exception as e:
-        print(f"Verify Password Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+            raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/user/<id_name>', methods=['GET'])
-def get_user_info(id_name):
-
+@app.get("/api/user/{id_name}")
+def get_user_info(id_name: str):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         c.execute('SELECT id_name, name, dob, gender, email, address, phone, type FROM users WHERE id_name = %s', (id_name,))
-
         row = c.fetchone()
-        
         if row:
-            user = dict(row)
-            return jsonify({'success': True, 'user': user})
+            return {"success": True, "user": dict(row)}
         else:
-            return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
-    except Exception as e:
-        print(f"Get User Info Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/user/<id_name>', methods=['PUT'])
-def update_user_info(id_name):
-
-    data = request.json
+@app.put("/api/user/{id_name}")
+def update_user_info(id_name: str, data: UserUpdate):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor()
-        
-        # 1. Verify Password
         c.execute('SELECT pw FROM users WHERE id_name = %s', (id_name,))
-
         row = c.fetchone()
         if not row:
-             return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+        if row[0] != data.pw:
+            raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
         
-        if row[0] != data['pw']:
-            return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
-
-        # 2. Update Info
         c.execute('''
-            UPDATE users 
-            SET email = %s, phone = %s, address = %s
-            WHERE id_name = %s
-        ''', (data['email'], data['phone'], data['address'], id_name))
-
+            UPDATE users SET email = %s, phone = %s, address = %s WHERE id_name = %s
+        ''', (data.email, data.phone, data.address, id_name))
         conn.commit()
-        
-        return jsonify({'success': True, 'message': '정보가 수정되었습니다.'})
-
-    except Exception as e:
-        print(f"Update User Info Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+        return {"success": True, "message": "정보가 수정되었습니다."}
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/change-password', methods=['POST'])
-def change_password():
-    data = request.json
+@app.post("/api/change-password")
+def change_password(data: PasswordChange):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor()
-        
-        # Update Password
-        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (data['new_pw'], data['id_name']))
-
+        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (data.new_pw, data.id_name))
         conn.commit()
-        
         if c.rowcount > 0:
-            return jsonify({'success': True, 'message': '비밀번호가 변경되었습니다.'})
+            return {"success": True, "message": "비밀번호가 변경되었습니다."}
         else:
-            return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
-
-    except Exception as e:
-        print(f"Change Password Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/jobs', methods=['GET'])
+@app.get("/api/jobs")
 def get_jobs():
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
-
         rows = c.fetchall()
-        
-        jobs = [dict(row) for row in rows]
-        return jsonify({'success': True, 'jobs': jobs})
-    except Exception as e:
-        print(f"Get Jobs Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+        return {"success": True, "jobs": [dict(row) for row in rows]}
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/jobs/<id>', methods=['GET'])
-def get_job_detail(id):
+@app.get("/api/jobs/{id}")
+def get_job_detail(id: int):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor(cursor_factory=RealDictCursor)
         c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement WHERE id = %s", (id,))
-        
         row = c.fetchone()
-        
         if row:
-            job = dict(row)
-            return jsonify({'success': True, 'job': job})
+            return {"success": True, "job": dict(row)}
         else:
-            return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
-    except Exception as e:
-        print(f"Get Job Detail Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+            raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/jobs', methods=['POST'])
-def create_job():
-    data = request.json
+@app.post("/api/jobs")
+def create_job(job: JobCreate):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor()
-        
         c.execute('''
             INSERT INTO interview_announcement (title, job, deadline, content, id_name)
-            VALUES (%s, %s, %s, %s, %s)
-            RETURNING id
-        ''', (data['title'], data.get('job', ''), data['deadline'], data.get('content', ''), data.get('id_name')))
-
-        
+            VALUES (%s, %s, %s, %s, %s) RETURNING id
+        ''', (job.title, job.job, job.deadline, job.content, job.id_name))
         new_id = c.fetchone()[0]
         conn.commit()
-        
-        return jsonify({'success': True, 'message': '공고가 등록되었습니다.', 'id': new_id})
-    except Exception as e:
-        print(f"Create Job Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+        return {"success": True, "message": "공고가 등록되었습니다.", "id": new_id}
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/jobs/<id>', methods=['PUT'])
-def update_job(id):
-    data = request.json
+@app.put("/api/jobs/{id}")
+def update_job(id: int, job: JobUpdate):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor()
-        
-        # Verify ownership
         c.execute("SELECT id_name FROM interview_announcement WHERE id = %s", (id,))
         row = c.fetchone()
         if not row:
-             return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
+            raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
+        if row[0] != job.id_name:
+            raise HTTPException(status_code=403, detail="수정 권한이 없습니다.")
         
-        if row[0] != data.get('id_name'):
-             return jsonify({'success': False, 'message': '수정 권한이 없습니다.'}), 403
-
         c.execute('''
             UPDATE interview_announcement
             SET title = %s, job = %s, deadline = %s, content = %s
             WHERE id = %s
-        ''', (data['title'], data.get('job', ''), data['deadline'], data.get('content', ''), id))
+        ''', (job.title, job.job, job.deadline, job.content, id))
         conn.commit()
-        
-        return jsonify({'success': True, 'message': '공고가 수정되었습니다.'})
-            
-    except Exception as e:
-        print(f"Update Job Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+        return {"success": True, "message": "공고가 수정되었습니다."}
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/jobs/<id>', methods=['DELETE'])
-def delete_job(id):
+@app.delete("/api/jobs/{id}")
+def delete_job(id: int, id_name: str):
+    conn = get_db_connection()
     try:
-        conn = get_db_connection()
         c = conn.cursor()
-        
-        # Check ownership
-        # Try to get id_name from JSON body or Query Params
-        data = request.get_json(silent=True) or request.args
-        requester_id = data.get('id_name')
-
         c.execute("SELECT id_name FROM interview_announcement WHERE id = %s", (id,))
         row = c.fetchone()
         if not row:
-             return jsonify({'success': False, 'message': '공고를 찾을 수 없습니다.'}), 404
-        
-        if row[0] != requester_id:
-             return jsonify({'success': False, 'message': '삭제 권한이 없습니다.'}), 403
+            raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
+        if row[0] != id_name:
+            raise HTTPException(status_code=403, detail="삭제 권한이 없습니다.")
         
         c.execute('DELETE FROM interview_announcement WHERE id = %s', (id,))
         conn.commit()
-        
-        return jsonify({'success': True, 'message': '공고가 삭제되었습니다.'})
-            
-    except Exception as e:
-        print(f"Delete Job Error: {e}")
-        return jsonify({'success': False, 'message': '서버 오류가 발생했습니다.'}), 500
+        return {"success": True, "message": "공고가 삭제되었습니다."}
     finally:
-        if conn: conn.close()
+        conn.close()
 
-@app.route('/api/upload/resume', methods=['POST'])
-def upload_resume():
-    if 'resume' not in request.files:
-        return jsonify({'success': False, 'message': '파일이 없습니다.'}), 400
+@app.post("/api/upload/resume")
+async def upload_resume(resume: UploadFile = File(...), id_name: str = Form(...), job_title: str = Form(...)):
+    if not resume.filename.lower().endswith('.pdf'):
+         raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
     
-    file = request.files['resume']
-    id_name = request.form.get('id_name')
-    job_title = request.form.get('job_title') # Job title or code from the announcement
-
-    if file.filename == '':
-        return jsonify({'success': False, 'message': '선택된 파일이 없습니다.'}), 400
+    filename = f"{id_name}_{uuid.uuid4()}_{resume.filename}" # More secure filename
+    filepath = os.path.join(UPLOAD_FOLDER, filename)
+    
+    try:
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(resume.file, buffer)
+            
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO interview_information (id_name, job, resume)
+            VALUES (%s, %s, %s)
+        ''', (id_name, job_title, filepath))
+        conn.commit()
+        conn.close()
         
-    if file and allowed_file(file.filename):
-        filename = secure_filename(f"{id_name}_{file.filename}")
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+        return {"success": True, "message": "이력서가 업로드되었습니다.", "filepath": filepath}
+    except Exception as e:
+        print(f"Upload Error: {e}")
+        raise HTTPException(status_code=500, detail="파일 업로드 중 오류 발생")
 
-        # DB Save
-        try:
-            conn = get_db_connection()
-            c = conn.cursor()
-            
-            # Save to interview_information
-            c.execute('''
-                INSERT INTO interview_information (id_name, job, resume)
-                VALUES (%s, %s, %s)
-            ''', (id_name, job_title, filepath))
-            
-            conn.commit()
-            return jsonify({'success': True, 'message': '이력서가 업로드되었습니다.', 'filepath': filepath})
-        except Exception as e:
-            print(f"Resume Upload DB Error: {e}")
-            return jsonify({'success': False, 'message': '데이터베이스 저장 중 오류가 발생했습니다.'}), 500
-        finally:
-            if conn: conn.close()
+# --- LLM Interview Logic ---
 
-    else:
-        return jsonify({'success': False, 'message': '허용되지 않는 파일 형식입니다. (PDF만 가능)'}), 400
-
-import webbrowser
-from threading import Timer
-
-if __name__ == '__main__':
-    init_db()
+@app.post("/api/interview/start")
+def start_interview(data: StartInterviewRequest):
+    """
+    Starts an interview session.
+    Generates the first question based on the job title.
+    """
+    interview_number = str(uuid.uuid4())
     
-    def open_browser():
-        if not os.environ.get("WERKZEUG_RUN_MAIN"):
-            webbrowser.open_new("http://localhost:5000/")
+    # Simple prompt for the first question
+    prompt = f"당신은 {data.job_title} 직무의 면접관입니다. 지원자에게 할 첫 번째 질문을 한국어로 하나만 만들어주세요."
+    
+    try:
+        if model:
+            response = model.generate_content(prompt)
+            question = response.text.strip()
+        else:
+            question = f"{data.job_title} 직무에 지원하게 된 동기는 무엇인가요? (LLM 미설정)"
 
-    Timer(1, open_browser).start()
-    print("Serving on http://localhost:5000")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+        return {
+            "success": True,
+            "interview_number": interview_number,
+            "question": question
+        }
+    except Exception as e:
+        print(f"LLM Error: {e}")
+        return {"success": False, "message": "질문 생성 중 오류가 발생했습니다."}
+
+@app.post("/api/interview/answer")
+def submit_answer(data: AnswerSubmission):
+    """
+    Evaluates the answer and generates the next question.
+    Saves everything to Interview_Progress.
+    """
+    
+    # 1. Evaluate current answer
+    eval_prompt = f"""
+    질문: {data.question}
+    지원자 답변: {data.answer}
+    
+    위 답변을 {data.job_title} 직무 지원자로서 평가해주세요.
+    평가 내용은 지원자에게 보이지 않으므로 솔직하고 비판적으로 분석해주세요.
+    점수 (10점 만점)와 구체적인 피드백을 포함해주세요.
+    """
+    
+    # 2. Generate next question
+    next_q_prompt = f"""
+    이전 질문: {data.question}
+    지원자 답변: {data.answer}
+    
+    이전 답변을 바탕으로 {data.job_title} 직무 면접을 이어갈 다음 꼬리 질문을 하나만 만들어주세요. 한국어로 해주세요.
+    """
+
+    try:
+        evaluation = "LLM 미설정으로 인한 평가 불가"
+        next_question = "다음 질문입니다. (LLM 미설정)"
+        
+        if model:
+             eval_response = model.generate_content(eval_prompt)
+             evaluation = eval_response.text.strip()
+             
+             next_q_response = model.generate_content(next_q_prompt)
+             next_question = next_q_response.text.strip()
+
+        # 3. Save to DB
+        conn = get_db_connection()
+        c = conn.cursor()
+        c.execute('''
+            INSERT INTO Interview_Progress (
+                Interview_Number, Applicant_Name, Job_Title, 
+                Create_Question, Question_answer, answer_time, Answer_Evaluation
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            data.interview_number, data.applicant_name, data.job_title,
+            data.question, data.answer, data.answer_time, evaluation
+        ))
+        conn.commit()
+        conn.close()
+        
+        return {
+            "success": True,
+            "next_question": next_question,
+            "evaluation_saved": True
+        }
+
+    except Exception as e:
+        print(f"Interview Process Error: {e}")
+        return {"success": False, "message": "면접 진행 중 오류가 발생했습니다."}
+
+
+# --- Static Files (Must be last) ---
+app.mount("/", StaticFiles(directory=".", html=True), name="static")
+
+if __name__ == "__main__":
+    init_db()
+    print("FastAPI Server running on http://localhost:5000")
+    uvicorn.run(app, host="0.0.0.0", port=5000)
