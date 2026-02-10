@@ -538,7 +538,7 @@ function initInterview() {
                 $('#mic-status').textContent = '오류 (권한 거부됨)';
                 showToast('카메라/마이크 접근 권한이 필요합니다. 브라우저 설정에서 허용해주세요.', 'error');
             }
-        });
+        };
     } else {
         console.error("Test Device Button not found!");
     }
