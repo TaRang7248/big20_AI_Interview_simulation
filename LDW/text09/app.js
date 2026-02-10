@@ -22,6 +22,7 @@ const AppState = {
         timeLeft: 0,
         mediaRecorder: null,
         audioChunks: [],
+        devicesReady: false,
     }
 };
 
@@ -230,9 +231,10 @@ window.startInterviewSetup = (jobId) => {
     $('#setup-job-title').textContent = `[${job.job || '-'}] ${job.title}`;
     $('#resume-upload').value = '';
     $('#resume-status').textContent = '';
-    $('#btn-start-interview').disabled = true;
+    // $('#btn-start-interview').disabled = true; // Don't disable initially
     navigateTo('interview-setup-page');
 };
+
 
 // Automatic Device Test
 async function testDevices() {
@@ -256,7 +258,13 @@ async function testDevices() {
         $('#btn-start-interview').disabled = false;
 
         // Stop stream to release for now
+        // stream.getTracks().forEach(track => track.stop()); // Don't stop, keep it open or just release. 
+        // Keeping it open might be better for seamless transition? 
+        // But let's stop and request again in interview. 
+        // Actually, if we stop, permissions might persist. 
         stream.getTracks().forEach(track => track.stop());
+
+        AppState.interview.devicesReady = true;
 
     } catch (err) {
         console.error("Device Error:", err);
@@ -264,7 +272,8 @@ async function testDevices() {
         $('#cam-status').textContent = '실패';
         $('#mic-status').className = 'status error';
         $('#mic-status').textContent = '실패';
-        showToast('카메라/마이크 권한이 필요합니다.', 'error');
+        // showToast('카메라/마이크 권한이 필요합니다.', 'error'); // Don't toast immediately on load
+        AppState.interview.devicesReady = false;
     }
 }
 
@@ -279,31 +288,47 @@ function initInterview() {
 async function handleStartInterview() {
     const fileInput = $('#resume-upload');
     if (!fileInput.files || fileInput.files.length === 0) {
-        showToast('이력서를 업로드해주세요.', 'error');
+        alert('이력서를 업로드해주세요.');
         return;
     }
 
-    // 1. Upload Resume
-    showLoading(true, "이력서 업로드 및 면접 준비 중...");
-    const file = fileInput.files[0];
-    const formData = new FormData();
-    formData.append('resume', file);
-    formData.append('id_name', AppState.currentUser.id_name);
+    // 1. Navigate Immediately (Optimistic UI)
+    navigateTo('interview-page');
 
-    const job = MOCK_DB.jobs.find(j => j.id === AppState.currentJobId);
-    formData.append('job_title', job.job);
+    // UI Initialization on Interview Page
+    $('#ai-message').textContent = "이력서를 분석하고 면접을 준비 중입니다...";
+    $('#chat-log').innerHTML = ''; // Clear previous log
+    addChatLog('System', '면접 환경을 설정하고 있습니다.');
 
+    // 2. Perform Setup in Background
     try {
+        // Check Devices (Post-navigation)
+        if (!AppState.interview.devicesReady) {
+            addChatLog('System', '카메라/마이크 권한 확인 중...');
+            await testDevices();
+            if (!AppState.interview.devicesReady) {
+                alert('카메라와 마이크 사용 권한이 필요합니다.');
+                navigateTo('interview-setup-page'); // Go back if failed
+                return;
+            }
+        }
+
         // Upload Resume
+        addChatLog('System', '이력서 업로드 중...');
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append('resume', file);
+        formData.append('id_name', AppState.currentUser.id_name);
+
+        const job = MOCK_DB.jobs.find(j => j.id === AppState.currentJobId);
+        formData.append('job_title', job.job);
+
         const upResp = await fetch('/api/upload/resume', { method: 'POST', body: formData });
         const upResult = await upResp.json();
-
         if (!upResult.success) throw new Error(upResult.message);
 
-        // 2. Start Interview (Generate 1st Question)
-        // Update Loading Text
-        showLoading(true, "AI 면접관이 질문을 생성하고 있습니다...");
-
+        // Start Interview
+        addChatLog('System', 'AI 면접관 연결 중...');
         const startResp = await fetch('/api/interview/start', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -313,7 +338,6 @@ async function handleStartInterview() {
             })
         });
         const startResult = await startResp.json();
-
         if (!startResult.success) throw new Error(startResult.message);
 
         // Success
@@ -321,16 +345,13 @@ async function handleStartInterview() {
         AppState.interview.interviewNumber = startResult.interview_number;
         AppState.interview.currentQuestion = startResult.question;
 
-        showLoading(false);
-        navigateTo('interview-page');
-
         // Start Interaction
         startQuestionSequence(startResult.question);
 
     } catch (error) {
-        showLoading(false);
         console.error(error);
-        showToast(error.message || '면접 시작 실패', 'error');
+        alert(`오류 발생: ${error.message}`);
+        navigateTo('interview-setup-page'); // Go back on error
     }
 }
 
