@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
+import EventToastContainer from "@/components/common/EventToast";
 import { sessionApi, interviewApi, ttsApi, interventionApi } from "@/lib/api";
 import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2 } from "lucide-react";
 
@@ -56,6 +57,7 @@ export default function InterviewPage() {
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const interventionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pushEventRef = useRef<((raw: Record<string, unknown>) => void) | null>(null);
 
   // 인증 확인
   useEffect(() => {
@@ -97,6 +99,10 @@ export default function InterviewPage() {
           const data = JSON.parse(e.data);
           if (data.type === "stt_result" && data.is_final) {
             setSttText(prev => prev + " " + data.transcript);
+          }
+          // EventBus 이벤트 → 실시간 토스트 알림
+          if (data.type === "event" && pushEventRef.current) {
+            pushEventRef.current(data);
           }
         } catch { /* ignore */ }
       };
@@ -247,6 +253,8 @@ export default function InterviewPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
+      {/* 실시간 이벤트 알림 (EventBus → WebSocket) */}
+      <EventToastContainer onPushEvent={(handler) => { pushEventRef.current = handler; }} />
 
       {/* 면접 준비 화면 */}
       {phase === "setup" && (

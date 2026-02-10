@@ -198,6 +198,9 @@ CSH/
 ├── did_avatar_service.py           # D-ID AI 아바타 영상 생성 (WebRTC 스트리밍)
 ├── json_utils.py                   # LLM JSON 안정적 추출/파싱 방어 로직 (6단계)
 ├── security.py                     # 보안 유틸리티 (bcrypt, JWT, TLS, CORS)
+├── events.py                       # 이벤트 타입 정의 (30+ EventType, Pydantic 모델)
+├── event_bus.py                    # Redis Pub/Sub EventBus (싱글턴, WebSocket 브로드캐스트)
+├── event_handlers.py               # 도메인별 이벤트 핸들러 등록 (9개 도메인)
 ├── video_interview_server.py       # 화상 면접 서버 (레거시)
 ├── start_interview.bat             # 원클릭 시작 스크립트 (Windows Batch)
 ├── start_all.ps1                   # 원클릭 시작 스크립트 (PowerShell)
@@ -213,7 +216,7 @@ CSH/
 ├── frontend/                       # Next.js 프론트엔드 (신규)
 │   ├── src/app/                    # App Router 페이지
 │   ├── src/components/             # 재사용 컴포넌트
-│   ├── src/contexts/               # 인증 컨텍스트
+│   ├── src/contexts/               # 인증 + 이벤트 컨텍스트
 │   └── src/lib/                    # API 유틸리티
 └── static/
     ├── integrated_interview.html   # 통합 화상 면접 UI
@@ -393,6 +396,93 @@ D-ID API를 활용한 실시간 AI 면접관 영상 생성 서비스입니다.
 | **한국어 TTS** | Microsoft TTS (ko-KR-SunHiNeural, ko-KR-InJoonNeural) |
 | **커스텀 아바타** | 사용자 정의 프레젠터 이미지 지원 |
 
+### 13. 이벤트 기반 아키텍처 (Event-Driven Architecture)
+
+SAD 설계서의 "이벤트 기반 마이크로서비스" 패턴을 구현합니다. **Redis Pub/Sub 기반 EventBus**를 도입하여 서비스 간 느슨한 결합(Loose Coupling)을 달성합니다.
+
+#### EventBus 아키텍처
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     EventBus (Singleton)                │
+│                                                         │
+│  ┌───────────┐   ┌──────────────┐   ┌──────────────┐   │
+│  │ Local     │   │ Redis        │   │ WebSocket    │   │
+│  │ Dispatch  │   │ Pub/Sub      │   │ Broadcast    │   │
+│  │ (async)   │   │ (cross-proc) │   │ (frontend)   │   │
+│  └─────┬─────┘   └──────┬───────┘   └──────┬───────┘   │
+│        │                │                   │           │
+│        ▼                ▼                   ▼           │
+│  Event Handlers   Celery Workers      React Client      │
+│  (server-side)    (sync publish)      (EventToast)      │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 이벤트 흐름
+
+1. **FastAPI 엔드포인트** → `event_bus.publish()` → 로컬 핸들러 실행 + Redis 채널 발행 + WebSocket 푸시
+2. **Celery 워커** → `_publish_event()` (sync Redis) → Redis 채널 발행 → EventBus 리스너가 수신 → 로컬 핸들러 + WebSocket 푸시
+3. **프론트엔드 수신**: WebSocket `onmessage` → `type: "event"` 메시지 → `EventToastContainer`로 실시간 알림
+
+#### 이벤트 타입 (30+ EventType)
+
+| 도메인 | 이벤트 | 설명 |
+| --- | --- | --- |
+| **Session** | `session.created`, `session.ended` | 면접 세션 생명주기 |
+| **Interview** | `interview.question_generated`, `interview.answer_submitted`, `interview.turn_started`, `interview.turn_ended` | 면접 질의응답 흐름 |
+| **Evaluation** | `evaluation.completed`, `evaluation.batch_completed` | AI 답변 평가 |
+| **Emotion** | `emotion.analyzed`, `emotion.alert` | 감정 분석 및 경고 |
+| **STT/TTS** | `stt.transcribed`, `tts.generated` | 음성 처리 |
+| **Resume** | `resume.uploaded`, `resume.indexed` | 이력서 업로드/RAG 색인 |
+| **Report** | `report.generated` | 면접 리포트 생성 완료 |
+| **Coding** | `coding.problem_generated`, `coding.submitted`, `coding.analyzed` | 코딩 테스트 흐름 |
+| **Whiteboard** | `whiteboard.submitted`, `whiteboard.analyzed` | 아키텍처 설계 |
+| **System** | `system.error`, `system.service_status` | 시스템 상태/오류 |
+
+#### 구현 파일
+
+| 파일 | 역할 |
+| --- | --- |
+| `events.py` | `EventType` enum (30+), 도메인별 Pydantic 이벤트 모델, `EventFactory` |
+| `event_bus.py` | Redis Pub/Sub + 로컬 비동기 디스패처 + WebSocket 브로드캐스트 (싱글턴) |
+| `event_handlers.py` | 9개 도메인별 핸들러 등록 (`register_all_handlers(bus)`) |
+
+#### Celery 이벤트 통합
+
+Celery 워커는 비동기 컨텍스트 외부에서 실행되므로 `_publish_event()` 헬퍼를 통해 동기식 Redis 발행을 수행합니다:
+
+| 태스크 | 발행 이벤트 |
+|--------|------------|
+| `evaluate_answer_task` | `evaluation.completed` |
+| `analyze_emotion_task` | `emotion.analyzed` |
+| `generate_report_task` | `report.generated` / `system.error` |
+| `process_resume_task` | `resume.indexed` |
+| `complete_interview_workflow_task` | `report.generated` / `system.error` |
+
+#### 서버 이벤트 발행 지점
+
+| API 엔드포인트 | 발행 이벤트 |
+| --- | --- |
+| `POST /api/sessions` | `session.created` |
+| `POST /api/chat` | `interview.answer_submitted`, `interview.question_generated` |
+| `POST /api/upload-resume` | `resume.uploaded` |
+| `startup` | `system.service_status` (started) |
+| `shutdown` | `system.service_status` (shutting_down) |
+
+#### 프론트엔드 실시간 이벤트 처리
+
+| 파일 | 역할 |
+| --- | --- |
+| `frontend/src/contexts/EventBusContext.tsx` | WebSocket 이벤트 컨텍스트 Provider — `useEventBus()` 훅 |
+| `frontend/src/components/common/EventToast.tsx` | 실시간 토스트 알림 (평가 완료, 감정 경고, 리포트 생성 등) |
+
+지원 알림 유형:
+- ✅ 평가 완료 — 점수 표시 (`evaluation.completed`)
+- 🧠 감정 경고 — 부정 감정 감지 (`emotion.alert`)
+- 📊 리포트 생성 완료 (`report.generated`)
+- 💻 코드 분석 완료 (`coding.analyzed`)
+- ⚠️ 시스템 오류 (`system.error`)
+
 ---
 
 ## 📡 API 엔드포인트
@@ -482,6 +572,11 @@ D-ID API를 활용한 실시간 AI 면접관 영상 생성 서비스입니다.
 ### 시스템
 - `GET /api/status` - 전체 서비스 상태 확인
 
+### 이벤트 모니터링
+- `GET /api/events/stats` - EventBus 통계 (총 이벤트 수, 타입별 카운트, 핸들러 수, WebSocket 연결 수)
+- `GET /api/events/history` - 최근 이벤트 히스토리 (타입 필터 지원)
+- `GET /api/events/registered` - 등록된 이벤트 타입 및 핸들러 수
+
 ### 코딩 테스트
 - `POST /api/coding/execute` - 코드 실행 (샌드박스)
 - `POST /api/coding/analyze` - AI 코드 분석
@@ -537,7 +632,8 @@ CSH/frontend/
     ├── components/
     │   ├── common/
     │   │   ├── Header.tsx   # 공통 네비게이션 헤더
-    │   │   └── Modal.tsx    # 재사용 가능한 모달 컴포넌트
+    │   │   ├── Modal.tsx    # 재사용 가능한 모달 컴포넌트
+    │   │   └── EventToast.tsx # 실시간 이벤트 토스트 알림
     │   ├── auth/
     │   │   ├── LoginModal.tsx         # 로그인 모달
     │   │   ├── RegisterModal.tsx      # 회원가입 모달
@@ -545,7 +641,8 @@ CSH/frontend/
     │   └── emotion/
     │       └── EmotionCharts.tsx      # Chart.js 차트 컴포넌트
     ├── contexts/
-    │   └── AuthContext.tsx  # JWT 세션 관리, 자동 로그아웃 (60분/유효 30분)
+    │   ├── AuthContext.tsx  # JWT 세션 관리, 자동 로그아웃 (60분/유효 30분)
+    │   └── EventBusContext.tsx # WebSocket 이벤트 컨텍스트 Provider (useEventBus 훅)
     └── lib/
         └── api.ts           # API 통신 라이브러리
 ```
@@ -579,7 +676,7 @@ CSH/frontend/
 | STT | DEEPGRAM_API_KEY 설정 + pyaudio | 음성 인식 |
 | RAG | POSTGRES_CONNECTION_STRING 설정 + pgvector | 이력서 맞춤 평가 |
 | 감정분석 | deepface + opencv-python 패키지 설치 | 감정 데이터 분석 |
-| Redis | Redis 서버 실행 + REDIS_URL 설정 | 감정 시계열 저장 + Celery 브로커 |
+| Redis | Redis 서버 실행 + REDIS_URL 설정 | 감정 시계열 저장 + Celery 브로커 + EventBus Pub/Sub |
 | Celery | Redis + celery_app.py 실행 | 비동기 작업 처리 |
 | 소셜 로그인 | KAKAO/GOOGLE/NAVER Client ID/Secret | OAuth 인증 |
 | 코딩 테스트 | Python 3.8+ (기본), Node.js, JDK (선택) | 코드 실행 |
@@ -729,6 +826,9 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 | `start_prerequisites.bat` | **사전 서비스 스크립트** - Redis, Ollama만 실행 |
 | `json_utils.py` | **JSON 안정적 파싱 모듈** (330+ lines) - 6단계 다층 파싱, Qwen3 `<think>` 블록 제거, 구문 오류 자동 수정 |
 | `security.py` | **보안 유틸리티 모듈** (330+ lines) - bcrypt 해싱, JWT 인증, CORS, WebSocket JWT, TLS, 보호 API 16개 |
+| `events.py` | **이벤트 정의 모듈** (230+ lines) - EventType enum (30+), 도메인별 Pydantic 이벤트 모델, EventFactory |
+| `event_bus.py` | **이벤트 버스 모듈** (310+ lines) - Redis Pub/Sub + 로컬 비동기 디스패치 + WebSocket 브로드캐스트 (싱글턴) |
+| `event_handlers.py` | **이벤트 핸들러 모듈** (250+ lines) - 9개 도메인별 핸들러 등록, 감정 경고 자동 발행 |
 | `requirements_integrated.txt` | 통합 의존성 목록 (FastAPI, LangChain, Celery, DeepFace, anthropic 등) |
 | `__init__.py` | 패키지 초기화 파일 |
 | `static/integrated_interview.html` | **통합 화상 면접 UI** - 실시간 평가 패널, 감정 분석 포함 |
@@ -738,7 +838,7 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 | `static/video.html` | 기존 화상 면접 UI (레거시) |
 | `uploads/` | 이력서 PDF 업로드 디렉토리 |
 | `documents/` | **설계 문서 디렉토리** - SAD, SRS, 보안 리뷰 보고서, RAG DB 구조, TODO |
-| `frontend/` | **Next.js 프론트엔드** - TypeScript + Tailwind CSS, 7개 페이지, 인증 시스템, Chart.js |
+| `frontend/` | **Next.js 프론트엔드** - TypeScript + Tailwind CSS, 7개 페이지, 인증 시스템, Chart.js, 실시간 이벤트 알림 |
 
 ---
 
@@ -826,6 +926,22 @@ async def get_my_result(task_id: str):
 ---
 
 ## 📝 변경 이력 (Changelog)
+
+### 2026-02-10
+
+#### 🏗️ 이벤트 기반 아키텍처 구현
+- **EventBus 코어** (`event_bus.py`): Redis Pub/Sub + 로컬 비동기 디스패치 + WebSocket 브로드캐스트 싱글턴
+- **이벤트 정의** (`events.py`): 30+ EventType enum, 10개 도메인별 Pydantic 이벤트 모델, EventFactory
+- **이벤트 핸들러** (`event_handlers.py`): 9개 도메인 핸들러 등록 (감정 경고 자동 발행 포함)
+- **Celery 이벤트 통합**: 5개 태스크에서 완료 이벤트 동기 발행 (`_publish_event()` 헬퍼)
+- **서버 통합**: startup/shutdown 이벤트, 5개 엔드포인트 이벤트 발행, 3개 모니터링 API
+- **프론트엔드 실시간 알림**: `EventBusContext.tsx` (WebSocket 이벤트 컨텍스트), `EventToast.tsx` (실시간 토스트 알림)
+- **아키텍처 문서 업데이트**: SAD + README_INTEGRATED에 이벤트 기반 아키텍처 섹션 추가
+
+#### 🔧 코딩 테스트 LLM 동적 생성
+- **LLM 문제 생성**: 하드코딩된 5문제 → Qwen3-4B 기반 동적 문제 생성 (`CodingProblemGenerator`)
+- **난이도 선택**: easy/medium/hard 난이도별 실시간 문제 생성
+- **프론트엔드 갱신**: 문제 목록 드롭다운 → 난이도 선택 버튼 + "새 문제" 생성 UI
 
 ### 2026-02-09 (약 80+ 커밋)
 
