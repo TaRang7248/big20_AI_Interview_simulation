@@ -405,11 +405,11 @@ except ImportError as e:
 
 # 코딩 테스트 서비스
 try:
-    from code_execution_service import create_coding_router, CODING_PROBLEMS
+    from code_execution_service import create_coding_router
     coding_router = create_coding_router()
     app.include_router(coding_router)
     CODING_TEST_AVAILABLE = True
-    print(f"✅ 코딩 테스트 서비스 활성화됨 (문제 수: {len(CODING_PROBLEMS)})")
+    print("✅ 코딩 테스트 서비스 활성화됨 (LLM 자동 출제)")
 except ImportError as e:
     CODING_TEST_AVAILABLE = False
     print(f"⚠️ 코딩 테스트 서비스 비활성화: {e}")
@@ -442,6 +442,24 @@ except ImportError as e:
     deepgram_client = None
     EventType = None
     print(f"⚠️ Deepgram STT 서비스 비활성화: {e}")
+
+
+# ========== 이벤트 기반 마이크로서비스 아키텍처 ==========
+# Redis Pub/Sub 기반 EventBus + 이벤트 핸들러 등록
+
+try:
+    from event_bus import EventBus
+    from events import EventType as AppEventType, EventFactory
+    from event_handlers import register_all_handlers
+
+    event_bus = EventBus.get_instance()
+    EVENT_BUS_AVAILABLE = True
+    print("✅ 이벤트 버스 (EventBus) 활성화됨")
+except ImportError as e:
+    event_bus = None
+    EVENT_BUS_AVAILABLE = False
+    AppEventType = None
+    print(f"⚠️ 이벤트 버스 비활성화: {e}")
 
 
 # ========== 전역 상태 관리 ==========
@@ -2676,7 +2694,17 @@ async def upload_resume(
             "resume_path": file_path,
             "resume_filename": file.filename
         })
-    
+
+    # 📤 이벤트 발행: 이력서 업로드
+    if EVENT_BUS_AVAILABLE and event_bus:
+        await event_bus.publish(
+            AppEventType.RESUME_UPLOADED,
+            session_id=session_id,
+            user_email=user_email,
+            data={"filename": file.filename, "chunks_created": chunks_created},
+            source="resume_api",
+        )
+
     return ResumeUploadResponse(
         success=True,
         message="이력서가 성공적으로 업로드되었습니다." + (
@@ -2929,7 +2957,17 @@ async def create_session(request: SessionCreateRequest = None, current_user: Dic
                 break
     
     print(f"✅ 면접 세션 생성: {session_id} (사용자: {request.user_email})")
-    
+
+    # 📤 이벤트 발행: 세션 생성
+    if EVENT_BUS_AVAILABLE and event_bus:
+        await event_bus.publish(
+            AppEventType.SESSION_CREATED,
+            session_id=session_id,
+            user_email=request.user_email,
+            data={"greeting": greeting[:100]},
+            source="session_manager",
+        )
+
     return {
         "session_id": session_id,
         "greeting": greeting,
@@ -3163,7 +3201,22 @@ async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_us
                 audio_url = f"/audio/{os.path.basename(audio_file)}"
         except Exception as e:
             print(f"TTS 생성 오류: {e}")
-    
+
+    # 📤 이벤트 발행: 질문 생성 + 답변 제출
+    if EVENT_BUS_AVAILABLE and event_bus:
+        await event_bus.publish(
+            AppEventType.ANSWER_SUBMITTED,
+            session_id=request.session_id,
+            data={"answer": request.message[:200], "question": response[:200]},
+            source="chat_api",
+        )
+        await event_bus.publish(
+            AppEventType.QUESTION_GENERATED,
+            session_id=request.session_id,
+            data={"question": response[:200], "has_audio": audio_url is not None},
+            source="ai_interviewer",
+        )
+
     return ChatResponse(
         session_id=request.session_id,
         response=response,
@@ -3557,7 +3610,11 @@ async def websocket_interview(websocket: WebSocket, session_id: str, token: Opti
     state.websocket_connections[session_id].append(websocket)
     
     print(f"[WS] 세션 {session_id} WebSocket 연결됨 (사용자: {ws_user_email})")
-    
+
+    # 📤 EventBus에 WebSocket 등록 (이벤트 기반 WS 브로드캐스트 지원)
+    if EVENT_BUS_AVAILABLE and event_bus:
+        event_bus.register_ws(session_id, websocket)
+
     try:
         # 연결 성공 메시지
         await websocket.send_json({
@@ -3586,6 +3643,9 @@ async def websocket_interview(websocket: WebSocket, session_id: str, token: Opti
         if session_id in state.websocket_connections:
             if websocket in state.websocket_connections[session_id]:
                 state.websocket_connections[session_id].remove(websocket)
+        # EventBus에서 WebSocket 해제
+        if EVENT_BUS_AVAILABLE and event_bus:
+            event_bus.unregister_ws(session_id, websocket)
 
 
 # ========== Emotion API ==========
@@ -3687,11 +3747,45 @@ async def get_status():
             "rag": RAG_AVAILABLE,
             "emotion": EMOTION_AVAILABLE,
             "redis": REDIS_AVAILABLE,
-            "celery": CELERY_AVAILABLE
+            "celery": CELERY_AVAILABLE,
+            "event_bus": EVENT_BUS_AVAILABLE,
         },
         "active_sessions": len(state.sessions),
         "active_connections": len(state.pcs),
-        "celery_status": check_celery_status() if CELERY_AVAILABLE else {"status": "disabled"}
+        "celery_status": check_celery_status() if CELERY_AVAILABLE else {"status": "disabled"},
+        "event_bus_stats": event_bus.get_stats() if EVENT_BUS_AVAILABLE and event_bus else {"status": "disabled"},
+    }
+
+
+# ========== 이벤트 버스 모니터링 API ==========
+
+@app.get("/api/events/stats")
+async def get_event_stats():
+    """이벤트 버스 통계 조회"""
+    if not EVENT_BUS_AVAILABLE or not event_bus:
+        return {"status": "disabled"}
+    return event_bus.get_stats()
+
+
+@app.get("/api/events/history")
+async def get_event_history(limit: int = 50, event_type: Optional[str] = None):
+    """이벤트 히스토리 조회"""
+    if not EVENT_BUS_AVAILABLE or not event_bus:
+        return {"status": "disabled", "events": []}
+    return {
+        "events": event_bus.get_history(limit=limit, event_type=event_type),
+        "total": len(event_bus.get_history(limit=9999)),
+    }
+
+
+@app.get("/api/events/registered")
+async def get_registered_events():
+    """등록된 이벤트 타입 및 핸들러 목록"""
+    if not EVENT_BUS_AVAILABLE or not event_bus:
+        return {"status": "disabled"}
+    return {
+        "event_types": event_bus.get_registered_events(),
+        "handler_count": {k: len(v) for k, v in event_bus._handlers.items() if v},
     }
 
 
@@ -4156,9 +4250,39 @@ async def start_interview_workflow(session_id: str):
 
 # ========== 서버 종료 처리 ==========
 
+@app.on_event("startup")
+async def on_startup():
+    """서버 시작 시 초기화 — 이벤트 버스 + 핸들러 등록"""
+    if EVENT_BUS_AVAILABLE and event_bus:
+        redis_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+        await event_bus.initialize(redis_url)
+        register_all_handlers(event_bus)
+        print("✅ [Startup] 이벤트 버스 초기화 및 핸들러 등록 완료")
+
+        # 시스템 시작 이벤트 발행
+        await event_bus.publish(
+            AppEventType.SERVICE_STATUS_CHANGED,
+            data={"service": "api_server", "status": "started"},
+            source="system",
+            broadcast_ws=False,
+        )
+
+
 @app.on_event("shutdown")
 async def on_shutdown():
     """서버 종료 시 정리"""
+    # 이벤트 버스 종료
+    if EVENT_BUS_AVAILABLE and event_bus:
+        await event_bus.publish(
+            AppEventType.SERVICE_STATUS_CHANGED,
+            data={"service": "api_server", "status": "shutting_down"},
+            source="system",
+            broadcast_ws=False,
+            propagate_redis=False,
+        )
+        await event_bus.shutdown()
+        print("✅ [Shutdown] 이벤트 버스 종료 완료")
+
     # WebRTC 연결 정리
     coros = [pc.close() for pc in state.pcs]
     await asyncio.gather(*coros, return_exceptions=True)

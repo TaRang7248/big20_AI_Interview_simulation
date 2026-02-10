@@ -10,6 +10,10 @@ AI 면접 시스템의 비동기 작업 태스크들을 정의합니다.
 4. TTS 음성 생성
 5. 이력서 RAG 처리
 6. 세션 정리 및 통계 집계
+
+이벤트 기반 아키텍처:
+- 각 태스크 완료 시 Redis Pub/Sub를 통해 이벤트를 발행합니다.
+- API 서버에서 이벤트를 수신하여 WebSocket으로 프론트엔드에 전달합니다.
 """
 
 import os
@@ -34,6 +38,31 @@ from celery.exceptions import SoftTimeLimitExceeded
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+# ========== 이벤트 발행 헬퍼 (Celery Worker 동기 컨텍스트) ==========
+
+def _publish_event(event_type_str: str, session_id: str = None, data: dict = None, source: str = "celery_worker"):
+    """
+    Celery 태스크 내부에서 이벤트 발행 (동기, Redis Pub/Sub).
+    API 서버의 EventBus가 수신하여 로컬 핸들러 + WebSocket 브로드캐스트 처리.
+    """
+    try:
+        import redis
+        r = redis.from_url(os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0"), decode_responses=True)
+        event_payload = json.dumps({
+            "event_type": event_type_str,
+            "event_id": os.urandom(6).hex(),
+            "timestamp": datetime.now().isoformat(),
+            "source": source,
+            "session_id": session_id,
+            "data": data or {},
+        }, ensure_ascii=False)
+        channel = f"interview_events:{event_type_str}"
+        r.publish(channel, event_payload)
+        r.close()
+    except Exception as e:
+        print(f"[EventPublish] 이벤트 발행 실패 ({event_type_str}): {e}")
 
 # ========== 서비스 초기화 (Worker에서 사용) ==========
 _llm = None
@@ -173,6 +202,13 @@ def evaluate_answer_task(
         evaluation["task_id"] = task_id
         evaluation["evaluated_at"] = datetime.now().isoformat()
         print(f"[Task {task_id}] 평가 완료 - 점수: {evaluation.get('total_score', 'N/A')}")
+
+        # 📤 이벤트 발행: 평가 완료
+        _publish_event(
+            "evaluation.completed",
+            session_id=session_id,
+            data={"task_id": task_id, "score": evaluation.get("total_score"), "feedback": evaluation.get("brief_feedback", "")},
+        )
         return evaluation
             
     except SoftTimeLimitExceeded:
@@ -299,7 +335,7 @@ def analyze_emotion_task(
         total = sum(raw.values()) or 1.0
         probabilities = {k: round(v / total, 4) for k, v in raw.items()}
         
-        return {
+        result = {
             "session_id": session_id,
             "dominant_emotion": item.get("dominant_emotion"),
             "probabilities": probabilities,
@@ -307,6 +343,14 @@ def analyze_emotion_task(
             "analyzed_at": datetime.now().isoformat(),
             "task_id": task_id
         }
+
+        # 📤 이벤트 발행: 감정 분석 완료
+        _publish_event(
+            "emotion.analyzed",
+            session_id=session_id,
+            data={"dominant_emotion": result["dominant_emotion"], "probabilities": probabilities, "confidence": max(probabilities.values()) if probabilities else 0},
+        )
+        return result
         
     except Exception as e:
         print(f"[Task {task_id}] 감정 분석 오류: {e}")
@@ -498,10 +542,18 @@ def generate_report_task(
         }
         
         print(f"[Task {task_id}] 리포트 생성 완료 - 등급: {report['grade']}")
+
+        # 📤 이벤트 발행: 리포트 생성 완료
+        _publish_event(
+            "report.generated",
+            session_id=session_id,
+            data={"task_id": task_id, "grade": report.get("grade"), "total_average": total_avg},
+        )
         return report
         
     except Exception as e:
         print(f"[Task {task_id}] 리포트 생성 오류: {e}")
+        _publish_event("system.error", session_id=session_id, data={"error": str(e), "source": "generate_report_task"})
         return {
             "session_id": session_id,
             "error": str(e),
@@ -682,7 +734,13 @@ def process_resume_task(
         
         # PDF 인덱싱
         rag.load_and_index_pdf(pdf_path)
-        
+
+        # 📤 이벤트 발행: 이력서 인덱싱 완료
+        _publish_event(
+            "resume.indexed",
+            session_id=session_id,
+            data={"pdf_path": pdf_path, "task_id": task_id},
+        )
         return {
             "session_id": session_id,
             "status": "success",
@@ -868,6 +926,17 @@ def complete_interview_workflow_task(
         ).get(timeout=180)
         
         print(f"[Task {task_id}] 면접 완료 워크플로우 완료")
+
+        # 📤 이벤트 발행: 워크플로우 완료 (리포트 포함)
+        _publish_event(
+            "report.generated",
+            session_id=session_id,
+            data={
+                "task_id": task_id,
+                "grade": report.get("grade") if isinstance(report, dict) else None,
+                "workflow": True,
+            },
+        )
         return {
             "session_id": session_id,
             "evaluations": evaluations,
@@ -878,6 +947,7 @@ def complete_interview_workflow_task(
         
     except Exception as e:
         print(f"[Task {task_id}] 워크플로우 오류: {e}")
+        _publish_event("system.error", session_id=session_id, data={"error": str(e), "source": "complete_interview_workflow_task"})
         return {
             "session_id": session_id,
             "error": str(e),
