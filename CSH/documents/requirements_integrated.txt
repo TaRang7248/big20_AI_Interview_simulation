@@ -67,6 +67,7 @@ reportlab>=4.0.0               # PDF 면접 리포트 생성 (한국어 폰트 �
 python-dotenv>=1.0.0
 requests>=2.31.0
 websockets>=12.0
+ffmpeg-python
 
 # ========== 선택사항 (Optional) ==========
 # tqdm>=4.66.0                 # 진행률 표시
