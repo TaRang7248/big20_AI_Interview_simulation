@@ -6,7 +6,7 @@ import Modal from "@/components/common/Modal";
 interface Props { open: boolean; onClose: () => void; onSwitch: () => void; }
 
 export default function RegisterModal({ open, onClose, onSwitch }: Props) {
-  const [form, setForm] = useState({ email: "", password: "", passwordConfirm: "", name: "", birth_date: "", gender: "", address: "" });
+  const [form, setForm] = useState({ email: "", password: "", passwordConfirm: "", name: "", birth_date: "", gender: "", address: "", phone: "" });
   const [emailStatus, setEmailStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ export default function RegisterModal({ open, onClose, onSwitch }: Props) {
     if (emailStatus === "taken") { setError("이미 사용 중인 이메일입니다."); return; }
     setLoading(true);
     try {
-      await authApi.register({ email: form.email, password: form.password, name: form.name, birth_date: form.birth_date, gender: form.gender, address: form.address });
+      await authApi.register({ email: form.email, password: form.password, name: form.name, birth_date: form.birth_date, gender: form.gender, address: form.address, phone: form.phone });
       alert("회원가입이 완료되었습니다! 로그인 해주세요.");
       onSwitch();
     } catch (e: unknown) {
@@ -89,6 +89,12 @@ export default function RegisterModal({ open, onClose, onSwitch }: Props) {
         <div>
           <label className="block text-sm text-[var(--text-secondary)] mb-1">주소</label>
           <input className="input-field" placeholder="서울시 강남구..." value={form.address} onChange={e => set("address", e.target.value)} />
+        </div>
+
+        {/* 전화번호 */}
+        <div>
+          <label className="block text-sm text-[var(--text-secondary)] mb-1">전화번호</label>
+          <input className="input-field" type="tel" placeholder="010-1234-5678" value={form.phone} onChange={e => set("phone", e.target.value)} />
         </div>
 
         {error && <p className="text-sm text-[var(--danger)] bg-[rgba(255,82,82,0.1)] p-3 rounded-lg">{error}</p>}
