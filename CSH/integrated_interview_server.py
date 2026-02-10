@@ -1049,7 +1049,14 @@ class AIInterviewer:
                     self.retriever = self.rag.get_retriever()
                     print("✅ RAG 초기화 완료 (테이블: resume_embeddings)")
             except Exception as e:
-                print(f"⚠️ RAG 초기화 실패: {e}")
+                print(f"⚠️ RAG 초기화 실패 (resume_embeddings): {e}")
+            
+            try:
+                self.qa_rag = ResumeRAG(table_name=QA_TABLE)
+                print("✅ Q&A RAG 초기화 완료 (테이블: qa_embeddings)")
+            except Exception as e:
+                self.qa_rag = None
+                print(f"⚠️ Q&A RAG 초기화 실패 (qa_embeddings): {e}")
         
         # TTS 초기화
         if TTS_AVAILABLE:
@@ -1264,10 +1271,9 @@ class AIInterviewer:
             
             # ========== 3-1. 면접 Q&A 참조 데이터 검색 (모범 답변 참고용) ==========
             qa_reference_context = ""
-            if RAG_AVAILABLE and user_answer:
+            if RAG_AVAILABLE and user_answer and getattr(self, 'qa_rag', None):
                 try:
-                    qa_rag = ResumeRAG(table_name=QA_TABLE)
-                    qa_docs = await run_in_executor(RAG_EXECUTOR, qa_rag.similarity_search, user_answer, 2)
+                    qa_docs = await run_in_executor(RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2)
                     if qa_docs:
                         qa_reference_context = "\n".join([d.page_content for d in qa_docs[:2]])
                         print(f"📖 [Q&A RAG] {len(qa_docs)}개 참조 문서에서 모범 답변 추출")
