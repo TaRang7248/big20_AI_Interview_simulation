@@ -205,12 +205,17 @@ IMH/IMH_Interview/
 
 ## 10. 현재 최우선 목표 (단 하나)
 
-### TASK-008 Emotion 분석 (DeepFace)
+### TASK-009 Voice 분석 (Parselmouth)
 - 목표:
-  - Playground에서 업로드된 영상/이미지의 감정 분석 파이프라인 검증
-  - DeepFace 기반 분석(1fps) 및 결과 반환
+  - Mock Voice Provider를 실제 Parselmouth 기반 분석 로직으로 교체
+  - Pitch / Intensity 등 음성 특성 추출 검증
 
 ### 최근 완료
+
+- TASK-008 Emotion 분석 (DeepFace) ✅ DONE
+  - `POST /api/v1/playground/emotion` 구현 완료
+  - DeepFace 기반 1fps 영상 분석 및 이미지 분석 검증
+  - `tf-keras` 의존성 해결 및 DTO 구조화 완료
 
 - TASK-007 Playground Embedding → Query Focus ✅ DONE
   - `POST /api/v1/playground/embedding` 구현 완료
@@ -243,9 +248,9 @@ IMH/IMH_Interview/
 
 ---
 
-### BACKLOG
+## BACKLOG
 
-### TASK-009 Voice 분석 (Parselmouth)
-- 목표:
-  - Mock Voice Provider를 실제 Parselmouth 기반 분석 로직으로 교체
-  - Pitch / Intensity 등 음성 특성 추출 검증
+- 후보 작업:
+  - MediaPipe 기반 시선 / 제스처 분석 파이프라인 검증
+- 비고:
+  - Phase 2 Playground 검증 이후 착수 검토

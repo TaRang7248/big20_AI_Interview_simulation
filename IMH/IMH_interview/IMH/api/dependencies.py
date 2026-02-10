@@ -8,6 +8,8 @@ from packages.imh_providers.pdf.base import IPDFProvider
 from packages.imh_providers.pdf.local_provider import LocalPDFProvider
 from packages.imh_providers.embedding.base import EmbeddingProvider
 from packages.imh_providers.embedding import get_embedding_provider as _get_embedding_provider_factory
+from packages.imh_providers.emotion.base import IEmotionProvider
+from packages.imh_providers.emotion.deepface_impl import DeepFaceEmotionProvider
 
 @lru_cache
 def get_config() -> IMHConfig:
@@ -41,3 +43,11 @@ async def get_embedding_provider() -> AsyncGenerator[EmbeddingProvider, None]:
     # In the future: if config.EMBEDDING_PROVIDER == "local": return LocalEmbeddingProvider(...)
     provider = _get_embedding_provider_factory("mock")
     yield provider
+
+async def get_emotion_provider() -> IEmotionProvider:
+    """
+    Dependency to get an instance of the Emotion Provider.
+    For TASK-008, uses DeepFaceEmotionProvider.
+    """
+    config = get_config()
+    return DeepFaceEmotionProvider(config)

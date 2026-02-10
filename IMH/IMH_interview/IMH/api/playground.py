@@ -10,12 +10,15 @@ from packages.imh_core.dto import (
     TranscriptDTO, 
     PDFExtractionResultDTO, 
     EmbeddingRequestDTO, 
+    EmbeddingRequestDTO, 
     EmbeddingResponseDTO
 )
+from packages.imh_providers.emotion.dto import VideoEmotionAnalysisResultDTO, FrameEmotionDTO, VideoEmotionAnalysisMetadataDTO, EmotionScoreDTO
 from packages.imh_providers.stt.base import ISTTProvider
 from packages.imh_providers.pdf.base import IPDFProvider
 from packages.imh_providers.embedding.base import EmbeddingProvider
-from IMH.api.dependencies import get_stt_provider, get_pdf_provider, get_embedding_provider
+from packages.imh_providers.emotion.base import IEmotionProvider
+from IMH.api.dependencies import get_stt_provider, get_pdf_provider, get_embedding_provider, get_emotion_provider
 
 router = APIRouter()
 logger = get_logger("IMH.api.playground")
@@ -27,6 +30,10 @@ MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_MB * 1024 * 1024
 SUPPORTED_PDF_EXTENSIONS = {".pdf"}
 MAX_PDF_SIZE_MB = 10
 MAX_PDF_SIZE_BYTES = MAX_PDF_SIZE_MB * 1024 * 1024
+
+SUPPORTED_EMOTION_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".jpg", ".jpeg", ".png"}
+MAX_EMOTION_FILE_SIZE_MB = 50
+MAX_EMOTION_FILE_SIZE_BYTES = MAX_EMOTION_FILE_SIZE_MB * 1024 * 1024
 
 @router.post("/stt", response_model=TranscriptDTO)
 async def analyze_stt(
@@ -210,3 +217,109 @@ async def analyze_embedding(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"error_code": "EMBEDDING_ERROR", "message": "An error occurred during embedding processing.", "request_id": request_id}
         )
+
+@router.post("/emotion", response_model=VideoEmotionAnalysisResultDTO)
+async def analyze_emotion(
+    file: UploadFile = File(...),
+    emotion_provider: IEmotionProvider = Depends(get_emotion_provider)
+):
+    """
+    Upload a video or image file and get emotion analysis results (1fps for video).
+    """
+    request_id = str(uuid.uuid4())
+    logger.info(f"Emotion Analysis Request received. RequestID: {request_id}, Filename: {file.filename}, ContentType: {file.content_type}")
+
+    # 1. Validation
+    file_ext = os.path.splitext(file.filename)[1].lower() if file.filename else ""
+    if file_ext not in SUPPORTED_EMOTION_EXTENSIONS:
+        msg = f"Unsupported file extension: {file_ext}. Supported: {SUPPORTED_EMOTION_EXTENSIONS}"
+        logger.warning(f"Emotion Validation Failed: {msg} [RequestID: {request_id}]")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail={"error_code": "INVALID_FILE_FORMAT", "message": msg, "request_id": request_id}
+        )
+
+    # 2. Save to Temporary File
+    temp_filename = f"{uuid.uuid4()}{file_ext}"
+    temp_dir = tempfile.gettempdir()
+    temp_file_path = os.path.join(temp_dir, temp_filename)
+    
+    try:
+        file_size = 0
+        with open(temp_file_path, "wb") as buffer:
+            while content := await file.read(1024 * 1024): 
+                file_size += len(content)
+                if file_size > MAX_EMOTION_FILE_SIZE_BYTES:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={"error_code": "FILE_TOO_LARGE", "message": f"File exceeds {MAX_EMOTION_FILE_SIZE_MB}MB limit", "request_id": request_id}
+                    )
+                buffer.write(content)
+        
+        logger.info(f"Emotion file saved temporarily at {temp_file_path} ({file_size} bytes) [RequestID: {request_id}]")
+
+        # 3. Process with Provider
+        # Distinguish Image vs Video
+        is_image = file_ext in {".jpg", ".jpeg", ".png"}
+        
+        if is_image:
+            # Analyze single face
+            # We need to wrap it into VideoEmotionAnalysisResultDTO
+            # Assuming just 1 frame at 0.0s
+            try:
+                face_result = await emotion_provider.analyze_face(temp_file_path)
+                
+                # Wrap
+                frame_dto = FrameEmotionDTO(
+                    timestamp=0.0,
+                    face_detected=True,
+                    dominant_emotion=face_result.dominant_emotion,
+                    emotion_scores=EmotionScoreDTO(**face_result.scores),
+                    box=[face_result.region['x'], face_result.region['y'], face_result.region['w'], face_result.region['h']]
+                )
+                
+                result = VideoEmotionAnalysisResultDTO(
+                    metadata=VideoEmotionAnalysisMetadataDTO(
+                        total_duration=0.0,
+                        total_frames_analyzed=1,
+                        model="DeepFace/Image"
+                    ),
+                    results=[frame_dto]
+                )
+                
+            except ValueError:
+                # No face detected in image
+                # Should return a result indicating no face, or error?
+                # Plan says: "이미지 파일: 단일 프레임(0.0초) 결과가 나오는지 확인"
+                # If no face, return face_detected=False
+                 result = VideoEmotionAnalysisResultDTO(
+                    metadata=VideoEmotionAnalysisMetadataDTO(
+                        total_duration=0.0,
+                        total_frames_analyzed=1,
+                        model="DeepFace/Image"
+                    ),
+                    results=[FrameEmotionDTO(timestamp=0.0, face_detected=False)]
+                )
+        else:
+            # Video
+            result = await emotion_provider.analyze_video(temp_file_path)
+
+        logger.info(f"Emotion Analysis succeeded. Frames: {len(result.results)} [RequestID: {request_id}]")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Emotion Analysis Failed [RequestID: {request_id}]")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error_code": "EMOTION_PROCESSING_ERROR", "message": "An error occurred during emotion analysis.", "request_id": request_id}
+        )
+    finally:
+        # 4. Cleanup
+        if os.path.exists(temp_file_path):
+            try:
+                os.remove(temp_file_path)
+                logger.info(f"Temporary Emotion file deleted: {temp_file_path} [RequestID: {request_id}]")
+            except Exception as e:
+                logger.error(f"Failed to delete temporary Emotion file: {temp_file_path}. Error: {e} [RequestID: {request_id}]")

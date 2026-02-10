@@ -143,3 +143,21 @@
         - Empty / Invalid Input -> Validation Error 처리 확인
         - 전체 테스트 통과 시 `"ALL TESTS PASSED"` 출력
     - **로그 확인**: `IMH/IMH_Interview/logs/runtime/runtime.log`에 API 요청/응답 및 처리 결과 기록 확인.
+
+### TASK-008 Emotion 분석 (DeepFace Implementation)
+- **요약**: DeepFace 모델을 활용한 **영상(1fps)/이미지 감정 분석** 파이프라인 구현. `playground` API에 통합 및 DTO 구조화.
+- **변경 사항**:
+    - `packages/imh_providers/emotion/dto.py`: 시계열 분석 결과(`VideoEmotionAnalysisResultDTO`) 및 프레임 DTO 정의.
+    - `packages/imh_providers/emotion/deepface_impl.py`: `DeepFaceEmotionProvider` 구현 (OpenCV Backend, 1fps 샘플링, Face Detection Fail 처리).
+    - `packages/imh_providers/emotion/base.py`, `mock.py`: `analyze_video` 인터페이스 추가 및 Mock 구현 업데이트.
+    - `IMH/api/dependencies.py`: `get_emotion_provider` 의존성 주입 추가 (DeepFaceImpl 사용).
+    - `IMH/api/playground.py`: `POST /emotion` 엔드포인트 구현 (이미지/비디오 분기 처리).
+    - `scripts/verify_task_008.py`: `TestClient` 기반 통합 검증 스크립트 작성 (Dummy 영상/이미지 생성 및 업로드).
+    - **환경 변경**: `tf-keras` 패키지 설치 (DeepFace + TF 2.20 호환성 이슈 해결).
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_008.py` (Verify Environment: `interview_env`)
+        - Image Upload -> 200 OK (DeepFace/Image Result).
+        - Video Upload (3s, 10fps) -> 200 OK. 3 Frames Analyzed (1fps Sampling 동작 확인).
+        - JSON 구조(`metadata`, `results`) 및 `timestamp` 정합성 확인.
+    - **로그 확인**: `IMH/IMH_Interview/logs/runtime/runtime.log`에 분석 프레임 수 및 처리 시간 기록 확인.
+

@@ -78,23 +78,26 @@
 
 ---
 
+### TASK-008 Emotion 분석 (DeepFace, 1fps)
+- **Goal**: Playground 환경에서 **DeepFace 기반 감정 분석 파이프라인**을 검증하고,
+  실시간 면접 적용 전 저주기(1fps) Emotion 분석 코어의 안정성을 확인
+- **Scope**:
+  - 이미지 / 비디오 파일 기반 Emotion 분석
+  - 1fps 프레임 샘플링 기반 DeepFace 추론
+  - 얼굴 미검출 / 다중 얼굴 처리 정책 검증
+  - 시계열 DTO 구조화 및 Playground API 연동
+- **Verification**: `python scripts/verify_task_008.py` Pass
+
+---
 ## ACTIVE
 
-### TASK-008 Voice 분석 (Parselmouth)
+### TASK-009 Voice 분석 (Parselmouth)
 - Parselmouth 기반 음성 분석
-- 발화 특성, pitch, intensity 등 추출
+- 발화 특성, pitch, intensity 등 음성 지표 추출
+- Playground 환경에서 파일 기반 검증
 
 ---
-
 ## BACKLOG
-
----
-
-### TASK-009 Emotion 분석 (DeepFace, 1fps)
-- DeepFace 기반 표정/감정 분석
-- 저주기(1fps) 처리
-
----
 
 ### TASK-010 Visual 분석 (MediaPipe)
 - MediaPipe 기반 시선/포즈/제스처 분석
