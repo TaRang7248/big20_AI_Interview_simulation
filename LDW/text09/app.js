@@ -516,6 +516,7 @@ $('#btn-cancel-interview').addEventListener('click', () => {
 });
 
 // Step 2: Main Interview Logic (Modified for Upload)
+// Step 2: Main Interview Logic (Connected to Server)
 $('#btn-start-interview').addEventListener('click', async () => {
     // Check if resume is uploaded
     const fileInput = $('#resume-upload');
@@ -535,7 +536,7 @@ $('#btn-start-interview').addEventListener('click', async () => {
     formData.append('job_title', job ? job.job : 'Unknown');
 
     try {
-        showToast('이력서 업로드 중...', 'info');
+        showToast('이력서 업로드 및 면접 준비 중...', 'info');
         const response = await fetch('/api/upload/resume', {
             method: 'POST',
             body: formData
@@ -547,69 +548,56 @@ $('#btn-start-interview').addEventListener('click', async () => {
             return;
         }
 
-        showToast('이력서 업로드 완료. 면접을 시작합니다.', 'success');
+        // Call API to Start Interview
+        const startResponse = await fetch('/api/interview/start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_name: AppState.currentUser.id_name,
+                job_id: AppState.currentJobId
+            })
+        });
+        const startResult = await startResponse.json();
+
+        if (startResult.success) {
+            // Init Interview State
+            AppState.interview = {
+                inProgress: true,
+                interviewNumber: startResult.interview_number,
+                currentQId: startResult.q_id,
+                currentQuestion: startResult.question,
+                questionCount: 1,
+                timeLeft: 60,
+                timer: null
+            };
+
+            showToast('면접을 시작합니다.', 'success');
+
+            // Clear UI
+            $('#chat-log').innerHTML = '';
+            $('#user-answer').value = '';
+            $('#coding-board').classList.add('hidden');
+
+            navigateTo('interview-page');
+            displayCurrentQuestion();
+
+        } else {
+            showToast(startResult.message || '면접 시작 실패', 'error');
+        }
 
     } catch (error) {
-        console.error('Resume Upload Error:', error);
-        showToast('서버 연결 실패 (이력서 업로드)', 'error');
+        console.error('Interview Start Error:', error);
+        showToast('서버 연결 실패', 'error');
         return;
     }
-
-
-    // Init Interview State
-    AppState.interview = {
-        inProgress: true,
-        phase: 1, // Start with Intro
-        questionIndex: 0,
-        logs: [],
-        timeLeft: 60 // 60s per question
-    };
-
-    // Clear UI
-    $('#chat-log').innerHTML = '';
-    $('#user-answer').value = '';
-    $('#coding-board').classList.add('hidden');
-
-    navigateTo('interview-page');
-    runInterviewPhase();
 });
 
-function runInterviewPhase() {
+function displayCurrentQuestion() {
     if (!AppState.interview.inProgress) return;
 
-    // Check Phase
-    let questions = [];
-    let phaseName = '';
-
-    if (AppState.interview.phase === 1) {
-        questions = MOCK_DB.interviewQuestions['phase1'];
-        phaseName = 'Phase 1: 자기소개';
-    } else if (AppState.interview.phase === 2) {
-        questions = MOCK_DB.interviewQuestions['phase2'];
-        phaseName = 'Phase 2: 역량 검증';
-    } else if (AppState.interview.phase === 3) {
-        questions = MOCK_DB.interviewQuestions['coding'];
-        phaseName = 'Phase 3: 기술 문제';
-        $('#coding-board').classList.remove('hidden');
-    } else {
-        // Finish
-        finishInterview();
-        return;
-    }
-
-    // Check Question Index
-    if (AppState.interview.questionIndex >= questions.length) {
-        // Next Phase
-        AppState.interview.phase++;
-        AppState.interview.questionIndex = 0;
-        // Recursive call for next phase
-        runInterviewPhase();
-        return;
-    }
-
     // Update UI
-    $('#phase-label').textContent = phaseName;
-    const currentQ = questions[AppState.interview.questionIndex];
+    $('#phase-label').textContent = `질문 ${AppState.interview.questionCount}`;
+    const currentQ = AppState.interview.currentQuestion;
 
     // AI Speaking (TTS)
     $('#ai-message').textContent = '...';
@@ -625,67 +613,53 @@ function runInterviewPhase() {
             // After speaking finishes:
             startTimer(60); // Start Timer
             startListening(); // Start STT
+            $('#user-answer').focus();
         });
     }, 500);
 }
 
-function startTimer(seconds) {
-    if (AppState.interview.timer) clearInterval(AppState.interview.timer);
-
-    AppState.interview.timeLeft = seconds;
-    updateTimerDisplay();
-
-    AppState.interview.timer = setInterval(() => {
-        AppState.interview.timeLeft--;
-        updateTimerDisplay();
-
-        if (AppState.interview.timeLeft <= 0) {
-            clearInterval(AppState.interview.timer);
-            submitAnswer(true); // Force submit
-        }
-    }, 1000);
-}
-
-function updateTimerDisplay() {
-    const min = Math.floor(AppState.interview.timeLeft / 60);
-    const sec = AppState.interview.timeLeft % 60;
-    $('#timer-display').textContent = `${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-
-    // Progress Bar simulation (just visual)
-    const totalTime = 60;
-    const pct = ((totalTime - AppState.interview.timeLeft) / totalTime) * 100;
-    $('#progress-bar').style.width = `${pct}%`;
-}
-
-function addChatLog(sender, text) {
-    const div = document.createElement('div');
-    div.className = `chat-msg ${sender.toLowerCase()}`;
-    div.innerHTML = `<strong>${sender}:</strong> ${text}`;
-    $('#chat-log').appendChild(div);
-    $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
-}
-
-$('#btn-submit-answer').addEventListener('click', () => submitAnswer(false));
 
 function submitAnswer(forced) {
     if (AppState.interview.timer) clearInterval(AppState.interview.timer);
     stopListening(); // Stop STT on submit
 
     const answer = $('#user-answer').value.trim() || (forced ? '(시간 초과)' : '(답변 없음)');
+    const timeTaken = 60 - AppState.interview.timeLeft;
+
     addChatLog('User', answer);
-
-    // Save Log
-    AppState.interview.logs.push({
-        phase: AppState.interview.phase,
-        qIndex: AppState.interview.questionIndex,
-        answer: answer
-    });
-
     $('#user-answer').value = '';
 
-    // Move next
-    AppState.interview.questionIndex++;
-    runInterviewPhase();
+    // Send Answer to Server
+    fetch('/api/interview/reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            interview_number: AppState.interview.interviewNumber,
+            q_id: AppState.interview.currentQId,
+            answer: answer,
+            time_taken: timeTaken
+        })
+    })
+        .then(res => res.json())
+        .then(result => {
+            if (result.success) {
+                if (result.finished) {
+                    finishInterview();
+                } else {
+                    // Next Question
+                    AppState.interview.currentQId = result.q_id;
+                    AppState.interview.currentQuestion = result.question;
+                    AppState.interview.questionCount++;
+                    displayCurrentQuestion();
+                }
+            } else {
+                showToast(result.message || '답변 제출 실패', 'error');
+            }
+        })
+        .catch(err => {
+            console.error('Reply Error:', err);
+            showToast('서버 통신 오류', 'error');
+        });
 }
 
 function finishInterview() {
