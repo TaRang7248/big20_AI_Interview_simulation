@@ -9,14 +9,16 @@ Text-to-Speech(TTS), Speech-to-Text(STT), LLM 기반 질문생성 및 답변 평
 - **화상 면접 중심**
 - **LLM**: Qwen3-4B 모델 기반 AI 면접 두뇌 역할. 질문을 생성하고 답변을 평가 (컨텍스트 윈도우 16384)
 - **이력서 RAG**: PDF 이력서 업로드 → 맞춤형 면접 평가
-- **Celery 비동기 처리**: 무거운 작업(LLM 평가, 감정 분석, 리포트 생성)을 백그라운드에서 처리
+- **Celery 비동기 처리**: 무거운 작업(LLM 평가, 감정 분석, 리포트 생성, 미디어 트랜스코딩)을 백그라운드에서 처리
 - **회원가입/로그인**: 이메일 기반 회원가입 및 소셜 로그인 (카카오, 구글, 네이버) 지원
 - **보안 시스템**: bcrypt 비밀번호 해싱, JWT 인증, CORS 제한, WebSocket JWT 인증, TLS 지원
 - **종합 리포트**: STAR 기법 분석, 키워드 추출, 등급 산정 포함
+- **Recharts 리포트 시각화**: 7종 인터랙티브 차트 (레이더, 바, 파이, 영역)로 면접 결과 시각 대시보드
+- **미디어 녹화/트랜스코딩**: aiortc + GStreamer/FFmpeg 하이브리드 아키텍처 기반 면접 영상 녹화 및 자동 트랜스코딩
 - **코딩 테스트**: Python, JavaScript, Java, C/C++ 지원하는 웹 IDE 통합
 - **화이트보드 면접**: Claude 3.5 Sonnet Vision을 활용한 시스템 아키텍처 다이어그램 분석
 - **AI 아바타**: D-ID WebRTC 스트리밍으로 실시간 AI 면접관 영상 생성
-- **Next.js 프론트엔드**: TypeScript + Tailwind CSS 기반 현대적 UI (App Router)
+- **Next.js 프론트엔드**: TypeScript + Tailwind CSS + Recharts 기반 현대적 UI (App Router)
 - **원클릭 시작**: 배치/PowerShell 스크립트로 전체 시스템 한 번에 실행
 
 ---
@@ -196,6 +198,7 @@ CSH/
 ├── code_execution_service.py       # 코딩 테스트 서비스 (샌드박스 실행, AI 분석)
 ├── whiteboard_service.py           # 화이트보드 다이어그램 분석 (Claude Vision)
 ├── did_avatar_service.py           # D-ID AI 아바타 영상 생성 (WebRTC 스트리밍)
+├── media_recording_service.py      # 미디어 녹화/트랜스코딩 서비스 (aiortc + GStreamer/FFmpeg 하이브리드)
 ├── json_utils.py                   # LLM JSON 안정적 추출/파싱 방어 로직 (6단계)
 ├── security.py                     # 보안 유틸리티 (bcrypt, JWT, TLS, CORS)
 ├── events.py                       # 이벤트 타입 정의 (30+ EventType, Pydantic 모델)
@@ -312,10 +315,12 @@ LLM 응답에서 JSON을 안정적으로 추출하고 파싱하기 위한 방어
 | `complete_interview_workflow_task` | 면접 완료 후 전체 워크플로우 | default |
 | `save_session_to_redis_task` | 세션 데이터 Redis 저장 | default |
 
-**추가 태스크 (celery_tasks.py 기준 총 14개):**
+**추가 태스크 (celery_tasks.py 기준 총 16개):**
 - `analyze_code_task` — AI 코드 분석
 - `analyze_whiteboard_task` — 화이트보드 다이어그램 분석
 - `complete_session_analysis_task` — 세션 종합 분석
+- `transcode_recording_task` — 미디어 트랜스코딩 (GStreamer/FFmpeg, 비디오+오디오 합성, H.264+AAC)
+- `cleanup_recording_task` — 만료/삭제된 녹화 파일 정리
 
 **주기적 작업 (Celery Beat):**
 - `cleanup_sessions_task`: 5분마다 만료 세션 정리
@@ -483,6 +488,150 @@ Celery 워커는 비동기 컨텍스트 외부에서 실행되므로 `_publish_e
 - 💻 코드 분석 완료 (`coding.analyzed`)
 - ⚠️ 시스템 오류 (`system.error`)
 
+### 14. 미디어 녹화/트랜스코딩 서비스 (media_recording_service.py)
+
+aiortc와 GStreamer/FFmpeg를 결합한 **하이브리드 아키텍처** 기반 면접 영상 녹화 및 트랜스코딩 서비스입니다.
+
+#### 아키텍처 개요
+
+```
+┌──────────────┐     raw frames (BGR24)     ┌──────────────────────┐
+│   aiortc     │  ─────────────────────►    │  GStreamer / FFmpeg   │
+│  (WebRTC     │     stdin pipe              │  (실시간 인코딩)       │
+│   Track      │                            │                      │
+│   수신)       │     audio frames           │  H.264 + AAC         │
+│              │  ─────────────────────►    │  → MP4 컨테이너        │
+└──────────────┘                            └──────────┬───────────┘
+                                                       │
+                                                       ▼
+                                            ┌──────────────────────┐
+                                            │  recordings/         │
+                                            │  ├── {session_id}/   │
+                                            │  │   ├── video.mp4   │
+                                            │  │   ├── audio.wav   │
+                                            │  │   ├── merged.mp4  │
+                                            │  │   └── thumb.jpg   │
+                                            │  └── metadata.json   │
+                                            └──────────────────────┘
+                                                       │
+                                            ┌──────────▼───────────┐
+                                            │  Celery Worker       │
+                                            │  (media_processing)  │
+                                            │  ├── transcode_task  │
+                                            │  └── cleanup_task    │
+                                            └──────────────────────┘
+```
+
+#### 핵심 설계: Graceful Degradation
+
+서비스는 실행 환경에 따라 최적의 미디어 처리 백엔드를 자동으로 선택합니다:
+
+| 우선순위 | 백엔드 | 파이프라인 명령 | 조건 |
+|----------|--------|----------------|------|
+| 1순위 | **GStreamer** | `gst-launch-1.0 fdsrc ! video/x-raw,format=BGR ! videoconvert ! x264enc ! mp4mux ! filesink` | `gst-launch-1.0` 실행 가능 |
+| 2순위 | **FFmpeg** | `ffmpeg -f rawvideo -pixel_format bgr24 -c:v libx264 -preset ultrafast` | `ffmpeg` 실행 가능 |
+| 3순위 | **비활성화** | — | 둘 다 미설치 시 경고 로그 출력, 녹화 기능 비활성화 |
+
+#### 주요 클래스/타입
+
+| 이름 | 타입 | 설명 |
+|------|------|------|
+| `RecordingStatus` | Enum | `IDLE`, `RECORDING`, `STOPPING`, `COMPLETED`, `FAILED`, `TRANSCODING`, `READY` |
+| `RecordingMetadata` | dataclass | 세션 ID, 파일 경로, 상태, 시작/종료 시간, 프레임 수, 해상도, fps, 파일 크기 |
+| `MediaRecordingService` | class | 녹화 서비스 메인 클래스 (싱글턴 인스턴스) |
+
+#### MediaRecordingService API
+
+| 메서드 | 설명 |
+|--------|------|
+| `start_recording(session_id, width, height, fps)` | 녹화 시작 — stdin pipe로 GStreamer/FFmpeg 프로세스 생성 |
+| `write_video_frame(session_id, frame)` | BGR24 raw 비디오 프레임을 파이프에 기록 |
+| `write_audio_frame(session_id, audio_data)` | PCM 오디오 데이터를 WAV 파일에 기록 |
+| `stop_recording(session_id)` | 녹화 중지 — 파이프 닫기, 프로세스 종료, 썸네일 생성, 메타데이터 저장 |
+| `transcode(input_path, output_path, format)` | 정적 메서드, GStreamer/FFmpeg로 비디오+오디오 합성 (H.264 + AAC) |
+| `delete_recording(session_id)` | 녹화 파일 및 메타데이터 삭제 |
+| `get_recording(session_id)` | 녹화 메타데이터 조회 |
+| `cleanup()` | 전체 녹화 세션 정리 (서버 종료 시 호출) |
+
+#### 서버 통합 (`integrated_interview_server.py`)
+
+- **`_video_pipeline(track, session_id)`**: WebRTC 비디오 트랙에서 프레임 추출 → 녹화 서비스에 프레임 기록 (매 프레임) + 감정 분석 (1초 간격) + 시선 추적
+- **`_audio_pipeline(track, session_id)`**: WebRTC 오디오 트랙 라우팅 — STT+녹화 동시 처리 또는 녹화 전용
+- **`_process_audio_with_stt_and_recording(track, session_id)`**: Deepgram STT와 녹화 오디오 파이프를 단일 프레임 루프에서 동시 처리
+
+#### FFmpeg / GStreamer 설치
+
+```powershell
+# FFmpeg 설치 (Windows — winget)
+winget install Gyan.FFmpeg
+
+# 또는 수동 설치: https://ffmpeg.org/download.html
+# PATH에 ffmpeg.exe 경로 추가 필요
+
+# GStreamer 설치 (Windows — MSI 인스톨러)
+# https://gstreamer.freedesktop.org/download/
+# Runtime + Development 모두 설치
+# 설치 후 시스템 PATH에 자동 추가됨
+```
+
+### 15. Recharts 리포트 시각화 (InterviewReportCharts.tsx)
+
+면접 종료 후 생성되는 종합 리포트를 **Recharts** 라이브러리를 활용하여 7종의 인터랙티브 차트로 시각화합니다.
+
+#### 차트 구성
+
+| 차트 | 컴포넌트 | 유형 | 데이터 소스 |
+|------|----------|------|-------------|
+| 평가 항목 레이더 | `EvalRadarChart` | RadarChart | LLM 5가지 평가 점수 (구체성, 논리성, 기술이해도, STAR, 전달력) |
+| 답변별 점수 비교 | `EvalBarChart` | BarChart (Grouped) | 질문별 5항목 점수 비교 |
+| STAR 기법 분석 | `StarBarChart` | BarChart (Horizontal) | 상황/과제/행동/결과 각 점수 |
+| 감정 분포 | `EmotionPieChart` | PieChart (Donut) | 7가지 감정 비율 |
+| 핵심 키워드 | `KeywordBarChart` | BarChart | 기술 키워드 + 일반 키워드 Top 10 |
+| 발화 속도 추이 | `SpeechAreaChart` | AreaChart | 답변별 SPM (분당 음절 수) + 단어 수 |
+| 시선 분석 | `GazeBarChart` | BarChart | 답변별 시선 집중도(%) — 조건부 색상 표시 |
+
+#### 부가 컴포넌트
+
+| 컴포넌트 | 설명 |
+|----------|------|
+| `ScoreCard` | 요약 메트릭 카드 (아이콘 + 점수 + 라벨) |
+| 등급 배지 | S(≥4.5) / A(≥3.5) / B(≥2.5) / C(≥1.5) / D — 등급별 색상 코딩 |
+| 답변별 상세 피드백 | 각 답변의 강점(strengths)과 개선점(improvements) 표시 |
+
+#### TypeScript 인터페이스
+
+```typescript
+interface ReportData {
+  session_id: string;
+  llm_evaluation: LLMEvaluation;
+  emotion_stats: EmotionStats;
+  speech_analysis: SpeechAnalysis;
+  gaze_analysis: GazeAnalysis;
+  star_analysis: StarAnalysis;
+  keywords: { tech: Record<string, number>; general: Record<string, number> };
+  grade: string;
+  total_score: number;
+}
+```
+
+#### 데이터 흐름
+
+```
+면접 종료 → GET /api/report/{session_id}
+        → React useEffect에서 데이터 fetch
+        → InterviewReportCharts 컴포넌트에 전달
+        → 7개 서브 차트 렌더링
+        → 로딩 상태: 스피너 표시
+        → 에러 시: 기존 텍스트 리포트 fallback
+```
+
+#### interview/page.tsx 통합
+
+면접 페이지의 리포트 phase에서 자동으로 차트 대시보드가 표시됩니다:
+- **로딩 상태**: 스피너 + "리포트 데이터를 불러오는 중..." 텍스트
+- **차트 대시보드**: 7종 차트 + ScoreCard + 등급 배지
+- **액션 버튼**: JSON 다운로드 / PDF 다운로드 / 대시보드 이동 (Lucide 아이콘)
+
 ---
 
 ## 📡 API 엔드포인트
@@ -593,6 +742,14 @@ Celery 워커는 비동기 컨텍스트 외부에서 실행되므로 `_publish_e
 - `POST /api/avatar/stream/{stream_id}/speak` - 텍스트로 아바타 말하기
 - `DELETE /api/avatar/stream/{stream_id}` - 스트림 종료
 
+### 미디어 녹화
+- `POST /api/recording/{session_id}/start` - 녹화 시작 (GStreamer/FFmpeg 파이프라인 생성)
+- `POST /api/recording/{session_id}/stop` - 녹화 중지 (파이프 닫기, 썸네일 생성, 메타데이터 저장)
+- `GET /api/recording/{session_id}` - 녹화 메타데이터 조회 (상태, 파일 크기, 해상도, 프레임 수 등)
+- `GET /api/recording/{session_id}/download` - 녹화 파일 다운로드 (FileResponse)
+- `DELETE /api/recording/{session_id}` - 녹화 파일 및 메타데이터 삭제
+- `GET /api/recording/status` - 녹화 서비스 전체 상태 조회 (활성 녹화 세션 수, GStreamer/FFmpeg 가용 여부)
+
 ---
 
 ## 🖥️ Next.js 프론트엔드 (CSH/frontend)
@@ -606,8 +763,10 @@ Next.js 기반 프론트엔드 애플리케이션
 | **Next.js 15** | App Router 기반 React 풀스택 프레임워크 |
 | **TypeScript** | 타입 안전성 보장 |
 | **Tailwind CSS** | 유틸리티 기반 CSS (다크 네이비 테마) |
+| **Recharts** | 면접 리포트 시각화 (레이더, 바, 파이, 영역 차트) |
 | **Chart.js** | 감정 분석 시계열/도넛/레이더 차트 |
 | **Monaco Editor** | 코딩 테스트용 웹 IDE |
+| **Lucide React** | 아이콘 라이브러리 (액션 버튼, UI 아이콘) |
 
 ### 프론트엔드 구조
 
@@ -638,6 +797,8 @@ CSH/frontend/
     │   │   ├── LoginModal.tsx         # 로그인 모달
     │   │   ├── RegisterModal.tsx      # 회원가입 모달
     │   │   └── ForgotPasswordModal.tsx # 비밀번호 찾기 모달
+    │   ├── report/
+    │   │   └── InterviewReportCharts.tsx # Recharts 리포트 시각화 (7종 차트)
     │   └── emotion/
     │       └── EmotionCharts.tsx      # Chart.js 차트 컴포넌트
     ├── contexts/
@@ -682,6 +843,7 @@ CSH/frontend/
 | 코딩 테스트 | Python 3.8+ (기본), Node.js, JDK (선택) | 코드 실행 |
 | 화이트보드 | ANTHROPIC_API_KEY 설정 (Claude) | 다이어그램 분석 |
 | AI 아바타 | DID_API_KEY 설정 | 실시간 아바타 영상 |
+| 미디어 녹화 | GStreamer 또는 FFmpeg 설치 (선택) | 면접 영상 녹화/트랜스코딩 |
 
 모든 서비스는 선택사항입니다. 설정되지 않은 서비스는 비활성화되며, 기본 기능으로 대체됩니다.
 
@@ -696,6 +858,7 @@ CSH/frontend/
 ✅ 코딩 테스트 서비스 활성화됨
 ✅ 화이트보드 분석 서비스 활성화됨
 ✅ D-ID 아바타 서비스 활성화됨
+✅ 미디어 녹화 서비스 활성화됨 (GStreamer)
 ```
 
 ---
@@ -809,9 +972,9 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 
 | 파일 | 설명 |
 |------|------|
-| `integrated_interview_server.py` | **통합 FastAPI 서버** (5060+ lines) - 질문 은행, LLM 평가, 회원 인증, 소셜 로그인, WebRTC, WebSocket, 감정 분석, 면접 개입(인터벤션), ThreadPoolExecutor 비동기 처리, Celery 워크플로우 |
-| `celery_app.py` | **Celery 애플리케이션 설정(설계도)** (120+ lines) - Celery 앱 생성, Redis 브로커 연결, 큐 정의 & 라우팅, Beat 스케줄 정의 |
-| `celery_tasks.py` | **Celery 비동기 태스크** (1080+ lines) - 14개 태스크 정의: LLM 평가, 감정 분석, 리포트 생성, TTS, RAG, 세션 정리, 통계, 워크플로우, Redis 세션 저장 |
+| `integrated_interview_server.py` | **통합 FastAPI 서버** (5230+ lines) - 질문 은행, LLM 평가, 회원 인증, 소셜 로그인, WebRTC, WebSocket, 감정 분석, 면접 개입(인터벤션), ThreadPoolExecutor 비동기 처리, Celery 워크플로우, 미디어 녹화 통합 (video/audio pipeline) |
+| `celery_app.py` | **Celery 애플리케이션 설정(설계도)** (120+ lines) - Celery 앱 생성, Redis 브로커 연결, 큐 정의 & 라우팅 (media_processing 큐 포함), Beat 스케줄 정의 |
+| `celery_tasks.py` | **Celery 비동기 태스크** (1280+ lines) - 16개 태스크 정의: LLM 평가, 감정 분석, 리포트 생성, TTS, RAG, 세션 정리, 통계, 워크플로우, Redis 세션 저장, 미디어 트랜스코딩, 녹화 정리 |
 | `text_interview.py` | **텍스트 면접 모듈** (510+ lines) - STAR 기법 분석, 키워드 추출, 리포트 생성 클래스 |
 | `hume_tts_service.py` | **Hume AI TTS 클라이언트** (440+ lines) - OAuth2 토큰 인증, EVI 음성 생성, 스트리밍 지원 |
 | `stt_engine.py` | **Deepgram STT 클라이언트** (320+ lines) - Nova-3 모델, 실시간 마이크 입력, VAD 지원, 한국어 띄어쓰기 보정 (pykospacing) |
@@ -819,6 +982,7 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 | `code_execution_service.py` | **코딩 테스트 서비스** (1180+ lines) - 샌드박스 코드 실행, AI 코드 분석, 문제 은행 |
 | `whiteboard_service.py` | **화이트보드 분석 서비스** (850+ lines) - Claude 3.5 Sonnet Vision (메인) + Qwen3-VL (폴백), 아키텍처 평가, 동적 문제 생성 |
 | `did_avatar_service.py` | **D-ID 아바타 서비스** (520+ lines) - Talks API + Streams API (WebRTC), 실시간 아바타 영상 생성 |
+| `media_recording_service.py` | **미디어 녹화/트랜스코딩 서비스** (430+ lines) - aiortc + GStreamer/FFmpeg 하이브리드, stdin pipe 실시간 인코딩, 썸네일 생성, 메타데이터 관리, Graceful Degradation |
 | `video_interview_server.py` | WebRTC + 감정 분석 서버 (350 lines, 레거시 — integrated에 통합됨) |
 | `data_entry.ipynb` | 데이터 입력용 Jupyter Notebook |
 | `start_interview.bat` | **원클릭 시작 스크립트** (Windows Batch) - 전체 시스템 실행 |
@@ -838,7 +1002,7 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 | `static/video.html` | 기존 화상 면접 UI (레거시) |
 | `uploads/` | 이력서 PDF 업로드 디렉토리 |
 | `documents/` | **설계 문서 디렉토리** - SAD, SRS, 보안 리뷰 보고서, RAG DB 구조, TODO |
-| `frontend/` | **Next.js 프론트엔드** - TypeScript + Tailwind CSS, 7개 페이지, 인증 시스템, Chart.js, 실시간 이벤트 알림 |
+| `frontend/` | **Next.js 프론트엔드** - TypeScript + Tailwind CSS + Recharts, 7개 페이지, 인증 시스템, Chart.js, Recharts 리포트 시각화, 실시간 이벤트 알림 |
 
 ---
 
@@ -910,6 +1074,9 @@ async def get_my_result(task_id: str):
 - [Anthropic Claude 문서](https://docs.anthropic.com/)
 - [D-ID API 문서](https://docs.d-id.com/)
 - [aiortc WebRTC 문서](https://github.com/aiortc/aiortc)
+- [Recharts 문서](https://recharts.org/)
+- [GStreamer 문서](https://gstreamer.freedesktop.org/documentation/)
+- [FFmpeg 문서](https://ffmpeg.org/documentation.html)
 
 ---
 
@@ -926,6 +1093,47 @@ async def get_my_result(task_id: str):
 ---
 
 ## 📝 변경 이력 (Changelog)
+
+### 2026-02-11
+
+#### 📊 Recharts 리포트 시각화 구현
+- **신규 컴포넌트** (`frontend/src/components/report/InterviewReportCharts.tsx`, 470+ lines):
+  - 7종 인터랙티브 차트 — `EvalRadarChart` (5가지 평가 레이더), `EvalBarChart` (답변별 그룹 바), `StarBarChart` (STAR 기법 수평 바), `EmotionPieChart` (감정 도넛), `KeywordBarChart` (Top 10 키워드 바), `SpeechAreaChart` (발화 속도 영역), `GazeBarChart` (시선 집중도 조건부 색상 바)
+  - `ScoreCard` 요약 메트릭 컴포넌트, 등급 배지 (S/A/B/C/D)
+  - TypeScript 인터페이스: `ReportData`, `LLMEvaluation`, `EmotionStats`, `SpeechAnalysis`, `GazeAnalysis`, `StarAnalysis`
+  - 답변별 상세 피드백 (강점/개선점) 섹션
+- **면접 페이지 통합** (`frontend/src/app/interview/page.tsx`):
+  - 리포트 phase에서 `InterviewReportCharts` 자동 렌더링
+  - `useEffect` 훅으로 리포트 데이터 비동기 fetch (`interviewApi.getReport()`)
+  - 로딩 스피너 → 차트 대시보드 → 에러 시 텍스트 리포트 fallback
+  - 액션 버튼: JSON 다운로드 / PDF 다운로드 / 대시보드 이동 (Lucide React 아이콘: `FileText`, `Download`, `LayoutDashboard`)
+- **Recharts 패키지 설치**: `npm install recharts` (38개 패키지 추가)
+- **API 타입 수정** (`frontend/src/lib/api.ts`): `authApi.register()` 타입에 `phone?: string` 필드 추가
+
+#### 🎬 aiortc + GStreamer/FFmpeg 하이브리드 미디어 녹화 아키텍처 구현
+- **신규 서비스** (`media_recording_service.py`, 430+ lines):
+  - aiortc에서 raw 프레임 추출 → stdin pipe로 GStreamer/FFmpeg에 실시간 전달하는 하이브리드 아키텍처
+  - Graceful Degradation: GStreamer (1순위) → FFmpeg (2순위) → 비활성화 (3순위)
+  - GStreamer 파이프라인: `fdsrc ! video/x-raw,format=BGR ! videoconvert ! x264enc ! mp4mux ! filesink`
+  - FFmpeg 파이프라인: `-f rawvideo -pixel_format bgr24 -c:v libx264 -preset ultrafast`
+  - `RecordingStatus` enum (7 상태), `RecordingMetadata` dataclass
+  - `MediaRecordingService` 클래스: `start_recording()`, `write_video_frame()`, `write_audio_frame()`, `stop_recording()`, `transcode()`, `delete_recording()`, `cleanup()`
+  - 썸네일 자동 생성 (`_generate_thumbnail()`), 영상 길이 감지 (`_get_duration()`)
+  - 싱글턴 `recording_service` 인스턴스
+- **서버 통합** (`integrated_interview_server.py`):
+  - `_video_pipeline(track, session_id)`: 비디오 트랙 프레임 → 녹화(매 프레임) + 감정 분석(1초) + 시선 추적
+  - `_audio_pipeline(track, session_id)`: 오디오 트랙 라우팅 — STT+녹화 동시 처리 또는 녹화 전용
+  - `_process_audio_with_stt_and_recording(track, session_id)`: Deepgram STT + 녹화 오디오 단일 루프
+  - WebRTC `on_track` 핸들러 리팩토링: 기존 `analyze_emotions()` → `_video_pipeline()` + `_audio_pipeline()`
+  - 6개 녹화 API 엔드포인트 추가 (POST start/stop, GET info/download, DELETE, GET status)
+  - shutdown 핸들러에 `recording_service.cleanup()` 추가
+  - startup 상태 출력에 녹화 서비스 상태 추가
+- **Celery 미디어 처리** (`celery_tasks.py`, `celery_app.py`):
+  - `transcode_recording_task`: GStreamer/FFmpeg 트랜스코딩, H.264+AAC 합성, 이벤트 발행, 재시도 (max 2)
+  - `cleanup_recording_task`: 만료/삭제 녹화 파일 정리
+  - `media_processing` 큐 추가 (`Exchange("media")`, routing_key `media.#`)
+  - 태스크 라우팅: `transcode_recording_task` → `media_processing`, `cleanup_recording_task` → `media_processing`
+- **TODO.md 업데이트**: SAD-2 (미디어 서버), SAD-5 (WebRTC/미디어 흐름), SAD-6 (비동기 작업 처리) → ✅ 해결
 
 ### 2026-02-10
 
