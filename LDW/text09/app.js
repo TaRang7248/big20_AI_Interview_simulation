@@ -23,6 +23,7 @@ const AppState = {
         mediaRecorder: null,
         audioChunks: [],
         devicesReady: false,
+        recognition: null, // Web Speech API
     }
 };
 
@@ -410,6 +411,49 @@ async function startRecording() {
         AppState.interview.mediaRecorder.start();
         $('#feed-label').textContent = "녹음 중... (Speaking)";
 
+        // --- Real-time STT (Web Speech API) ---
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            AppState.interview.recognition = new SpeechRecognition();
+            AppState.interview.recognition.lang = 'ko-KR';
+            AppState.interview.recognition.continuous = true;
+            AppState.interview.recognition.interimResults = true;
+
+            AppState.interview.recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                // Update Textarea (Visual only)
+                const textArea = $('#user-answer');
+                // Append if needed, or just show current session text
+                // Since this is a new answer, we can just overwrite or append to what we have for this turn
+                // But simplified: just show what is being recognized now
+                textArea.value = finalTranscript + interimTranscript;
+                textArea.scrollTop = textArea.scrollHeight;
+            };
+
+            AppState.interview.recognition.onerror = (event) => {
+                console.warn("Speech Recognition Error:", event.error);
+            };
+
+            // Restart if it stops but we are still recording (e.g. silence)
+            AppState.interview.recognition.onend = () => {
+                if (AppState.interview.inProgress && AppState.interview.mediaRecorder && AppState.interview.mediaRecorder.state === 'recording') {
+                    try { AppState.interview.recognition.start(); } catch (e) { }
+                }
+            };
+
+            AppState.interview.recognition.start();
+        }
+
     } catch (err) {
         console.error("Recording Error:", err);
         showToast("마이크 접근 실패", 'error');
@@ -417,20 +461,33 @@ async function startRecording() {
 }
 
 function stopRecording() {
-    if (AppState.interview.mediaRecorder && AppState.interview.mediaRecorder.state !== 'inactive') {
+    // Stop Speech Recognition
+    if (AppState.interview.recognition) {
+        AppState.interview.recognition.onend = null; // Prevent restart
+        AppState.interview.recognition.stop();
+        AppState.interview.recognition = null;
+    }
+
+    return new Promise(resolve => {
+        if (!AppState.interview.mediaRecorder || AppState.interview.mediaRecorder.state === 'inactive') {
+            resolve();
+            return;
+        }
+
+        AppState.interview.mediaRecorder.onstop = () => {
+            resolve();
+        };
+
         AppState.interview.mediaRecorder.stop();
         $('#feed-label').textContent = "녹음 종료 (Processing)";
-    }
+    });
 }
 
 async function handleSubmitAnswer(forced = false) {
     if (!AppState.interview.inProgress) return;
 
     clearInterval(AppState.interview.timer);
-    stopRecording();
-
-    // Wait slightly for recorder to finish saving chunks
-    await new Promise(r => setTimeout(r, 500));
+    await stopRecording();
 
     const audioBlob = new Blob(AppState.interview.audioChunks, { type: 'audio/webm' });
     const audioFile = new File([audioBlob], "answer.webm", { type: 'audio/webm' });

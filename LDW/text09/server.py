@@ -531,7 +531,11 @@ async def submit_answer(
                 file=audio_file,
                 language="ko"
             )
-        applicant_answer = transcript.text
+        applicant_answer = transcript.text.strip()
+        
+        # Handle Empty Answer
+        if not applicant_answer:
+            applicant_answer = "답변 없음"
         
         # 2. Find Previous Question (The one with this interview number and NO answer yet)
         conn = get_db_connection()
@@ -568,7 +572,10 @@ async def submit_answer(
         {applicant_answer}
         
         [작업 1] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
+        - 만약 답변이 "답변 없음"이라면, "답변을 하지 않았습니다."라고 평가하고 점수를 낮게 책정하세요.
+        
         [작업 2] 답변 내용을 바탕으로 꼬리 질문을 하거나, 다른 주제로 넘어가는 다음 면접 질문을 하나만 생성해주세요.
+        - 답변이 없거나 내용이 부실하면, 다른 주제로 넘어가거나 더 쉬운 질문을 해주세요.
         
         반드시 JSON 형식으로 반환해주세요.
         {{
@@ -583,7 +590,20 @@ async def submit_answer(
             response_format={"type": "json_object"}
         )
         
-        result = json.loads(completion.choices[0].message.content)
+        content = completion.choices[0].message.content
+        # Robust JSON Parsing: Remove Markdown if present
+        if content.startswith("```json"):
+            content = content.replace("```json", "").replace("```", "")
+        elif content.startswith("```"):
+            content = content.replace("```", "")
+        
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError:
+             logger.error(f"JSON Parse Error. Content: {content}")
+             # Fallback
+             result = {"evaluation": "평가 실패", "next_question": "다음 질문으로 넘어가겠습니다."}
+
         evaluation = result.get("evaluation", "평가 불가")
         next_question = result.get("next_question", "면접을 마칩니다.")
         
