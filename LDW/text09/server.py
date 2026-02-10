@@ -23,21 +23,38 @@ def allowed_file(filename):
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 # DB Connection settings
-DB_HOST = "127.0.0.1"
-DB_NAME = "interview_db"
-DB_USER = "postgres"
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_NAME = os.getenv("DB_NAME", "interview_db")
+DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579") # Default fallback or from env
-DB_PORT = "5432"
+DB_PORT = os.getenv("DB_PORT", "5432")
 
 def get_db_connection():
-    conn = psycopg2.connect(
-        host=DB_HOST,
-        database=DB_NAME,
-        user=DB_USER,
-        password=DB_PASS,
-        port=DB_PORT
-    )
-    return conn
+    hosts = [DB_HOST, "127.0.0.1", "localhost"]
+    last_error = None
+    
+    for host in hosts:
+        try:
+            print(f"Attempting to connect to DB at {host}...")
+            conn = psycopg2.connect(
+                host=host,
+                database=DB_NAME,
+                user=DB_USER,
+                password=DB_PASS,
+                port=DB_PORT,
+                connect_timeout=3
+            )
+            print(f"Successfully connected to DB at {host}")
+            return conn
+        except psycopg2.OperationalError as e:
+            last_error = e
+            print(f"Failed to connect to {host}: {e}")
+            
+    print(f"All connection attempts failed. Last error: {last_error}")
+    print(f"Connection Details: Host={DB_HOST}, DB={DB_NAME}, User={DB_USER}, Port={DB_PORT}")
+    raise last_error
+
+
 
 def init_db():
     conn = get_db_connection()
