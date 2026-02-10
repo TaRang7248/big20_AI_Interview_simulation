@@ -2,14 +2,20 @@ import os
 import shutil
 import uuid
 import tempfile
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status
+from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, status, Body
 from fastapi.responses import JSONResponse
 
 from packages.imh_core.logging import get_logger
-from packages.imh_core.dto import TranscriptDTO, PDFExtractionResultDTO
+from packages.imh_core.dto import (
+    TranscriptDTO, 
+    PDFExtractionResultDTO, 
+    EmbeddingRequestDTO, 
+    EmbeddingResponseDTO
+)
 from packages.imh_providers.stt.base import ISTTProvider
 from packages.imh_providers.pdf.base import IPDFProvider
-from IMH.api.dependencies import get_stt_provider, get_pdf_provider
+from packages.imh_providers.embedding.base import EmbeddingProvider
+from IMH.api.dependencies import get_stt_provider, get_pdf_provider, get_embedding_provider
 
 router = APIRouter()
 logger = get_logger("IMH.api.playground")
@@ -165,3 +171,42 @@ async def analyze_pdf(
             except Exception as e:
                 logger.error(f"Failed to delete temporary PDF file: {temp_file_path}. Error: {e} [RequestID: {request_id}]")
 
+@router.post("/embedding", response_model=EmbeddingResponseDTO)
+async def analyze_embedding(
+    request: EmbeddingRequestDTO,
+    embedding_provider: EmbeddingProvider = Depends(get_embedding_provider)
+):
+    """
+    Generate an embedding vector for the given query text.
+    Focused on Search Query Embedding (TASK-007).
+    """
+    request_id = str(uuid.uuid4())
+    logger.info(f"Embedding Request received. RequestID: {request_id}, Text Length: {len(request.text)}")
+
+    if not request.text.strip():
+         raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail={"error_code": "EMPTY_TEXT", "message": "Text cannot be empty", "request_id": request_id}
+        )
+
+    try:
+        # 1. Processing
+        vector = embedding_provider.embed_query(request.text)
+        dimension = embedding_provider.get_dimension()
+        
+        # 2. Response
+        result = EmbeddingResponseDTO(
+            vector=vector,
+            dimension=dimension,
+            model_name="mock-embedding" # Hardcoded for mock, can be dynamic later
+        )
+        
+        logger.info(f"Embedding Processing succeeded. Dimension: {dimension} [RequestID: {request_id}]")
+        return result
+
+    except Exception as e:
+        logger.exception(f"Embedding Processing Failed [RequestID: {request_id}]")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error_code": "EMBEDDING_ERROR", "message": "An error occurred during embedding processing.", "request_id": request_id}
+        )

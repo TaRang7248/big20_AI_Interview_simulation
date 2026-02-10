@@ -129,3 +129,17 @@
         - Page Limit (51 pages) -> 400 OK
         - No Text (Blank PDF) -> 422 OK
     - **로그 확인**: `logs/agent/agent.log`에 페이지 수, 글자 수, Latency 기록 확인.
+
+### TASK-007 Playground Embedding → Query Focus
+- **요약**: 검색(RAG) 용도로 사용되는 **Query Text**를 임베딩 벡터로 변환하는 Playground 파이프라인 구현. 대화 전체/STT 결과 임베딩은 제외하고, Mock Provider 기반으로 변환 흐름만 검증.
+- **변경 사항**:
+    - `packages/imh_providers/embedding/`: Embedding Provider 패키지 신설 (`Interface`, `MockEmbeddingProvider`).
+    - `packages/imh_core/dto.py`: `EmbeddingRequestDTO`, `EmbeddingResponseDTO` 추가.
+    - `IMH/api/playground.py`: `POST /embedding` 엔드포인트 추가.
+    - `scripts/verify_task_007.py`: Query Text → Embedding 변환 검증 스크립트 작성.
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_007.py` (Verify Environment: `interview_env`)
+        - Valid Query Text -> Vector 반환 성공
+        - Empty / Invalid Input -> Validation Error 처리 확인
+        - 전체 테스트 통과 시 `"ALL TESTS PASSED"` 출력
+    - **로그 확인**: `IMH/IMH_Interview/logs/runtime/runtime.log`에 API 요청/응답 및 처리 결과 기록 확인.

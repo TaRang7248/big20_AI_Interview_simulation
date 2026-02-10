@@ -13,7 +13,6 @@
 - DONE    : 완료
 
 ---
-
 ## DONE
 
 ### TASK-001 로깅 기반 구축 (Phase 0)
@@ -29,7 +28,6 @@
 
 - **Verification**
   - `python scripts/check_logging.py` 실행 시 성공
-
 
 ---
 
@@ -60,37 +58,63 @@
 
 ---
 
+### TASK-006 Playground PDF → Text (문서 업로드)
+- **Goal**: PDF 업로드 → 텍스트 추출 Playground 파이프라인 검증
+- **Scope**:
+  - PDF 파일 업로드
+  - 텍스트 추출 결과 반환
+  - 저장 정책 준수(원본 파일 장기 저장 금지)
+- **Verification**: `python scripts/verify_task_006.py` Pass
+
+---
+
+### TASK-007 Playground Embedding → Query Focus
+- **Goal**: 검색(RAG) 용도로 사용되는 **Query Text**를 임베딩 벡터로 변환하는 Playground 파이프라인 검증
+- **Scope**:
+  - Query Text → Embedding 변환
+  - Embedding Provider (Mock) 기반 검증
+  - 대화 전체 / STT 결과 임베딩 제외
+- **Verification**: `python scripts/verify_task_007.py` Pass
+
+---
+
 ## ACTIVE
 
-(없음 - 에이전트 대기 중)
+### TASK-008 Voice 분석 (Parselmouth)
+- Parselmouth 기반 음성 분석
+- 발화 특성, pitch, intensity 등 추출
+
+---
 
 ## BACKLOG
 
-### TASK-006 Playground PDF → Text (문서 업로드)
-- PDF 업로드 → 텍스트 추출
-- 저장 정책 준수(원본 파일 장기 저장 금지)
-- (선택) 텍스트 결과를 LLM 입력으로 연결 가능한 형태로 반환
+---
 
-### TASK-007 Voice 분석 (Parselmouth)
-- Parselmouth 기반
+### TASK-009 Emotion 분석 (DeepFace, 1fps)
+- DeepFace 기반 표정/감정 분석
+- 저주기(1fps) 처리
 
-### TASK-008 Emotion 분석 (DeepFace, 1fps)
-- DeepFace (1fps)
+---
 
-### TASK-009 Visual 분석 (MediaPipe)
-- MediaPipe
+### TASK-010 Visual 분석 (MediaPipe)
+- MediaPipe 기반 시선/포즈/제스처 분석
 
-### TASK-010 정량 평가 엔진 (루브릭 기반)
+---
+
+### TASK-011 정량 평가 엔진 (루브릭 기반)
 - 정량 평가 루브릭(JSON 스키마) 기반 점수 산출
 - 분석 결과를 평가 입력으로 변환
 
-### TASK-011 평가 근거 데이터 구조 (Evidence)
+---
+
+### TASK-012 평가 근거 데이터 구조 (Evidence)
 - 평가 점수 산출 근거 데이터 구조 정의
 - 결과 리포트/감사용 Evidence JSON 설계
 
+---
 
 ## HOLD
 
-### TASK-012 TTS Provider (Text → Speech)
+### TASK-013 TTS Provider (Text → Speech)
 - 면접관 음성 출력(TTS) Provider 인터페이스 및 Mock
 - 실시간 면접/세션 단계에서만 착수

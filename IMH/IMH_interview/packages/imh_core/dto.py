@@ -82,3 +82,15 @@ class PDFExtractionResultDTO(BaseDTO):
     full_text: str
     pages: list[PDFPageDTO]
     metadata: dict[str, Any]
+
+
+# -------------------------------------------------------------------------
+# Embedding Provider DTOs (TASK-007)
+# -------------------------------------------------------------------------
+class EmbeddingRequestDTO(BaseDTO):
+    text: str
+
+class EmbeddingResponseDTO(BaseDTO):
+    vector: list[float]
+    dimension: int
+    model_name: str | None = None

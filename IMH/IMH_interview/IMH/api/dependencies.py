@@ -6,6 +6,8 @@ from packages.imh_providers.stt.base import ISTTProvider
 from packages.imh_providers.stt.mock import MockSTTProvider
 from packages.imh_providers.pdf.base import IPDFProvider
 from packages.imh_providers.pdf.local_provider import LocalPDFProvider
+from packages.imh_providers.embedding.base import EmbeddingProvider
+from packages.imh_providers.embedding import get_embedding_provider as _get_embedding_provider_factory
 
 @lru_cache
 def get_config() -> IMHConfig:
@@ -29,4 +31,13 @@ async def get_pdf_provider() -> AsyncGenerator[IPDFProvider, None]:
     """
     # config = get_config() # Can be used for limits configuration later
     provider = LocalPDFProvider()
+    yield provider
+
+async def get_embedding_provider() -> AsyncGenerator[EmbeddingProvider, None]:
+    """
+    Dependency to get an instance of the Embedding Provider.
+    Currently returns MockEmbeddingProvider.
+    """
+    # In the future: if config.EMBEDDING_PROVIDER == "local": return LocalEmbeddingProvider(...)
+    provider = _get_embedding_provider_factory("mock")
     yield provider

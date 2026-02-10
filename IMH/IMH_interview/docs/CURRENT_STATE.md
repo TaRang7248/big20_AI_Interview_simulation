@@ -22,6 +22,11 @@
     Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
   - 파일 확장자 검증, 페이지 수 제한(50), 용량 제한(10MB),
     텍스트 추출 및 NO_TEXT_FOUND(422) 정책 검증 완료
+- TASK-007 기준:
+  - `scripts/verify_task_007.py`를
+    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+  - Query Text → Embedding 벡터 변환 파이프라인(Mock Provider) 검증 완료
+  - 대화 전체/STT 결과 임베딩 제외 정책 확인
 ---
 
 ## 1. 프로젝트 목적 (확정)
@@ -36,15 +41,14 @@
 
 ## 2. 현재 개발 단계
 
-- 상태: **Phase 2 진입 (API 최소 골격 / Playground 구현 단계)**
+- 상태: **Phase 2 진행 중 (API 최소 골격 / Playground 구현 단계)**
 - 실제 비즈니스 로직 구현: ❌ 아직 없음
 - DB / 벡터 저장 / RAG 연동: ❌ 아직 없음
-- Playground API 구현: ⭕ 일부 완료 (TASK-005, TASK-006)
+- Playground API 구현: ⭕ 주요 항목 완료 (TASK-005, TASK-006, TASK-007)
 
 > ❗ 현재 단계는 “비즈니스 기능 구현”이 아니라  
 > API 계약, Provider 경계, 안정성 제약을 검증하는 Phase이다.  
 > 실제 서비스 로직은 이후 Phase에서 진행한다.
-
 ---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -129,10 +133,13 @@ IMH/IMH_Interview/
 - IMH/는 실행 진입점만 담당하며 비즈니스 로직을 가지지 않는다.
 
 ### 진행 상태
-- `packages/imh_core/`: ✅ DONE (TASK-002 완료, logging 포함)
+- `packages/imh_core/`: ✅ DONE  
+  - TASK-002 완료 (config / errors / dto)
+  - 공통 로깅 기반 포함 (TASK-001)
 - `packages/imh_providers/`: ✅ DONE
-  - TASK-003: Provider 구조 확정
+  - TASK-003: Provider 인터페이스 + Mock 구조 확정
   - TASK-006: PDF Local Provider 추가
+  - TASK-007: Embedding Provider (Interface / Mock) 추가
 
 
 ## 7. 로깅 / 기록 규칙 (중요)
@@ -198,55 +205,47 @@ IMH/IMH_Interview/
 
 ## 10. 현재 최우선 목표 (단 하나)
 
-### TASK-007: Playground Text → Embedding (Vectorization)
-
+### TASK-008 Emotion 분석 (DeepFace)
 - 목표:
-  - Playground에서 생성된 텍스트 결과(STT, PDF 등)를
-    임베딩 가능한 형태로 변환하는 최소 파이프라인을 구축한다.
-  - “텍스트 → 벡터” 흐름의 API 계약과 Provider 경계를 검증한다.
-
-- 범위 (포함):
-  - 입력 텍스트 수신 (TASK-005, TASK-006 결과물 기준)
-  - 텍스트 전처리(Chunking 기준 정의 포함)
-  - Embedding 생성 로직 (Local / Provider 기반)
-  - 결과 벡터 반환 (Playground 검증 목적)
-
-- 범위 (제외):
-  - 벡터 DB 저장 (PGVector 등)
-  - 검색 / Retrieval / RAG 구성
-  - 비즈니스 규칙 기반 점수 계산
-  - LLM 응답 생성
-
-> ❗ TASK-007은 “검색/활용”을 목표로 하지 않는다.  
-> 텍스트가 **임베딩 가능한 형태로 안정적으로 변환되는지**를 검증하는 것이 목적이다.
-
+  - Playground에서 업로드된 영상/이미지의 감정 분석 파이프라인 검증
+  - DeepFace 기반 분석(1fps) 및 결과 반환
 
 ### 최근 완료
-- TASK-006: Playground PDF → Text (문서 업로드) ✅ DONE
-  - PDF 텍스트 추출 API (`POST /api/v1/playground/pdf-text`) 구현
-  - 안정성 제약(50페이지, 10MB) 및 로깅 구현 완료
-  - `pypdf` 기반 Local Provider 적용
 
-- TASK-005: Playground STT (파일 업로드) ✅ DONE
+- TASK-007 Playground Embedding → Query Focus ✅ DONE
+  - `POST /api/v1/playground/embedding` 구현 완료
+  - 검색용 Query Text → Embedding 벡터 변환 파이프라인 검증
+  - Mock Provider 기반 처리
+  - 저장/검색/RAG 연동 제외
+
+- TASK-006 Playground PDF → Text (문서 업로드) ✅ DONE
+  - `POST /api/v1/playground/pdf-text` 구현
+  - 안정성 제약(50페이지, 10MB) 적용
+  - `pypdf` 기반 Local Provider 연동
+
+- TASK-005 Playground STT (파일 업로드) ✅ DONE
   - Mock STT Provider 연동 및 DI 구조 적용
-  - 파일 업로드 및 임시 파일 관리(100MB 제한) 구현
-  - `POST /api/v1/playground/stt` 수동 검증 완료
+  - 파일 업로드 및 임시 파일 관리(100MB 제한)
+  - `POST /api/v1/playground/stt` 검증 완료
 
-- TASK-004: FastAPI 최소 엔트리 + Healthcheck ✅ DONE
+- TASK-004 FastAPI 최소 엔트리 + Healthcheck ✅ DONE
   - FastAPI 실행 진입점 확정
   - `/health` 엔드포인트 구현
   - Python 3.10.11 / interview_env 기준 검증 완료
 
-- TASK-003: Provider 인터페이스 + Mock 구현 ✅ DONE
+- TASK-003 Provider 인터페이스 + Mock 구현 ✅ DONE
   - STT / LLM / Emotion / Visual / Voice Provider 인터페이스 정의
   - Async Mock Provider 구현
-  - 검증 스크립트(`scripts/verify_task_003.py`) 통과
+  - `scripts/verify_task_003.py` 통과
 
-- TASK-002: imh_core 최소 패키지 구성(config / errors / dto) ✅ DONE
+- TASK-002 imh_core 최소 패키지 구성 (config / errors / dto) ✅ DONE
+- TASK-001 로깅 기반 구축 ✅ DONE
 
-- TASK-001: 로깅 기반 구축 ✅ DONE
+---
 
-### TASK-007: Voice 분석 (Parselmouth)
+### BACKLOG
+
+### TASK-009 Voice 분석 (Parselmouth)
 - 목표:
-  - Mock Voice Provider를 실제 Parselmouth 로직으로 교체 검토
-- 상태: **BACKLOG**
+  - Mock Voice Provider를 실제 Parselmouth 기반 분석 로직으로 교체
+  - Pitch / Intensity 등 음성 특성 추출 검증
