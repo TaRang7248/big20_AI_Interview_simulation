@@ -4,14 +4,14 @@ import { useRouter } from "next/navigation";
 import Header from "@/components/common/Header";
 import { useAuth } from "@/contexts/AuthContext";
 import { authApi } from "@/lib/api";
-import { User, Mail, Calendar, MapPin, Lock, Save, Loader2, CheckCircle2 } from "lucide-react";
+import { User, Mail, Calendar, MapPin, Phone, Lock, Save, Loader2, CheckCircle2 } from "lucide-react";
 
 export default function ProfilePage() {
   const { user, refreshUser } = useAuth();
   const router = useRouter();
 
   const [form, setForm] = useState({
-    name: "", birth_date: "", gender: "", address: "",
+    name: "", birth_date: "", gender: "", address: "", phone: "",
   });
   const [pwForm, setPwForm] = useState({
     current_password: "", new_password: "", confirm_password: "",
@@ -29,6 +29,7 @@ export default function ProfilePage() {
       birth_date: user.birth_date || "",
       gender: user.gender || "",
       address: user.address || "",
+      phone: user.phone || "",
     });
   }, [user, router]);
 
@@ -128,6 +129,14 @@ export default function ProfilePage() {
               <input type="text" value={form.address}
                 onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
                 className="input-field" placeholder="주소" />
+            </div>
+
+            {/* 전화번호 */}
+            <div>
+              <label className="text-sm text-gray-400 mb-1 flex items-center gap-1"><Phone size={14} /> 전화번호</label>
+              <input type="tel" value={form.phone}
+                onChange={e => setForm(p => ({ ...p, phone: e.target.value }))}
+                className="input-field" placeholder="010-1234-5678" />
             </div>
           </div>
 
