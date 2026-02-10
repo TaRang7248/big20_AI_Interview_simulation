@@ -11,6 +11,7 @@ try:
 except ImportError:
     PdfReader = None
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
 
 # Load .env from project root
@@ -138,6 +139,25 @@ def init_db():
         if not c.fetchone():
             c.execute("ALTER TABLE interview_announcement ADD COLUMN job TEXT")
             print("Migrated interview_announcement table: Added job column")
+
+        # --- FIX: Interview_Progress Migration ---
+        # 1. Check for Interview_Number
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='interview_number'")
+        if not c.fetchone():
+            c.execute("ALTER TABLE interview_progress ADD COLUMN Interview_Number TEXT")
+            print("Migrated Interview_Progress: Added Interview_Number")
+        
+        # 2. Check for Applicant_Name
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='applicant_name'")
+        if not c.fetchone():
+            c.execute("ALTER TABLE interview_progress ADD COLUMN Applicant_Name TEXT")
+            print("Migrated Interview_Progress: Added Applicant_Name")
+
+        # 3. Check for job
+        c.execute("SELECT column_name FROM information_schema.columns WHERE table_name='interview_progress' AND column_name='job'")
+        if not c.fetchone():
+            c.execute("ALTER TABLE interview_progress ADD COLUMN job TEXT")
+            print("Migrated Interview_Progress: Added job")
             
         conn.commit()
     except Exception as e:
@@ -169,12 +189,15 @@ def register():
         if c.fetchone():
             return jsonify({'success': False, 'message': '이미 존재하는 아이디입니다.'}), 400
             
+        # Hash the password
+        hashed_pw = generate_password_hash(data['pw'])
+
         c.execute('''
             INSERT INTO users (id_name, pw, name, dob, gender, email, address, phone, type)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             data['id_name'], 
-            data['pw'], 
+            hashed_pw, 
             data['name'], 
             data.get('dob'), 
             data.get('gender'), 
@@ -199,15 +222,26 @@ def login():
         c = conn.cursor(cursor_factory=RealDictCursor)
         
         # User lookup logic
-        # Note: In production, password should be hashed. Plain text for this demo.
-        c.execute('SELECT * FROM users WHERE id_name = %s AND pw = %s', (data['id_name'], data['pw']))
+        c.execute('SELECT * FROM users WHERE id_name = %s', (data['id_name'],))
 
         row = c.fetchone()
         
         if row:
-            # pyscopg2 RealDictCursor returns a dict-like object
             user = dict(row)
-            return jsonify({'success': True, 'user': user})
+            # Check password (handle both hash and legacy plain text)
+            if check_password_hash(user['pw'], data['pw']) or user['pw'] == data['pw']:
+                # If it was plain text, we should probably update it to hash (Auto-migration)
+                if user['pw'] == data['pw']:
+                     try:
+                        new_hash = generate_password_hash(data['pw'])
+                        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (new_hash, user['id_name']))
+                        conn.commit()
+                     except:
+                        pass # Ignore migration errors for now
+
+                return jsonify({'success': True, 'user': user})
+            else:
+                return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
         else:
             return jsonify({'success': False, 'message': '아이디 또는 비밀번호가 일치하지 않습니다.'}), 401
             
@@ -229,7 +263,14 @@ def verify_password():
 
         row = c.fetchone()
         
-        if row and row[0] == data['pw']:
+        # Determine if match
+        match = False
+        if row:
+             stored_pw = row[0]
+             if check_password_hash(stored_pw, data['pw']) or stored_pw == data['pw']:
+                  match = True
+
+        if match:
              return jsonify({'success': True})
         else:
              return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
@@ -276,7 +317,9 @@ def update_user_info(id_name):
         if not row:
              return jsonify({'success': False, 'message': '사용자를 찾을 수 없습니다.'}), 404
         
-        if row[0] != data['pw']:
+        stored_pw = row[0]
+        # Check if match (Hash or Plain)
+        if not (check_password_hash(stored_pw, data['pw']) or stored_pw == data['pw']):
             return jsonify({'success': False, 'message': '비밀번호가 일치하지 않습니다.'}), 401
 
         # 2. Update Info
@@ -304,7 +347,8 @@ def change_password():
         c = conn.cursor()
         
         # Update Password
-        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (data['new_pw'], data['id_name']))
+        new_hashed_pw = generate_password_hash(data['new_pw'])
+        c.execute('UPDATE users SET pw = %s WHERE id_name = %s', (new_hashed_pw, data['id_name']))
 
         conn.commit()
         
@@ -636,6 +680,68 @@ def reply_interview():
     except Exception as e:
         print(f"Reply Interview Error: {e}")
         return jsonify({'success': False, 'message': '답변 제출 중 오류가 발생했습니다.'}), 500
+    finally:
+        if conn: conn.close()
+
+@app.route('/api/interview/result/<interview_number>', methods=['GET'])
+def get_interview_result(interview_number):
+    try:
+        conn = get_db_connection()
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 1. Get all Q&A
+        c.execute('''
+            SELECT Create_Question, Question_answer, Answer_Evaluation 
+            FROM Interview_Progress 
+            WHERE Interview_Number = %s 
+            ORDER BY id ASC
+        ''', (interview_number,))
+        
+        rows = c.fetchall()
+        
+        if not rows:
+             return jsonify({'success': False, 'message': '면접 기록을 찾을 수 없습니다.'}), 404
+
+        # 2. Calculate Mock Score (Simple logic based on evaluation length/keywords)
+        # In real world, LLM would score. Here we randomize slightly biased by answer length.
+        total_score_tech = 0
+        total_score_prob = 0
+        total_score_comm = 0
+        total_score_atti = 0
+        
+        for row in rows:
+            ans = row['question_answer'] or ""
+            # Simple length heuristic
+            score_base = min(len(ans) * 2, 90) + random.randint(0, 10)
+            if score_base > 100: score_base = 100
+            if score_base < 60: score_base = 60
+            
+            total_score_tech += score_base
+            total_score_prob += score_base + random.randint(-5, 5)
+            total_score_comm += score_base + random.randint(-5, 5)
+            total_score_atti += score_base + random.randint(-5, 5)
+
+        count = len(rows)
+        avg_tech = round(total_score_tech / count, 1)
+        avg_prob = round(total_score_prob / count, 1)
+        avg_comm = round(total_score_comm / count, 1)
+        avg_atti = round(total_score_atti / count, 1)
+
+        result_data = {
+            'scores': {
+                'tech': avg_tech,
+                'prob': avg_prob,
+                'comm': avg_comm,
+                'atti': avg_atti
+            },
+            'qa_list': [dict(r) for r in rows]
+        }
+        
+        return jsonify({'success': True, 'result': result_data})
+
+    except Exception as e:
+        print(f"Get Result Error: {e}")
+        return jsonify({'success': False, 'message': '결과 조회 중 오류가 발생했습니다.'}), 500
     finally:
         if conn: conn.close()
 
