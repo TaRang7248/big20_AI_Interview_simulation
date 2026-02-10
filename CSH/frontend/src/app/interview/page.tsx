@@ -429,9 +429,33 @@ export default function InterviewPage() {
             <p className="text-[var(--text-secondary)] mb-6">
               수고하셨습니다. 상세 리포트를 확인해보세요.
             </p>
-            <div className="flex gap-4 justify-center">
+            <div className="flex gap-4 justify-center flex-wrap">
               <button onClick={() => window.open(`/api/report/${sessionId}`, "_blank")} className="btn-gradient px-8 py-3">
                 리포트 보기
+              </button>
+              <button
+                onClick={() => {
+                  const token = localStorage.getItem("token");
+                  fetch(`/api/report/${sessionId}/pdf`, {
+                    headers: { Authorization: `Bearer ${token}` },
+                  })
+                    .then((res) => {
+                      if (!res.ok) throw new Error("PDF 생성 실패");
+                      return res.blob();
+                    })
+                    .then((blob) => {
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `interview_report_${sessionId?.slice(0, 8)}.pdf`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    })
+                    .catch((err) => alert(err.message));
+                }}
+                className="px-8 py-3 rounded-xl bg-[rgba(0,217,255,0.15)] border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.25)] transition"
+              >
+                📄 PDF 다운로드
               </button>
               <button onClick={() => router.push("/dashboard")} className="px-8 py-3 rounded-xl border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.1)] transition">
                 대시보드로
