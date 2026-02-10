@@ -61,3 +61,12 @@ async def get_voice_provider() -> "IVoiceProvider":
     from packages.imh_providers.voice.parselmouth_impl import ParselmouthVoiceProvider
     from packages.imh_providers.voice.base import IVoiceProvider
     return ParselmouthVoiceProvider()
+
+async def get_visual_provider() -> "MediaPipeVisualProvider":
+    """
+    Dependency to get an instance of the Visual Provider.
+    For TASK-010, uses MediaPipeVisualProvider.
+    """
+    # config = get_config()
+    from packages.imh_providers.visual.mediapipe_impl import MediaPipeVisualProvider
+    return MediaPipeVisualProvider()

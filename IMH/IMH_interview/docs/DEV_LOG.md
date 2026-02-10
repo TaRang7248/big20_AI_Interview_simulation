@@ -187,3 +187,37 @@
 - **재검증 결과**:
     - Invalid File (.txt) -> 422 Unprocessable Entity 확인.
     - 정상/무음 파일 기존 테스트 통과 유지.
+
+### PRE_TASK-010 선행 안정화 (Stabilization)
+- **요약**: TASK-010 착수 전, 기존 Emotion 엔드포인트의 리소스 누수 및 Mock Provider 정합성 버그 수정.
+- **변경 사항**:
+    - `IMH/api/playground.py`: `analyze_emotion` 내 `UnboundLocalError`(예외 변수 미정의 참조) 및 임시 파일 삭제 누락 수정.
+    - `packages/imh_providers/emotion/mock.py`: `EmotionResultDTO` 필수 필드(`scores`) 누락분 보완.
+- **검증 증거**:
+    - `scripts/verify_task_008.py` 실행 시 임시 파일 삭제 로그(`Temporary Emotion file deleted`) 확인 및 Regression Test (001~009) All Pass.
+
+### TASK-010 Visual 분석 (MediaPipe) Plan 수립
+- **요약**: MediaPipe 기반 시각 분석(시선, 포즈, 제스처) 모듈을 프로젝트 표준으로 흡수하기 위한 계획 문서 작성.
+- **변경 사항**:
+    - `docs/TASK-010_PLAN.md` 작성: "성공했던 구현의 재현 및 표준화"를 골자로 한 Phase 2 최종 분석 모듈 설계 방향 확정.
+- **주요 전략**:
+    - **재현 기반(Reproduction)**: 과거 성공한 MediaPipe 연동 구조를 Phase 2 기준선으로 고정.
+    - **안전 출력 중심**: 얼굴/신체 미검출(No Face) 시에도 안정적인 DTO 반환 보장.
+    - **관리형 리스크**: 의존성 충돌 이슈를 재설계가 아닌 환경 관리 대상으로 정의하여 안정성 확보.
+
+### TASK-010 Visual 분석 (MediaPipe) Implementation
+- **요약**: MediaPipe 기반 시각 분석(시선, 포즈) Provider(`MediaPipeVisualProvider`) 구현 및 Playground API 연동. Phase 2 기준선(Reproduction Baseline) 준수.
+- **변경 사항**:
+    - `packages/imh_providers/visual/dto.py`: `VisualResultDTO` 정의 (Presence, Attention, Pose Score 및 Metadata).
+    - `packages/imh_providers/visual/mediapipe_impl.py`: `analyze` 메서드 구현. 얼굴 검출, 시선(Yaw), 어깨 기울기(Pose) 분석 로직 적용.
+    - `IMH/api/dependencies.py`: `get_visual_provider` 의존성 주입 추가.
+    - `IMH/api/playground.py`: `POST /visual` 엔드포인트 구현 (이미지 업로드).
+    - `scripts/verify_task_010.py`: 검증 스크립트 작성 (No Face 시나리오 검증).
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_010.py` (Verify Environment: `interview_env`)
+        - No Face Image (Black) -> `has_face=False`, `presence_score=0.0` 확인.
+        - API Router Import -> 성공.
+        - Provider Initialization -> 성공 (MediaPipe Spec: 0.10.5 확인).
+    - **로그 확인**: `logs/agent/agent.log`에 `Visual Analysis succeeded. Has Face: False` 기록 확인.
+
+

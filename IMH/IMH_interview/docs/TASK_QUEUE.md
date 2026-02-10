@@ -101,21 +101,26 @@
 - **Verification**: `python scripts/verify_task_009.py` Pass
 
 ---
-## ACTIVE
 
 ### TASK-010 Visual 분석 (MediaPipe)
-- MediaPipe 기반 시선 / 포즈 / 제스처 분석
-- Playground 환경에서 시각 정보 분석 파이프라인 검증
----
-## BACKLOG
+- **Goal**: Playground 환경에서 **MediaPipe 기반 시각 분석 파이프라인**을 검증하고,
+  실시간 면접 적용 전 비언어적 시각 정보 분석 코어의 안정성을 확인
+- **Scope**:
+  - 이미지 기반 얼굴 검출 및 존재 여부(Presence) 판단
+  - 시선(Yaw) 및 자세(Pose) 정보 추출
+  - 얼굴 미검출(No Face) 시 안전한 결과 반환 정책 검증
+  - Visual Provider 실구현체(MediaPipe) 기반 동작 확인
+- **Verification**: `python scripts/verify_task_010.py` Pass
 
 ---
+## ACTIVE
 
 ### TASK-011 정량 평가 엔진 (루브릭 기반)
+- 분석 결과를 평가 입력(Evidence)으로 변환
 - 정량 평가 루브릭(JSON 스키마) 기반 점수 산출
-- 분석 결과를 평가 입력으로 변환
 
 ---
+## BACKLOG
 
 ### TASK-012 평가 근거 데이터 구조 (Evidence)
 - 평가 점수 산출 근거 데이터 구조 정의

@@ -24,9 +24,11 @@ from packages.imh_core.dto import (
     PDFExtractionResultDTO, 
     EmbeddingRequestDTO, 
     EmbeddingResponseDTO,
-    VoiceResultDTO
+    VoiceResultDTO,
+    VisualResultDTO
 )
-from IMH.api.dependencies import get_stt_provider, get_pdf_provider, get_embedding_provider, get_emotion_provider, get_voice_provider
+from IMH.api.dependencies import get_stt_provider, get_pdf_provider, get_embedding_provider, get_emotion_provider, get_voice_provider, get_visual_provider
+from packages.imh_providers.visual.mediapipe_impl import MediaPipeVisualProvider
 
 router = APIRouter()
 logger = get_logger("IMH.api.playground")
@@ -42,6 +44,10 @@ MAX_PDF_SIZE_BYTES = MAX_PDF_SIZE_MB * 1024 * 1024
 SUPPORTED_EMOTION_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".jpg", ".jpeg", ".png"}
 MAX_EMOTION_FILE_SIZE_MB = 50
 MAX_EMOTION_FILE_SIZE_BYTES = MAX_EMOTION_FILE_SIZE_MB * 1024 * 1024
+
+SUPPORTED_VISUAL_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MAX_VISUAL_FILE_SIZE_MB = 10
+MAX_VISUAL_FILE_SIZE_BYTES = MAX_VISUAL_FILE_SIZE_MB * 1024 * 1024
 
 @router.post("/stt", response_model=TranscriptDTO)
 async def analyze_stt(
@@ -404,4 +410,57 @@ async def analyze_voice(
                 logger.info(f"Temporary Voice file deleted: {temp_file_path} [RequestID: {request_id}]")
             except Exception as e:
                 logger.error(f"Failed to delete temporary Voice file: {temp_file_path}. Error: {e} [RequestID: {request_id}]")
+
+@router.post("/visual", response_model=VisualResultDTO)
+async def analyze_visual(
+    file: UploadFile = File(...),
+    visual_provider: "MediaPipeVisualProvider" = Depends(get_visual_provider)
+):
+    """
+    Upload an image file and get Visual Analysis results (Presence, Attention, Pose).
+    Based on MediaPipe Phase 2 implementation.
+    """
+    request_id = str(uuid.uuid4())
+    logger.info(f"Visual Analysis Request received. RequestID: {request_id}, Filename: {file.filename}, ContentType: {file.content_type}")
+
+    # 1. Validation
+    file_ext = os.path.splitext(file.filename)[1].lower() if file.filename else ""
+    if file_ext not in SUPPORTED_VISUAL_EXTENSIONS:
+         msg = f"Unsupported file extension: {file_ext}. Supported: {SUPPORTED_VISUAL_EXTENSIONS}"
+         logger.warning(f"Visual Validation Failed: {msg} [RequestID: {request_id}]")
+         raise HTTPException(
+             status_code=status.HTTP_400_BAD_REQUEST, 
+             detail={"error_code": "INVALID_FILE_FORMAT", "message": msg, "request_id": request_id}
+         )
+
+    # 2. Read directly into bytes
+    try:
+        content = await file.read()
+        file_size = len(content)
+        
+        if file_size > MAX_VISUAL_FILE_SIZE_BYTES:
+             raise HTTPException(
+                 status_code=status.HTTP_400_BAD_REQUEST,
+                 detail={"error_code": "FILE_TOO_LARGE", "message": f"File exceeds {MAX_VISUAL_FILE_SIZE_MB}MB limit", "request_id": request_id}
+             )
+        
+        logger.info(f"Visual file read ({file_size} bytes) [RequestID: {request_id}]")
+
+        # 3. Process with Provider
+        # We invoke the provider synchronously as MediaPipe is CPU bound blocking
+        # Ideally this should be in a threadpool, but for Mock/Phase 2 low load, direct call is fine.
+        result = visual_provider.analyze(content)
+        
+        logger.info(f"Visual Analysis succeeded. Has Face: {result.has_face} [RequestID: {request_id}]")
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Visual Analysis Failed [RequestID: {request_id}]")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error_code": "VISUAL_PROCESSING_ERROR", "message": "An error occurred during visual analysis.", "request_id": request_id}
+        )
+
 

@@ -38,7 +38,12 @@
   - 무음(Silence) 입력 시 크래시 없이 null/0 반환 정책 검증
   - 비정상 파일 입력 시 422 Unprocessable Entity 반환 정책 검증 완료
 
----
+- TASK-010 기준:
+  - `scripts/verify_task_010.py`를
+    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+  - 얼굴 미검출(No Face) 입력 시
+    `has_face=False`, `presence_score=0.0` 반환 정책 검증 완료
+  - MediaPipe Provider 초기화 및 API Router Import 정상 동작 확인
 
 ## 1. 프로젝트 목적 (확정)
 
@@ -153,6 +158,8 @@ IMH/IMH_Interview/
   - TASK-006: PDF Local Provider 추가
   - TASK-007: Embedding Provider (Interface / Mock) 추가
   - TASK-009: Voice Provider (Parselmouth 기반 실제 구현) 추가
+  - TASK-010: Visual Provider (MediaPipe 기반 실제 구현) 추가
+
 
 
 
@@ -220,14 +227,21 @@ IMH/IMH_Interview/
 ## 10. 현재 최우선 목표
 
 ### ACTIVE
-- TASK-010 Visual 분석 (MediaPipe)
-  - MediaPipe 기반 시선 / 포즈 / 제스처 분석 파이프라인 Playground 검증
-  - 입력(이미지/비디오) 기반 최소 분석 결과 반환 및 안정성 정책 검증
+- TASK-011 정량 평가 엔진 (루브릭 기반) 착수
+  - Phase 2 분석 모듈(Emotion / Voice / Visual) 결과를
+    평가 근거(Evidence)로 구조화하는 단계
+
 ---
 
 ## BACKLOG
 
 ### 최근 완료
+
+- TASK-010 Visual 분석 (MediaPipe) ✅ DONE
+  - `POST /api/v1/playground/visual` 구현 완료
+  - MediaPipe (FaceMesh, Pose) 기반 시선/자세 분석 Pipeline 검증
+  - `verify_task_010` 검증 통과 (No Face 시나리오 포함)
+  - Reproduction Baseline (`mediapipe==0.10.5` 등) 준수 확인
 
 - TASK-009 Voice 분석 (Parselmouth) ✅ DONE
   - Mock Voice Provider를 실제 Parselmouth 기반 분석 로직으로 교체
@@ -274,7 +288,6 @@ IMH/IMH_Interview/
 ## BACKLOG
 
 - 후보 작업:
-  - TASK-011 정량 평가 엔진 (루브릭 기반)
   - TASK-012 평가 근거 데이터 구조 (Evidence)
   - TASK-013 TTS Provider (Text → Speech)  (HOLD 성격 유지)
 - 비고:
