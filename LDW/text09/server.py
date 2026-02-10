@@ -447,35 +447,13 @@ def start_interview(data: StartInterviewRequest):
         resume_path = row[0]
         resume_text = extract_text_from_pdf(resume_path)
         
-        # Get Job Questions Pool
-        questions_pool = get_job_questions(data.job_title)
-        
         # Determine Applicant Name
         c.execute("SELECT name FROM users WHERE id_name = %s", (data.id_name,))
         user_row = c.fetchone()
         applicant_name = user_row[0] if user_row else "지원자"
 
-        # Generate 1st Question
-        prompt = f"""
-        당신은 면접관입니다. 
-        직무: {data.job_title}
-        지원자 이름: {applicant_name}
-        
-        [이력서 내용]
-        {resume_text[:2000]}... (생략)
-        
-        [질문 풀]
-        {questions_pool}
-        
-        위 정보를 바탕으로 면접을 시작하는 첫 번째 질문을 하나만 만들어주세요. 
-        인사말과 함께 자연스럽게 질문해주세요. 한국어로 해주세요.
-        """
-        
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        first_question = completion.choices[0].message.content.strip()
+        # 1. First Question: Self Introduction (Fixed)
+        first_question = f"안녕하세요, {applicant_name}님. 면접을 시작하겠습니다. 먼저 간단하게 자기소개를 부탁드립니다."
         
         # Save to DB
         c.execute('''
@@ -569,52 +547,95 @@ async def submit_answer(
         resume_context = row[2] if row[2] else ""
         
         # 3. Evaluate & 4. Next Question
-        prompt = f"""
-        [상황]
-        직무: {job_title}
-        면접자: {applicant_name}
+        # 3. Determine Question Phase
+        # Count how many questions have been asked including this one
+        c.execute("SELECT COUNT(*) FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
+        current_q_count = c.fetchone()[0]
         
-        [이전 질문]
-        {prev_question}
+        # Phase Logic
+        # Q1 (Done): Self Intro
+        # Q2 ~ Q6 (Next): Technical Questions (Target: 5 Total)
+        # Q7 ~ Q11 (Next): Personality Questions (Target: 5 Total)
+        # Q12 (Next): Closing
         
-        [지원자 답변]
-        {applicant_answer}
-        
-        [작업 1] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
-        - 만약 답변이 "답변 없음"이라면, "답변을 하지 않았습니다."라고 평가하고 점수를 낮게 책정하세요.
-        
-        [작업 2] 답변 내용을 바탕으로 꼬리 질문을 하거나, 다른 주제로 넘어가는 다음 면접 질문을 하나만 생성해주세요.
-        - 답변이 없거나 내용이 부실하면, 다른 주제로 넘어가거나 더 쉬운 질문을 해주세요.
-        
-        반드시 JSON 형식으로 반환해주세요.
-        {{
-            "evaluation": "평가 내용...",
-            "next_question": "다음 질문..."
-        }}
-        """
-        
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
-        )
-        
-        content = completion.choices[0].message.content
-        # Robust JSON Parsing: Remove Markdown if present
-        if content.startswith("```json"):
-            content = content.replace("```json", "").replace("```", "")
-        elif content.startswith("```"):
-            content = content.replace("```", "")
-        
-        try:
-            result = json.loads(content)
-        except json.JSONDecodeError:
-             logger.error(f"JSON Parse Error. Content: {content}")
-             # Fallback
-             result = {"evaluation": "평가 실패", "next_question": "다음 질문으로 넘어가겠습니다."}
+        next_phase = ""
+        if current_q_count < 6:
+            next_phase = "직무 기술(Technical Skill)"
+        elif current_q_count < 11:
+            next_phase = "인성 및 가치관(Personality & Culture Fit)"
+        elif current_q_count == 11:
+            next_phase = "마무리(Closing)"
+        else:
+            next_phase = "END"
 
-        evaluation = result.get("evaluation", "평가 불가")
-        next_question = result.get("next_question", "면접을 마칩니다.")
+        # 4. Evaluate & Generate Next Question
+        if next_phase == "END":
+             evaluation_prompt = f"""
+             [상황]
+             직무: {job_title}
+             면접자: {applicant_name}
+             마무리 질문에 대한 답변: {applicant_answer}
+             
+             이 답변을 간단히 평가해주세요. (관리자용)
+             """
+             # Simple eval for last answer
+             completion = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": evaluation_prompt}]
+             )
+             evaluation = completion.choices[0].message.content
+             next_question = "면접이 종료되었습니다. 수고하셨습니다."
+             
+        else:
+            prompt = f"""
+            [상황]
+            직무: {job_title}
+            면접자: {applicant_name}
+            현재 진행 단계: {current_q_count}번째 질문 완료. 다음은 {current_q_count + 1}번째 질문인 [{next_phase}] 단계입니다.
+            
+            [이전 질문]
+            {prev_question}
+            
+            [지원자 답변]
+            {applicant_answer}
+            
+            [작업 1] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
+            - 만약 답변이 "답변 없음"이라면, "답변을 하지 않았습니다."라고 평가하고 점수를 낮게 책정하세요.
+            
+            [작업 2] 다음 질문을 생성해주세요.
+            - 단계: {next_phase}
+            - {next_phase}에 맞는 질문을 해주세요.
+            - 만약 '마무리(Closing)' 단계라면, "마지막으로 하고 싶은 말이 있나요?" 또는 "면접을 마치며 궁금한 점이 있나요?" 같은 질문을 해주세요.
+            - 이전 답변 내용과 자연스럽게 이어지거나, 새로운 주제로 전환해도 됩니다.
+            
+            반드시 JSON 형식으로 반환해주세요.
+            {{
+                "evaluation": "평가 내용...",
+                "next_question": "다음 질문..."
+            }}
+            """
+            
+            completion = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"}
+            )
+            
+            content = completion.choices[0].message.content
+            # Robust JSON Parsing
+            if content.startswith("```json"):
+                content = content.replace("```json", "").replace("```", "")
+            elif content.startswith("```"):
+                content = content.replace("```", "")
+            
+            try:
+                result = json.loads(content)
+                evaluation = result.get("evaluation", "평가 불가")
+                next_question = result.get("next_question", "다음 질문을 준비 중입니다.")
+            except json.JSONDecodeError:
+                 logger.error(f"JSON Parse Error. Content: {content}")
+                 evaluation = "평가 실패"
+                 next_question = "다음 질문으로 넘어가겠습니다."
         
         # 5. Update DB (Current Row)
         c.execute("""
