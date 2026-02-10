@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<diagram version="1" name="AI 면접 시스템">
+	<entities>
+		<data-source id="postgres-jdbc-19bfdde8ce4-24924b3395c5ad4">
+			<entity id="1" name="evaluation_reports" fq-name="public.evaluation_reports">
+				<path name="public"/>
+				<path name="interview_db"/>
+			</entity>
+			<entity id="2" name="interview_sessions" fq-name="public.interview_sessions">
+				<path name="public"/>
+				<path name="interview_db"/>
+			</entity>
+			<entity id="3" name="job_postings" fq-name="public.job_postings">
+				<path name="public"/>
+				<path name="interview_db"/>
+			</entity>
+			<entity id="4" name="qa_embeddings" fq-name="public.qa_embeddings">
+				<path name="public"/>
+				<path name="interview_db"/>
+			</entity>
+			<entity id="5" name="resume_embeddings" fq-name="public.resume_embeddings">
+				<path name="public"/>
+				<path name="interview_db"/>
+			</entity>
+			<entity id="6" name="transcripts" fq-name="public.transcripts">
+				<path name="public"/>
+				<path name="interview_db"/>
+			</entity>
+			<entity id="7" name="users" fq-name="public.users">
+				<path name="public"/>
+				<path name="interview_db"/>
+			</entity>
+		</data-source>
+	</entities>
+	<relations>
+		<relation name="fk_interview_eval" fq-name="public.evaluation_reports.fk_interview_eval" type="fk" pk-ref="2" fk-ref="1"/>
+		<relation name="fk_interview" fq-name="public.transcripts.fk_interview" type="fk" pk-ref="2" fk-ref="6"/>
+		<relation name="fk_session_job" fq-name="public.interview_sessions.fk_session_job" type="fk" pk-ref="3" fk-ref="2"/>
+		<relation name="fk_qa_transcript" fq-name="public.qa_embeddings.fk_qa_transcript" type="fk" pk-ref="6" fk-ref="4"/>
+		<relation name="fk_candidate" fq-name="public.interview_sessions.fk_candidate" type="fk" pk-ref="7" fk-ref="2"/>
+		<relation name="fk_resume_user" fq-name="public.resume_embeddings.fk_resume_user" type="fk" pk-ref="7" fk-ref="5"/>
+	</relations>
+</diagram>
