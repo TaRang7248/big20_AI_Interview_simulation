@@ -18,7 +18,15 @@ from packages.imh_providers.stt.base import ISTTProvider
 from packages.imh_providers.pdf.base import IPDFProvider
 from packages.imh_providers.embedding.base import EmbeddingProvider
 from packages.imh_providers.emotion.base import IEmotionProvider
-from IMH.api.dependencies import get_stt_provider, get_pdf_provider, get_embedding_provider, get_emotion_provider
+from packages.imh_providers.voice.base import IVoiceProvider
+from packages.imh_core.dto import (
+    TranscriptDTO, 
+    PDFExtractionResultDTO, 
+    EmbeddingRequestDTO, 
+    EmbeddingResponseDTO,
+    VoiceResultDTO
+)
+from IMH.api.dependencies import get_stt_provider, get_pdf_provider, get_embedding_provider, get_emotion_provider, get_voice_provider
 
 router = APIRouter()
 logger = get_logger("IMH.api.playground")
@@ -317,9 +325,78 @@ async def analyze_emotion(
         )
     finally:
         # 4. Cleanup
+                logger.error(f"Failed to delete temporary Emotion file: {temp_file_path}. Error: {e} [RequestID: {request_id}]")
+
+@router.post("/voice", response_model=VoiceResultDTO)
+async def analyze_voice(
+    file: UploadFile = File(...),
+    voice_provider: IVoiceProvider = Depends(get_voice_provider)
+):
+    """
+    Upload an audio file (WAV recommended) and get acoustic features.
+    Extracts Pitch, Intensity, Jitter, Shimmer, HNR.
+    """
+    request_id = str(uuid.uuid4())
+    logger.info(f"Voice Analysis Request received. RequestID: {request_id}, Filename: {file.filename}, ContentType: {file.content_type}")
+
+    # 1. Validation
+    # Allow standard audio formats. Parselmouth prefers WAV but handles others if codec is present.
+    # We use same set as STT for now + .wav
+    file_ext = os.path.splitext(file.filename)[1].lower() if file.filename else ""
+    if file_ext not in SUPPORTED_EXTENSIONS:
+         msg = f"Unsupported file extension: {file_ext}. Supported: {SUPPORTED_EXTENSIONS}"
+         logger.warning(f"Voice Validation Failed: {msg} [RequestID: {request_id}]")
+         raise HTTPException(
+             status_code=status.HTTP_400_BAD_REQUEST, 
+             detail={"error_code": "INVALID_FILE_FORMAT", "message": msg, "request_id": request_id}
+         )
+
+    # 2. Save to Temporary File
+    temp_filename = f"{uuid.uuid4()}{file_ext}"
+    temp_dir = tempfile.gettempdir()
+    temp_file_path = os.path.join(temp_dir, temp_filename)
+
+    try:
+        file_size = 0
+        with open(temp_file_path, "wb") as buffer:
+             while content := await file.read(1024 * 1024): 
+                 file_size += len(content)
+                 if file_size > MAX_FILE_SIZE_BYTES:
+                     raise HTTPException(
+                         status_code=status.HTTP_400_BAD_REQUEST,
+                         detail={"error_code": "FILE_TOO_LARGE", "message": f"File exceeds {MAX_FILE_SIZE_MB}MB limit", "request_id": request_id}
+                     )
+                 buffer.write(content)
+        
+        logger.info(f"Voice file saved temporarily at {temp_file_path} ({file_size} bytes) [RequestID: {request_id}]")
+
+        # 3. Process with Provider
+        # Returns VoiceResultDTO
+        result: VoiceResultDTO = await voice_provider.analyze_audio(temp_file_path)
+        
+        logger.info(f"Voice Analysis succeeded. Pitch={result.pitch_mean} [RequestID: {request_id}]")
+        return result
+
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        logger.warning(f"Voice Analysis - Bad Input: {ve} [RequestID: {request_id}]")
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, 
+            detail={"error_code": "INVALID_AUDIO_FILE", "message": str(ve), "request_id": request_id}
+        )
+    except Exception as e:
+        logger.exception(f"Voice Analysis Failed [RequestID: {request_id}]")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error_code": "VOICE_PROCESSING_ERROR", "message": "An error occurred during voice analysis.", "request_id": request_id}
+        )
+    finally:
+        # 4. Cleanup
         if os.path.exists(temp_file_path):
             try:
                 os.remove(temp_file_path)
-                logger.info(f"Temporary Emotion file deleted: {temp_file_path} [RequestID: {request_id}]")
+                logger.info(f"Temporary Voice file deleted: {temp_file_path} [RequestID: {request_id}]")
             except Exception as e:
-                logger.error(f"Failed to delete temporary Emotion file: {temp_file_path}. Error: {e} [RequestID: {request_id}]")
+                logger.error(f"Failed to delete temporary Voice file: {temp_file_path}. Error: {e} [RequestID: {request_id}]")
+

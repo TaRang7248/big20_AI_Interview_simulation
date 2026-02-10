@@ -51,3 +51,13 @@ async def get_emotion_provider() -> IEmotionProvider:
     """
     config = get_config()
     return DeepFaceEmotionProvider(config)
+
+async def get_voice_provider() -> "IVoiceProvider":
+    """
+    Dependency to get an instance of the Voice Provider.
+    For TASK-009, uses ParselmouthVoiceProvider.
+    """
+    # config = get_config()
+    from packages.imh_providers.voice.parselmouth_impl import ParselmouthVoiceProvider
+    from packages.imh_providers.voice.base import IVoiceProvider
+    return ParselmouthVoiceProvider()

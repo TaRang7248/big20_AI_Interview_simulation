@@ -161,3 +161,29 @@
         - JSON 구조(`metadata`, `results`) 및 `timestamp` 정합성 확인.
     - **로그 확인**: `IMH/IMH_Interview/logs/runtime/runtime.log`에 분석 프레임 수 및 처리 시간 기록 확인.
 
+
+### TASK-009 Voice 분석 (Parselmouth)
+- **요약**: `praat-parselmouth` 라이브러리를 활용한 음성 분석 Provider(`ParselmouthVoiceProvider`) 구현 및 Playground API 연동.
+- **변경 사항**:
+    - `packages/imh_providers/voice/parselmouth_impl.py`: `analyze_audio` 구현 (Pitch, Intensity, Jitter, Shimmer, HNR 추출).
+    - `packages/imh_core/dto.py`: `VoiceResultDTO` 확장 (Intensity 및 Min/Max 필드 추가).
+    - `IMH/api/playground.py`: `POST /voice` 엔드포인트 추가.
+    - `IMH/api/dependencies.py`: `get_voice_provider` 의존성 주입 추가.
+    - `scripts/verify_task_009.py`: 검증 스크립트 작성 (Sine Wave, Silence, Invalid File 테스트).
+    - **환경 변경**: `praat-parselmouth` 패키지 설치.
+- **검증 증거**:
+    - **스크립트 실행 결과**: `python scripts/verify_task_009.py` (Verify Environment: `interview_env`)
+        - Sine Wave (440Hz) -> 200 OK. Feature Extraction (Pitch ~440Hz, Jitter/Shimmer/HNR Valid).
+        - Silence File -> 200 OK. Null/Zero Values Returned (Graceful Handling).
+        - Invalid File (.txt) -> 500 Internal Server Error (Provider Exception Raised).
+    - **로그 확인**: `logs/runtime/runtime.log`에 분석 지표 요약 및 예외 스택트레이스 기록.
+
+#### TASK-009 Hotfix (2026-02-10)
+- **요약**: Voice 분석 시 잘못된 파일 입력에 대해 500 대신 422 에러를 반환하도록 수정.
+- **변경 사항**:
+    - `packages/imh_providers/voice/parselmouth_impl.py`: `parselmouth.Sound` 생성 실패 시 `ValueError`로 래핑하여 raise.
+    - `IMH/api/playground.py`: `analyze_voice`에서 `ValueError` 포착 시 `HTTP 422` 반환.
+    - `scripts/verify_task_009.py`: Invalid File 테스트 기대치를 500 -> 422로 수정.
+- **재검증 결과**:
+    - Invalid File (.txt) -> 422 Unprocessable Entity 확인.
+    - 정상/무음 파일 기존 테스트 통과 유지.

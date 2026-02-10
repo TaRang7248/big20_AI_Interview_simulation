@@ -17,16 +17,27 @@
 - TASK-004 기준:
   - `scripts/verify_task_004.py`를
     Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+
 - TASK-006 기준:
   - `scripts/verify_task_006.py`를
     Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
-  - 파일 확장자 검증, 페이지 수 제한(50), 용량 제한(10MB),
-    텍스트 추출 및 NO_TEXT_FOUND(422) 정책 검증 완료
+  - 파일 확장자 검증, 페이지 수 제한(50),
+    용량 제한(10MB), 텍스트 추출 및
+    NO_TEXT_FOUND(422) 정책 검증 완료
+
 - TASK-007 기준:
   - `scripts/verify_task_007.py`를
     Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
   - Query Text → Embedding 벡터 변환 파이프라인(Mock Provider) 검증 완료
   - 대화 전체/STT 결과 임베딩 제외 정책 확인
+
+- TASK-009 기준:
+  - `scripts/verify_task_009.py`를
+    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+  - Sine Wave(440Hz) 입력 시 Pitch/Intensity/Jitter/Shimmer/HNR 정상 추출 확인
+  - 무음(Silence) 입력 시 크래시 없이 null/0 반환 정책 검증
+  - 비정상 파일 입력 시 422 Unprocessable Entity 반환 정책 검증 완료
+
 ---
 
 ## 1. 프로젝트 목적 (확정)
@@ -136,10 +147,13 @@ IMH/IMH_Interview/
 - `packages/imh_core/`: ✅ DONE  
   - TASK-002 완료 (config / errors / dto)
   - 공통 로깅 기반 포함 (TASK-001)
+
 - `packages/imh_providers/`: ✅ DONE
   - TASK-003: Provider 인터페이스 + Mock 구조 확정
   - TASK-006: PDF Local Provider 추가
   - TASK-007: Embedding Provider (Interface / Mock) 추가
+  - TASK-009: Voice Provider (Parselmouth 기반 실제 구현) 추가
+
 
 
 ## 7. 로깅 / 기록 규칙 (중요)
@@ -203,14 +217,23 @@ IMH/IMH_Interview/
 
 ---
 
-## 10. 현재 최우선 목표 (단 하나)
+## 10. 현재 최우선 목표
 
-### TASK-009 Voice 분석 (Parselmouth)
-- 목표:
-  - Mock Voice Provider를 실제 Parselmouth 기반 분석 로직으로 교체
-  - Pitch / Intensity 등 음성 특성 추출 검증
+### ACTIVE
+- TASK-010 Visual 분석 (MediaPipe)
+  - MediaPipe 기반 시선 / 포즈 / 제스처 분석 파이프라인 Playground 검증
+  - 입력(이미지/비디오) 기반 최소 분석 결과 반환 및 안정성 정책 검증
+---
+
+## BACKLOG
 
 ### 최근 완료
+
+- TASK-009 Voice 분석 (Parselmouth) ✅ DONE
+  - Mock Voice Provider를 실제 Parselmouth 기반 분석 로직으로 교체
+  - Pitch / Intensity / Jitter / Shimmer / HNR 음성 특성 추출 구현
+  - 정상 음성 / 무음 / 비정상 파일 입력에 대한 예외 처리 정책 검증 완료
+  - Playground 환경에서 검증 스크립트 기반 동작 확인
 
 - TASK-008 Emotion 분석 (DeepFace) ✅ DONE
   - `POST /api/v1/playground/emotion` 구현 완료
@@ -251,6 +274,8 @@ IMH/IMH_Interview/
 ## BACKLOG
 
 - 후보 작업:
-  - MediaPipe 기반 시선 / 제스처 분석 파이프라인 검증
+  - TASK-011 정량 평가 엔진 (루브릭 기반)
+  - TASK-012 평가 근거 데이터 구조 (Evidence)
+  - TASK-013 TTS Provider (Text → Speech)  (HOLD 성격 유지)
 - 비고:
-  - Phase 2 Playground 검증 이후 착수 검토
+  - Phase 2 Playground 검증(010) 이후 평가/리포트 계층 착수 검토

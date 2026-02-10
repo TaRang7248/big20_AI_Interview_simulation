@@ -89,18 +89,25 @@
 - **Verification**: `python scripts/verify_task_008.py` Pass
 
 ---
-## ACTIVE
 
 ### TASK-009 Voice 분석 (Parselmouth)
-- Parselmouth 기반 음성 분석
-- 발화 특성, pitch, intensity 등 음성 지표 추출
-- Playground 환경에서 파일 기반 검증
+- **Goal**: Playground 환경에서 **Parselmouth 기반 음성 분석 파이프라인**을 검증하고,
+  실시간 면접 적용 전 음성 특성 분석 코어의 안정성을 확인
+- **Scope**:
+  - 오디오 파일 기반 음성 분석
+  - Pitch / Intensity / Jitter / Shimmer / HNR 등 음향학적 지표 추출
+  - 무음 / 비정상 파일 입력에 대한 예외 처리 정책 검증
+  - Voice Provider 실구현체(Parselmouth) 기반 동작 확인
+- **Verification**: `python scripts/verify_task_009.py` Pass
 
 ---
-## BACKLOG
+## ACTIVE
 
 ### TASK-010 Visual 분석 (MediaPipe)
-- MediaPipe 기반 시선/포즈/제스처 분석
+- MediaPipe 기반 시선 / 포즈 / 제스처 분석
+- Playground 환경에서 시각 정보 분석 파이프라인 검증
+---
+## BACKLOG
 
 ---
 
@@ -112,7 +119,7 @@
 
 ### TASK-012 평가 근거 데이터 구조 (Evidence)
 - 평가 점수 산출 근거 데이터 구조 정의
-- 결과 리포트/감사용 Evidence JSON 설계
+- 결과 리포트 / 감사를 위한 Evidence JSON 설계
 
 ---
 
@@ -120,4 +127,4 @@
 
 ### TASK-013 TTS Provider (Text → Speech)
 - 면접관 음성 출력(TTS) Provider 인터페이스 및 Mock
-- 실시간 면접/세션 단계에서만 착수
+- 실시간 면접 / 세션 단계에서만 착수

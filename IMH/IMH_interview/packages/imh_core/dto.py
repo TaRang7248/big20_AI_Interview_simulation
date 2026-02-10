@@ -66,6 +66,11 @@ class VisualResultDTO(BaseDTO):
 # -------------------------------------------------------------------------
 class VoiceResultDTO(BaseDTO):
     pitch_mean: float | None = None
+    pitch_min: float | None = None
+    pitch_max: float | None = None
+    intensity_mean: float | None = None
+    intensity_min: float | None = None
+    intensity_max: float | None = None
     jitter: float | None = None
     shimmer: float | None = None
     hnr: float | None = None  # Harmonics-to-Noise Ratio
