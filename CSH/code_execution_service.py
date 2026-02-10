@@ -4,10 +4,10 @@
 면접 코딩 테스트를 위한 샌드박스 코드 실행 및 AI 기반 코드 분석
 
 기능:
-1. Python, JavaScript, Java 코드 실행 (샌드박스)
+1. Python, JavaScript, Java, C, C++ 코드 실행 (샌드박스)
 2. 실행 시간 및 메모리 측정
 3. AI 기반 코드 품질 분석 (시간 복잡도, 스타일, 주석 등)
-4. 코딩 문제 은행
+4. LLM 자동 코딩 문제 생성 (1회 1문제)
 """
 
 import os
@@ -18,6 +18,7 @@ import time
 import re
 import json
 import asyncio
+import uuid
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime
@@ -99,17 +100,118 @@ class CodingProblem(BaseModel):
     memory_limit: int = 256  # MB
 
 
-# ========== 코딩 문제 은행 ==========
-CODING_PROBLEMS = {
-    "two_sum": CodingProblem(
-        id="two_sum",
-        title="두 수의 합 (Two Sum)",
-        difficulty="easy",
-        description="""정수 배열 nums와 정수 target이 주어집니다.
+# ========== LLM 코딩 문제 생성기 ==========
+PROBLEM_GENERATION_PROMPT = """당신은 코딩 면접 출제 전문가입니다.
+주어진 난이도에 맞는 코딩 문제를 1개 생성해주세요.
+
+[난이도: {difficulty}]
+
+[난이도별 기준]
+- easy: 기본 자료구조(배열, 문자열), 반복문, 조건문 활용 문제 (예: 정렬, 탐색, 문자열 처리)
+- medium: 해시맵, 스택/큐, 이진탐색, 투 포인터, 재귀 활용 문제
+- hard: DP, 그래프, 트리, 고급 알고리즘 문제
+
+[요구사항]
+1. 문제는 stdin으로 입력 받고 stdout으로 출력하는 형식이어야 합니다
+2. 입력/출력 형식을 명확히 설명해야 합니다
+3. 예제를 2개 이상 포함해야 합니다
+4. 테스트 케이스를 4개 이상 포함해야 합니다 (예제에 사용한 것 포함)
+5. 힌트를 1~2개 제공해야 합니다
+6. 한국어로 작성해주세요
+
+[출력 형식 - 반드시 아래 JSON 형식으로만 응답하세요. 다른 텍스트 없이 JSON만 출력하세요]
+{{
+    "title": "문제 제목",
+    "difficulty": "{difficulty}",
+    "description": "문제 설명 (입출력 형식 포함)",
+    "examples": [
+        {{"input": "입력값", "output": "출력값", "explanation": "설명"}}
+    ],
+    "test_cases": [
+        {{"input": "입력값", "expected": "기대 출력값"}}
+    ],
+    "hints": ["힌트1", "힌트2"]
+}}
+"""
+
+# 생성된 문제를 캐시 (problem_id -> CodingProblem)
+_generated_problems: Dict[str, CodingProblem] = {}
+
+
+class CodingProblemGenerator:
+    """LLM 기반 코딩 문제 자동 생성기"""
+
+    def __init__(self):
+        if LLM_AVAILABLE:
+            self.llm = ChatOllama(
+                model=DEFAULT_LLM_MODEL,
+                temperature=0.8,  # 다양한 문제 생성을 위해 높은 temperature
+                num_ctx=DEFAULT_LLM_NUM_CTX,
+            )
+        else:
+            self.llm = None
+
+    async def generate(self, difficulty: str = "medium") -> CodingProblem:
+        """LLM을 사용하여 코딩 문제 1개를 생성합니다."""
+        if not self.llm:
+            return self._fallback_problem(difficulty)
+
+        try:
+            prompt = PROBLEM_GENERATION_PROMPT.format(difficulty=difficulty)
+            response = await asyncio.to_thread(
+                self.llm.invoke,
+                [
+                    SystemMessage(content="당신은 코딩 면접 문제 출제 전문가입니다. JSON 형식으로만 응답하세요."),
+                    HumanMessage(content=prompt),
+                ]
+            )
+            raw = response.content.strip()
+
+            # <think> 태그 제거 (Qwen 모델)
+            raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+
+            # JSON 파싱 (json_utils 활용)
+            parsed = parse_code_analysis_json(raw)
+            if not parsed:
+                # 직접 JSON 추출 시도
+                json_match = re.search(r'\{[\s\S]*\}', raw)
+                if json_match:
+                    parsed = json.loads(json_match.group())
+                else:
+                    print(f"[CodingProblemGenerator] JSON 파싱 실패, fallback 사용")
+                    return self._fallback_problem(difficulty)
+
+            problem_id = str(uuid.uuid4())[:8]
+            problem = CodingProblem(
+                id=problem_id,
+                title=parsed.get("title", "코딩 문제"),
+                difficulty=parsed.get("difficulty", difficulty),
+                description=parsed.get("description", ""),
+                examples=parsed.get("examples", []),
+                test_cases=parsed.get("test_cases", []),
+                hints=parsed.get("hints", []),
+            )
+
+            # 캐시에 저장
+            _generated_problems[problem_id] = problem
+            print(f"[CodingProblemGenerator] 문제 생성 완료: {problem.title} (ID: {problem_id})")
+            return problem
+
+        except Exception as e:
+            print(f"[CodingProblemGenerator] 문제 생성 실패: {e}")
+            return self._fallback_problem(difficulty)
+
+    def _fallback_problem(self, difficulty: str = "easy") -> CodingProblem:
+        """LLM 사용 불가 시 기본 문제 반환"""
+        problem_id = str(uuid.uuid4())[:8]
+        problem = CodingProblem(
+            id=problem_id,
+            title="두 수의 합 (Two Sum)",
+            difficulty=difficulty,
+            description="""정수 배열 nums와 정수 target이 주어집니다.
 nums에서 두 수를 선택하여 더한 값이 target이 되는 두 수의 인덱스를 반환하세요.
 
 각 입력에는 정확히 하나의 해답이 있다고 가정하며, 같은 요소를 두 번 사용할 수 없습니다.
-답은 어떤 순서로든 반환할 수 있습니다.
 
 **입력 형식:**
 - 첫 번째 줄: 배열의 크기 n
@@ -118,161 +220,20 @@ nums에서 두 수를 선택하여 더한 값이 target이 되는 두 수의 인
 
 **출력 형식:**
 - 두 인덱스를 공백으로 구분하여 출력""",
-        examples=[
-            {
-                "input": "4\n2 7 11 15\n9",
-                "output": "0 1",
-                "explanation": "nums[0] + nums[1] = 2 + 7 = 9 이므로 [0, 1]을 반환합니다."
-            },
-            {
-                "input": "3\n3 2 4\n6",
-                "output": "1 2",
-                "explanation": "nums[1] + nums[2] = 2 + 4 = 6 이므로 [1, 2]을 반환합니다."
-            }
-        ],
-        test_cases=[
-            {"input": "4\n2 7 11 15\n9", "expected": "0 1"},
-            {"input": "3\n3 2 4\n6", "expected": "1 2"},
-            {"input": "2\n3 3\n6", "expected": "0 1"},
-            {"input": "5\n1 5 3 7 2\n9", "expected": "1 3"},
-        ],
-        hints=["해시맵을 사용하면 O(n) 시간 복잡도로 해결할 수 있습니다."]
-    ),
-    "palindrome": CodingProblem(
-        id="palindrome",
-        title="회문 검사 (Palindrome Check)",
-        difficulty="easy",
-        description="""주어진 문자열이 회문(앞뒤가 같은 문자열)인지 확인하세요.
-영문자와 숫자만 고려하며, 대소문자는 구분하지 않습니다.
-
-**입력 형식:**
-- 한 줄의 문자열
-
-**출력 형식:**
-- 회문이면 "true", 아니면 "false" 출력""",
-        examples=[
-            {
-                "input": "A man, a plan, a canal: Panama",
-                "output": "true",
-                "explanation": "영문자만 추출하면 'amanaplanacanalpanama'로 회문입니다."
-            },
-            {
-                "input": "race a car",
-                "output": "false",
-                "explanation": "영문자만 추출하면 'raceacar'로 회문이 아닙니다."
-            }
-        ],
-        test_cases=[
-            {"input": "A man, a plan, a canal: Panama", "expected": "true"},
-            {"input": "race a car", "expected": "false"},
-            {"input": "Was it a car or a cat I saw?", "expected": "true"},
-            {"input": "hello", "expected": "false"},
-            {"input": "a", "expected": "true"},
-        ],
-        hints=["투 포인터를 사용하면 효율적으로 해결할 수 있습니다."]
-    ),
-    "fizzbuzz": CodingProblem(
-        id="fizzbuzz",
-        title="FizzBuzz",
-        difficulty="easy",
-        description="""1부터 n까지의 수를 출력하되:
-- 3의 배수면 "Fizz" 출력
-- 5의 배수면 "Buzz" 출력
-- 3과 5의 공배수면 "FizzBuzz" 출력
-- 그 외에는 숫자 출력
-
-**입력 형식:**
-- 정수 n (1 ≤ n ≤ 100)
-
-**출력 형식:**
-- 각 줄에 하나씩 출력""",
-        examples=[
-            {
-                "input": "5",
-                "output": "1\n2\nFizz\n4\nBuzz",
-                "explanation": "1, 2는 그대로, 3은 Fizz, 4는 그대로, 5는 Buzz"
-            },
-            {
-                "input": "15",
-                "output": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz",
-                "explanation": "15는 3과 5의 공배수이므로 FizzBuzz"
-            }
-        ],
-        test_cases=[
-            {"input": "5", "expected": "1\n2\nFizz\n4\nBuzz"},
-            {"input": "15", "expected": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz"},
-            {"input": "3", "expected": "1\n2\nFizz"},
-        ]
-    ),
-    "reverse_linked_list": CodingProblem(
-        id="reverse_linked_list",
-        title="연결 리스트 뒤집기",
-        difficulty="medium",
-        description="""연결 리스트가 주어졌을 때, 리스트를 뒤집어서 반환하세요.
-
-**입력 형식:**
-- 공백으로 구분된 정수들 (연결 리스트의 노드 값들)
-
-**출력 형식:**
-- 뒤집어진 연결 리스트의 노드 값들 (공백으로 구분)""",
-        examples=[
-            {
-                "input": "1 2 3 4 5",
-                "output": "5 4 3 2 1",
-                "explanation": "1->2->3->4->5를 뒤집으면 5->4->3->2->1"
-            },
-            {
-                "input": "1 2",
-                "output": "2 1",
-                "explanation": "1->2를 뒤집으면 2->1"
-            }
-        ],
-        test_cases=[
-            {"input": "1 2 3 4 5", "expected": "5 4 3 2 1"},
-            {"input": "1 2", "expected": "2 1"},
-            {"input": "1", "expected": "1"},
-            {"input": "10 20 30", "expected": "30 20 10"},
-        ],
-        hints=["세 개의 포인터(prev, curr, next)를 사용하여 반복적으로 해결할 수 있습니다."]
-    ),
-    "binary_search": CodingProblem(
-        id="binary_search",
-        title="이진 탐색 (Binary Search)",
-        difficulty="medium",
-        description="""정렬된 정수 배열에서 target 값의 인덱스를 찾으세요.
-target이 배열에 없으면 -1을 반환하세요.
-
-시간 복잡도 O(log n)으로 구현해야 합니다.
-
-**입력 형식:**
-- 첫 번째 줄: 배열의 크기 n
-- 두 번째 줄: n개의 정렬된 정수 (공백으로 구분)
-- 세 번째 줄: target 값
-
-**출력 형식:**
-- target의 인덱스 또는 -1""",
-        examples=[
-            {
-                "input": "6\n-1 0 3 5 9 12\n9",
-                "output": "4",
-                "explanation": "9는 인덱스 4에 있습니다."
-            },
-            {
-                "input": "6\n-1 0 3 5 9 12\n2",
-                "output": "-1",
-                "explanation": "2는 배열에 없습니다."
-            }
-        ],
-        test_cases=[
-            {"input": "6\n-1 0 3 5 9 12\n9", "expected": "4"},
-            {"input": "6\n-1 0 3 5 9 12\n2", "expected": "-1"},
-            {"input": "1\n5\n5", "expected": "0"},
-            {"input": "5\n1 2 3 4 5\n1", "expected": "0"},
-            {"input": "5\n1 2 3 4 5\n5", "expected": "4"},
-        ],
-        hints=["left, right 포인터와 mid = (left + right) // 2를 사용하세요."]
-    ),
-}
+            examples=[
+                {"input": "4\n2 7 11 15\n9", "output": "0 1", "explanation": "nums[0] + nums[1] = 2 + 7 = 9"},
+                {"input": "3\n3 2 4\n6", "output": "1 2", "explanation": "nums[1] + nums[2] = 2 + 4 = 6"},
+            ],
+            test_cases=[
+                {"input": "4\n2 7 11 15\n9", "expected": "0 1"},
+                {"input": "3\n3 2 4\n6", "expected": "1 2"},
+                {"input": "2\n3 3\n6", "expected": "0 1"},
+                {"input": "5\n1 5 3 7 2\n9", "expected": "1 3"},
+            ],
+            hints=["해시맵을 사용하면 O(n) 시간 복잡도로 해결할 수 있습니다."],
+        )
+        _generated_problems[problem_id] = problem
+        return problem
 
 
 # ========== 코드 실행 엔진 ==========
@@ -918,8 +879,8 @@ class CodeExecutionService:
     ) -> Dict:
         """코드 실행 및 분석"""
         
-        # 문제 가져오기
-        problem = CODING_PROBLEMS.get(problem_id) if problem_id else None
+        # 문제 가져오기 (캐시에서 조회)
+        problem = _generated_problems.get(problem_id) if problem_id else None
         
         # 테스트 케이스 결정
         test_cases = custom_test_cases or (problem.test_cases if problem else [])
@@ -974,32 +935,29 @@ def create_coding_router():
     
     router = APIRouter(prefix="/api/coding", tags=["Coding Test"])
     service = CodeExecutionService()
+    generator = CodingProblemGenerator()
     
-    @router.get("/problems")
-    async def get_problems():
-        """문제 목록 조회"""
-        return {
-            "problems": [
-                {
-                    "id": p.id,
-                    "title": p.title,
-                    "difficulty": p.difficulty
-                }
-                for p in CODING_PROBLEMS.values()
-            ]
-        }
+    @router.get("/generate")
+    async def generate_problem(difficulty: str = "medium"):
+        """LLM으로 코딩 문제 1개 생성"""
+        if difficulty not in ("easy", "medium", "hard"):
+            difficulty = "medium"
+        problem = await generator.generate(difficulty)
+        # 테스트 케이스는 일부만 공개
+        public_problem = problem.dict()
+        public_problem['test_cases'] = problem.test_cases[:2]
+        return public_problem
     
     @router.get("/problems/{problem_id}")
     async def get_problem(problem_id: str):
-        """문제 상세 조회"""
-        problem = CODING_PROBLEMS.get(problem_id)
+        """캐시된 문제 상세 조회"""
+        problem = _generated_problems.get(problem_id)
         if not problem:
-            raise HTTPException(status_code=404, detail="문제를 찾을 수 없습니다.")
+            raise HTTPException(status_code=404, detail="문제를 찾을 수 없습니다. 새 문제를 생성해주세요.")
         
         # 테스트 케이스는 일부만 공개
         public_problem = problem.dict()
-        public_problem['test_cases'] = problem.test_cases[:2]  # 처음 2개만
-        
+        public_problem['test_cases'] = problem.test_cases[:2]
         return public_problem
     
     @router.post("/execute")
@@ -1173,14 +1131,19 @@ if __name__ == "__main__":
     import asyncio
     
     async def test():
-        service = CodeExecutionService()
+        # LLM 문제 생성 테스트
+        generator = CodingProblemGenerator()
+        problem = await generator.generate("easy")
+        print("=== 생성된 문제 ===")
+        print(json.dumps(problem.dict(), indent=2, ensure_ascii=False))
         
+        # 코드 실행 테스트
+        service = CodeExecutionService()
         code = '''
 n = int(input())
 nums = list(map(int, input().split()))
 target = int(input())
 
-# Two Sum 솔루션
 def two_sum(nums, target):
     seen = {}
     for i, num in enumerate(nums):
@@ -1194,7 +1157,8 @@ result = two_sum(nums, target)
 print(result[0], result[1])
 '''
         
-        result = await service.run_and_analyze(code, "python", "two_sum")
+        result = await service.run_and_analyze(code, "python", problem.id)
+        print("\n=== 실행 결과 ===")
         print(json.dumps(result, indent=2, ensure_ascii=False))
     
     asyncio.run(test())

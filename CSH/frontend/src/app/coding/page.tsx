@@ -2,8 +2,8 @@
 import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Header from "@/components/common/Header";
-import { codingApi, type CodingProblemSummary, type CodingProblem, type CodeSubmitResult } from "@/lib/api";
-import { Play, Send, RotateCcw, ChevronRight, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { codingApi, type CodingProblem, type CodeSubmitResult } from "@/lib/api";
+import { Play, Send, RotateCcw, RefreshCw, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
 
 // Monaco Editor – SSR 비활성화
@@ -15,6 +15,12 @@ const LANGUAGES = [
   { value: "java", label: "Java" },
   { value: "c", label: "C" },
   { value: "cpp", label: "C++" },
+];
+
+const DIFFICULTIES = [
+  { value: "easy", label: "Easy", color: "bg-[rgba(76,175,80,0.2)] text-green-400" },
+  { value: "medium", label: "Medium", color: "bg-[rgba(255,152,0,0.2)] text-orange-400" },
+  { value: "hard", label: "Hard", color: "bg-[rgba(244,67,54,0.2)] text-red-400" },
 ];
 
 const DIFFICULTY_COLORS: Record<string, string> = {
@@ -32,28 +38,39 @@ function CodingTestPage() {
   const sessionId = searchParams.get("session") || "";
 
   // 상태
-  const [problems, setProblems] = useState<CodingProblemSummary[]>([]);
   const [problem, setProblem] = useState<CodingProblem | null>(null);
+  const [difficulty, setDifficulty] = useState("medium");
   const [language, setLanguage] = useState("python");
   const [code, setCode] = useState("");
   const [output, setOutput] = useState("");
   const [analysis, setAnalysis] = useState<CodeSubmitResult["analysis"] | null>(null);
   const [running, setRunning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [activeTab, setActiveTab] = useState<"problem" | "examples" | "hints">("problem");
   const [showAnalysis, setShowAnalysis] = useState(false);
 
-  // 문제 목록 로드
-  useEffect(() => { codingApi.getProblems().then(setProblems).catch(() => {}); }, []);
-
-  // 문제 선택
-  const loadProblem = async (id: number) => {
-    const p = await codingApi.getProblem(id);
-    setProblem(p);
-    const tpl = await codingApi.getTemplate(language, id);
-    setCode(tpl.template || "");
-    setOutput(""); setAnalysis(null); setShowAnalysis(false);
+  // 문제 생성
+  const generateProblem = async (diff?: string) => {
+    setGenerating(true);
+    setProblem(null);
+    setOutput("");
+    setAnalysis(null);
+    setShowAnalysis(false);
+    try {
+      const p = await codingApi.generate(diff || difficulty);
+      setProblem(p);
+      const tpl = await codingApi.getTemplate(language, p.id);
+      setCode(tpl.template || "");
+    } catch (e: unknown) {
+      setOutput(`문제 생성 실패: ${e instanceof Error ? e.message : "알 수 없는 오류"}`);
+    } finally {
+      setGenerating(false);
+    }
   };
+
+  // 페이지 로드 시 자동으로 문제 생성
+  useEffect(() => { generateProblem(); }, []);
 
   // 언어 변경
   const changeLang = async (lang: string) => {
@@ -62,6 +79,12 @@ function CodingTestPage() {
       const tpl = await codingApi.getTemplate(lang, problem.id);
       setCode(tpl.template || "");
     }
+  };
+
+  // 난이도 변경 시 새 문제 생성
+  const changeDifficulty = (diff: string) => {
+    setDifficulty(diff);
+    generateProblem(diff);
   };
 
   // 코드 실행
@@ -105,14 +128,24 @@ function CodingTestPage() {
         <div className="flex items-center gap-4">
           <span className="text-[#007acc] font-semibold flex items-center gap-2">💻 AI 코딩 테스트</span>
 
-          {/* 문제 선택 */}
-          <select className="bg-[#252526] text-[#ccc] border border-[#3c3c3c] px-3 py-1 rounded text-sm"
-            value={problem?.id || ""} onChange={e => loadProblem(Number(e.target.value))}>
-            <option value="">문제 선택...</option>
-            {problems.map(p => (
-              <option key={p.id} value={p.id}>{p.title}</option>
+          {/* 난이도 선택 */}
+          <div className="flex items-center gap-1">
+            {DIFFICULTIES.map(d => (
+              <button key={d.value} onClick={() => changeDifficulty(d.value)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
+                  difficulty === d.value ? d.color + " ring-1 ring-current" : "text-[#858585] hover:text-[#ccc]"
+                }`}>
+                {d.label}
+              </button>
             ))}
-          </select>
+          </div>
+
+          {/* 새 문제 버튼 */}
+          <button onClick={() => generateProblem()} disabled={generating}
+            className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-[#4a3f8a] text-[#c4b5fd] hover:bg-[#5b4fa8] transition disabled:opacity-50">
+            {generating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            새 문제
+          </button>
 
           {problem && (
             <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${DIFFICULTY_COLORS[problem.difficulty] || ""}`}>
@@ -128,7 +161,7 @@ function CodingTestPage() {
             {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
           </select>
 
-          <button onClick={() => problem && loadProblem(problem.id)}
+          <button onClick={() => problem && generateProblem(difficulty)}
             className="flex items-center gap-1 px-3 py-1.5 rounded text-xs bg-[#3c3c3c] text-[#ccc] hover:bg-[#505050] transition">
             <RotateCcw size={12} /> 초기화
           </button>
@@ -162,8 +195,13 @@ function CodingTestPage() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 text-sm text-[#ccc] leading-relaxed">
-            {!problem ? (
-              <p className="text-center text-[#858585] mt-12">위에서 문제를 선택해주세요.</p>
+            {generating ? (
+              <div className="flex flex-col items-center justify-center mt-12 gap-3">
+                <Loader2 size={32} className="animate-spin text-[#007acc]" />
+                <p className="text-[#858585]">AI가 문제를 생성하고 있습니다...</p>
+              </div>
+            ) : !problem ? (
+              <p className="text-center text-[#858585] mt-12">문제가 없습니다. &quot;새 문제&quot; 버튼을 눌러주세요.</p>
             ) : activeTab === "problem" ? (
               <div>
                 <h2 className="text-lg font-bold text-white mb-4">{problem.title}</h2>
