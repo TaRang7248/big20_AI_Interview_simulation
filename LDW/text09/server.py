@@ -12,6 +12,8 @@ from typing import Optional, List
 from dotenv import load_dotenv
 import google.generativeai as genai
 import uvicorn
+import webbrowser
+from threading import Timer
 
 # Load .env
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env'))
@@ -491,7 +493,11 @@ def submit_answer(data: AnswerSubmission):
 # --- Static Files (Must be last) ---
 app.mount("/", StaticFiles(directory=".", html=True), name="static")
 
+def open_browser():
+    webbrowser.open("http://localhost:5000")
+
 if __name__ == "__main__":
     init_db()
     print("FastAPI Server running on http://localhost:5000")
+    Timer(1, open_browser).start()
     uvicorn.run(app, host="0.0.0.0", port=5000)
