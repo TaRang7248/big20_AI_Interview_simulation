@@ -9,8 +9,9 @@
 
 ## 상태 정의
 - BACKLOG : 대기 (착수 금지)
-- ACTIVE  : 현재 허용
+- ACTIVE  : 현재 허용 (에이전트 착수 가능)
 - DONE    : 완료
+- HOLD    : 보류 (조건 충족 전까지 착수 금지)
 
 ---
 ## DONE
@@ -195,6 +196,177 @@
 ---
 ## ACTIVE
 - (현재 ACTIVE 항목 없음)
+
+## BACKLOG
+
+### TASK-017 Interview Session Engine (실시간 면접 세션 엔진)
+- **Goal**:
+  - “실시간 면접 플로우 통합”의 중심이 되는 세션 엔진을 정의하고,
+    정책 기반 상태 전이 및 질문 진행 규칙을 일관되게 오케스트레이션한다.
+- **Scope**:
+  - 세션 상태 전이 정의: APPLIED → IN_PROGRESS → (COMPLETED | INTERRUPTED) → EVALUATED
+  - 질문 진행 규칙:
+    - 질문 전환 트리거(답변완료 버튼 / 침묵 / 제한시간) 정책 반영
+    - 최소 질문 수 기본값 10개 보장(정책 기반)
+    - 침묵 2케이스 구분(무응답 침묵 vs 답변 후 침묵)
+  - 세션 중 결과 생성 타이밍(매 질문 평가, 최종 결과 공개는 종료 후) 정책 반영
+- **Out of Scope**:
+  - WebRTC/실시간 스트리밍 구현
+  - 프론트/UI 구현
+  - DB 도입/마이그레이션
+- **Dependencies**:
+  - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
+  - TASK-011 ~ TASK-015 완료
+
+---
+
+### TASK-018 실전/연습 모드 분리 (Interview Mode Policy Split)
+- **Goal**:
+  - “공고 기반 실전 면접”과 “AI 면접 연습”의 기능/권한/중단 정책을 분리한다.
+- **Scope**:
+  - 실전/연습 기능 차이 정책 반영(일시정지/재시도/재질문 등)
+  - 중단/복구 정책 반영:
+    - 연습: 재진행 허용
+    - 실전: 중단 시 INTERRUPTED로 종료 처리
+  - 결과 노출 정책 분리(실전은 관리자 설정 기반)
+- **Out of Scope**:
+  - 실제 UI 버튼/화면 구현
+  - 장애 원인 자동 판별(사용자 강제 종료 vs 시스템 문제)
+- **Dependencies**:
+  - TASK-017 세션 엔진 정의 완료
+  - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
+
+---
+
+### TASK-019 공고(채용) 정책 엔진 (Job Posting Policy Engine)
+- **Goal**:
+  - 관리자(인사담당자)가 공고 등록 시 설정한 옵션이 면접 진행/노출 정책에 반영되도록 한다.
+- **Scope**:
+  - 공고별 설정 항목 정의 및 정책 반영:
+    - 침묵 대기 시간
+    - 답변 제한 시간
+    - 평가 가중치 조정 범위(10~90%)
+    - 필수 질문
+    - 질문 표시 방식(TTS only / TTS + Text)
+    - 공고별 모델 선택(등록 후 수정 불가)
+    - 결과 공개 시점: 즉시 / 특정 시각 / 관리자 승인
+    - 단, 어떤 설정이든 “2주 내 합/불합 자동 전달” 하한선 유지
+- **Out of Scope**:
+  - 실제 공고 등록 UI/관리자 페이지 구현
+  - DB 기반 영속화(현재는 파일 기반/임시 구조 유지)
+- **Dependencies**:
+  - TASK-018 정책 분리 기준 확정
+  - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
+
+---
+
+### TASK-020 관리자 지원자 조회/필터 규격 (Admin Applicant Filtering)
+- **Goal**:
+  - 관리자가 면접자들을 빠르게 탐색/분류할 수 있는 조회/필터 기준을 확정한다.
+- **Scope**:
+  - 필수 필터:
+    - 날짜
+    - 접수/진행 상태(APPLIED/IN_PROGRESS/COMPLETED/INTERRUPTED/EVALUATED)
+    - 합/불합
+  - 추천 추가 필터(우선순위 낮음):
+    - 점수 구간(전체/축별)
+    - 축별 약점(예: 의사소통 낮음)
+    - 중단 여부(INTERRUPTED)
+    - 공고/직무/모집분야
+- **Out of Scope**:
+  - 실제 관리자 UI 구현
+- **Dependencies**:
+  - TASK-019 공고 정책 엔진 범위 확정
+  - 리포트 조회 API 계약(TASK-014) 및 UI 소비 규격(TASK-015)
+
+---
+
+### TASK-021 세션 중단 표기/처리 규격 (Interrupt Handling & Visibility)
+- **Goal**:
+  - 실전/연습 모드의 “중단 처리”를 일관되게 종료 상태로 반영하고,
+    관리자 조회에서 “면접 중단”이 명확히 구분되도록 한다.
+- **Scope**:
+  - 실전: INTERRUPTED 종료 처리
+  - 연습: 재진행 허용(정책 범위 내)
+  - 관리자 조회/리포트에 중단 플래그/표시 규격 확정
+- **Out of Scope**:
+  - 중단 원인 자동 판별(네트워크/브라우저/사용자 종료 등)
+- **Dependencies**:
+  - TASK-018 실전/연습 모드 분리 확정
+  - TASK-020 관리자 조회 규격 확정
+
+---
+
+### TASK-022 질문은행 구조 정비 (Question Bank Structuring)
+- **Goal**:
+  - 보유한 약 6천 개 질문/답변 데이터를 정책 기반으로 정비한다.
+- **Scope**:
+  - 질문 태그 체계 정렬(직무/인재상/루브릭 연결)
+  - 필수 질문과의 충돌 정책 정의
+  - 공고 기반 질문 구성 전략 수립
+- **Out of Scope**:
+  - 실제 DB 마이그레이션
+- **Dependencies**:
+  - 인터뷰 정책 스펙 확정본
+  - 질문 태그 설계 문서
+
+---
+
+### TASK-023 RAG Fallback 엔진 통합
+- **Goal**:
+  - 질문 생성 품질 저하 또는 실패 시 질문은행을 fallback으로 활용한다.
+- **Scope**:
+  - 질문 생성 실패 조건 정의
+  - 태그 기반 질문 검색 전략 정의
+  - 공고 직무/인재상과 질문 매핑 정책 반영
+- **Out of Scope**:
+  - PGVector 정식 도입
+- **Dependencies**:
+  - TASK-022 완료
+  - 세션 엔진(TASK-017) 구조 확정
+
+---
+
+### TASK-024 PostgreSQL 도입 (공고/세션/평가 영속화)
+- **Goal**:
+  - 현재 파일 기반 저장 구조를 PostgreSQL 기반으로 전환한다.
+- **Scope**:
+  - users / job_postings / interviews / evaluations 스키마 적용
+  - 파일 기반 저장소 교체
+- **Out of Scope**:
+  - 인프라 배포 자동화
+- **Dependencies**:
+  - Phase 5 후반부 완료
+  - 데이터 아키텍처 설계 문서
+
+---
+
+### TASK-025 Redis 세션 상태 도입
+- **Goal**:
+  - 실시간 세션 상태 및 락 관리를 안정화한다.
+- **Scope**:
+  - IN_PROGRESS 세션 상태 관리
+  - 중복 요청 방지
+  - 세션 타임아웃 관리
+- **Out of Scope**:
+  - 클러스터링/고가용성 구성
+- **Dependencies**:
+  - TASK-017 세션 엔진 완료
+  - PostgreSQL 도입 완료
+
+---
+
+### TASK-026 관리자 통계 대시보드
+- **Goal**:
+  - 공고별/직무별/평가축별 통계 시각화 기능 제공
+- **Scope**:
+  - 평균 점수
+  - 합격률
+  - 평가축별 약점 분포
+- **Out of Scope**:
+  - 외부 BI 도구 연동
+- **Dependencies**:
+  - PostgreSQL 정식 도입
 
 ---
 ## HOLD
