@@ -283,11 +283,12 @@ $('#myinfo-form').addEventListener('submit', async (e) => {
     // Better UX: Add a password confirm modal or field.
     // SHORTCUT for this task: prompt user for password.
 
-    const pw = prompt("정보 수정을 위해 현재 비밀번호를 입력해주세요:");
-    if (!pw) return;
+    // [Modified] Password prompt removed as per request
+    // const pw = prompt("정보 수정을 위해 현재 비밀번호를 입력해주세요:");
+    // if (!pw) return;
 
     const updatedData = {
-        pw: pw, // Validation on server
+        // pw: pw, // Removed
         email: $('#edit-email').value,
         address: $('#edit-addr').value,
         phone: `${$('#edit-phone-1').value}-${$('#edit-phone-2').value}-${$('#edit-phone-3').value}`
