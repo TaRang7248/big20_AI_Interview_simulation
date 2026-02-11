@@ -92,7 +92,7 @@ class PasswordChange(BaseModel):
     new_pw: str
 
 class UserUpdate(BaseModel):
-    pw: str
+    pw: Optional[str] = None
     email: Optional[str]
     phone: Optional[str]
     address: Optional[str]
@@ -284,12 +284,9 @@ def update_user_info(id_name: str, data: UserUpdate):
     conn = get_db_connection()
     try:
         c = conn.cursor()
-        c.execute('SELECT pw FROM users WHERE id_name = %s', (id_name,))
-        row = c.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
-        if row[0] != data.pw:
-            raise HTTPException(status_code=401, detail="비밀번호가 일치하지 않습니다.")
+        # Password check removed as requested
+        # c.execute('SELECT pw FROM users WHERE id_name = %s', (id_name,))
+        # ... validation removed ...
         
         c.execute('''
             UPDATE users SET email = %s, phone = %s, address = %s WHERE id_name = %s
