@@ -21,8 +21,8 @@ try:
     )
     cur = conn.cursor()
     
-    # Check columns in users table
-    cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'users';")
+    # Check columns in interview_progress table
+    cur.execute("SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'interview_progress';")
     columns = cur.fetchall()
     
     print("Columns in 'users' table:")
