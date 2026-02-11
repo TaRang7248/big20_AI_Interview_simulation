@@ -93,6 +93,41 @@ function initRouter() {
 
 // --- 5. Auth ---
 function initAuth() {
+    // ID Duplicate Check
+    $('#btn-check-id').addEventListener('click', async () => {
+        const idInput = $('#reg-id');
+        const msgBox = $('#id-check-msg');
+        const idValue = idInput.value.trim();
+
+        if (!idValue) {
+            msgBox.textContent = '아이디를 입력해주세요.';
+            msgBox.style.color = 'red';
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/check-id', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_name: idValue })
+            });
+            const result = await response.json();
+
+            if (result.available) {
+                msgBox.textContent = result.message; // "사용 가능한 아이디입니다."
+                msgBox.style.color = 'green';
+                // Optional: Lock ID input or set a flag (not strictly required by prompt but good practice)
+            } else {
+                msgBox.textContent = result.message; // "이미 존재하는 아이디입니다."
+                msgBox.style.color = 'red';
+            }
+        } catch (error) {
+            console.error('ID Check Error:', error);
+            msgBox.textContent = '서버 오류가 발생했습니다.';
+            msgBox.style.color = 'red';
+        }
+    });
+
     $('#login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const id = $('#login-id').value;
