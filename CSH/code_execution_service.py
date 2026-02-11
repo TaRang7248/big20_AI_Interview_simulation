@@ -1115,6 +1115,65 @@ class CodeAnalyzer:
         )
 
 
+# ========== 스마트 출력 비교 ==========
+# 부동소수점 오차 허용 범위 (절대·상대)
+_FLOAT_ABS_TOL = 1e-6
+_FLOAT_REL_TOL = 1e-9
+
+
+def _is_float(s: str) -> bool:
+    """문자열이 부동소수점 숫자인지 판별"""
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _tokens_match(tok_a: str, tok_b: str) -> bool:
+    """토큰 단위 비교: 부동소수점이면 오차 허용, 아니면 정확 비교"""
+    if tok_a == tok_b:
+        return True
+    if _is_float(tok_a) and _is_float(tok_b):
+        fa, fb = float(tok_a), float(tok_b)
+        # 절대 오차 또는 상대 오차 중 하나라도 통과하면 OK
+        if abs(fa - fb) <= _FLOAT_ABS_TOL:
+            return True
+        if fb != 0 and abs((fa - fb) / fb) <= _FLOAT_REL_TOL:
+            return True
+    return False
+
+
+def _smart_compare(actual: str, expected: str) -> bool:
+    """
+    스마트 출력 비교:
+    1. Trim & Clean — 각 줄의 trailing whitespace 제거, 빈 줄 무시
+    2. Line-by-Line — 줄 단위로 비교하여 메모리 효율적
+    3. 부동소수점 오차 허용 — 토큰별 float 판별 후 ±1e-6 허용
+    """
+    # 줄 분리 → trailing whitespace 제거 → 빈 줄 스킵
+    a_lines = [ln.rstrip() for ln in actual.splitlines() if ln.strip()]
+    e_lines = [ln.rstrip() for ln in expected.splitlines() if ln.strip()]
+
+    if len(a_lines) != len(e_lines):
+        return False
+
+    for a_line, e_line in zip(a_lines, e_lines):
+        # 빠른 경로: 줄 전체가 동일하면 통과
+        if a_line == e_line:
+            continue
+        # 토큰 분리 비교 (공백 기준)
+        a_tokens = a_line.split()
+        e_tokens = e_line.split()
+        if len(a_tokens) != len(e_tokens):
+            return False
+        for at, et in zip(a_tokens, e_tokens):
+            if not _tokens_match(at, et):
+                return False
+
+    return True
+
+
 # ========== 코드 실행 서비스 ==========
 class CodeExecutionService:
     """코드 실행 및 분석 통합 서비스"""
@@ -1154,7 +1213,7 @@ class CodeExecutionService:
 
             expected = tc.get('expected', '').strip()
             actual = result.output.strip()
-            passed = actual == expected
+            passed = _smart_compare(actual, expected)
 
             test_results.append({
                 "test_id": i + 1,
