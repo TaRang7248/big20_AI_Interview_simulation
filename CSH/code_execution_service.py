@@ -1,13 +1,24 @@
 """
-코드 실행 및 AI 분석 서비스
-============================
+코드 실행 및 AI 분석 서비스 (보안 강화 버전)
+================================================
 면접 코딩 테스트를 위한 샌드박스 코드 실행 및 AI 기반 코드 분석
 
-기능:
-1. Python, JavaScript, Java, C, C++ 코드 실행 (샌드박스)
-2. 실행 시간 및 메모리 측정
-3. AI 기반 코드 품질 분석 (시간 복잡도, 스타일, 주석 등)
-4. LLM 자동 코딩 문제 생성 (1회 1문제)
+보안 기능:
+1. Docker 컨테이너 격리 (사용 가능 시 자동 전환)
+   - --network none: 네트워크 완전 격리
+   - --memory 256m: 메모리 제한
+   - --read-only + tmpfs: 파일시스템 접근 제한
+   - --cap-drop ALL: 커널 권한 박탈
+   - --security-opt no-new-privileges: 권한 상승 방지
+   - --pids-limit 50: 프로세스 폭탄 방지
+   - non-root USER: 최소 권한 실행
+2. 코드 보안 검사 (CodeSanitizer)
+   - 5개 언어별 위험 패턴 차단 (시스템 명령, 네트워크, 파일 접근 등)
+3. 리소스 모니터링 (subprocess fallback)
+   - psutil 기반 메모리 모니터링
+   - 시간 제한 (timeout)
+4. Python 런타임 SafeImporter (defense in depth)
+5. LLM 자동 코딩 문제 생성 (1회 1문제)
 """
 
 import os
@@ -19,8 +30,10 @@ import re
 import json
 import asyncio
 import uuid
+import shutil
+import threading
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
@@ -52,6 +65,156 @@ MAX_OUTPUT_SIZE = 10000  # 문자
 SUPPORTED_LANGUAGES = ["python", "javascript", "java", "c", "cpp"]
 
 
+# ========== 샌드박스 설정 ==========
+DOCKER_IMAGE = "interview-sandbox"
+DOCKER_AVAILABLE = False
+SANDBOX_MEMORY_MB = 256
+SANDBOX_MEMORY_LIMIT = f"{SANDBOX_MEMORY_MB}m"
+SANDBOX_PID_LIMIT = "50"
+SANDBOX_CPU_LIMIT = "1"
+
+
+def _check_docker_available():
+    """Docker 데몬 및 샌드박스 이미지 사용 가능 여부 확인 (서버 시작 시 1회 실행)"""
+    global DOCKER_AVAILABLE
+    try:
+        result = subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=5
+        )
+        if result.returncode != 0:
+            raise RuntimeError("Docker daemon not running")
+
+        # 샌드박스 이미지 존재 확인
+        img_check = subprocess.run(
+            ["docker", "image", "inspect", DOCKER_IMAGE],
+            capture_output=True, timeout=5
+        )
+        if img_check.returncode != 0:
+            # 이미지 자동 빌드 시도
+            dockerfile_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "sandbox"
+            )
+            if os.path.isfile(os.path.join(dockerfile_dir, "Dockerfile")):
+                print(f"[Sandbox] Docker 이미지 '{DOCKER_IMAGE}' 빌드 중...")
+                build = subprocess.run(
+                    ["docker", "build", "-t", DOCKER_IMAGE, dockerfile_dir],
+                    capture_output=True, text=True, timeout=300
+                )
+                if build.returncode == 0:
+                    print(f"[Sandbox] 이미지 빌드 완료 ✅")
+                    DOCKER_AVAILABLE = True
+                else:
+                    print(f"[Sandbox] 이미지 빌드 실패 ❌: {build.stderr[:300]}")
+            else:
+                print(f"[Sandbox] Dockerfile 미발견: {dockerfile_dir}")
+        else:
+            DOCKER_AVAILABLE = True
+    except Exception:
+        pass
+
+    status = "✅ Docker 격리 모드" if DOCKER_AVAILABLE else "⚠️ 서브프로세스 모드 (보안 제한적)"
+    print(f"[Sandbox] {status}")
+
+
+_check_docker_available()
+
+
+# ========== 코드 보안 검사기 ==========
+class CodeSanitizer:
+    """5개 언어에 대한 정적 보안 코드 검사 (Docker 유무와 무관하게 항상 실행)"""
+
+    DANGEROUS_PATTERNS: Dict[str, List[Tuple[str, str]]] = {
+        "python": [
+            (r'\b(subprocess|shutil|socket|requests|urllib|http\.client|ftplib)\b',
+             "시스템/네트워크 모듈 사용 금지"),
+            (r'\b(exec|eval|compile|__import__|globals|locals)\s*\(',
+             "동적 코드 실행 금지"),
+            (r'\b(ctypes|cffi|_thread|multiprocessing|signal)\b',
+             "저수준 시스템 접근 금지"),
+            (r'open\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)',
+             "시스템 경로 접근 금지"),
+            (r'\bos\s*\.\s*(system|popen|exec|spawn|remove|unlink|rmdir|chmod|chown|kill|fork)',
+             "OS 명령 실행 금지"),
+        ],
+        "javascript": [
+            (r'require\s*\(\s*[\"\'](?:child_process|fs|net|http|https|dgram|cluster|worker_threads|os|vm)[\"\']',
+             "시스템/네트워크 모듈 사용 금지"),
+            (r'\beval\s*\(', "eval 사용 금지"),
+            (r'\bprocess\s*\.\s*(exit|env|cwd|chdir|kill)',
+             "프로세스 제어 금지"),
+            (r'\bFunction\s*\(', "동적 함수 생성 금지"),
+        ],
+        "java": [
+            (r'\b(Runtime|ProcessBuilder)\b.*\b(exec|start)\b',
+             "프로세스 실행 금지"),
+            (r'\b(Socket|ServerSocket|URL|URLConnection|HttpClient|HttpURLConnection)\b',
+             "네트워크 접근 금지"),
+            (r'\bSystem\s*\.\s*(exit|getenv)',
+             "시스템 제어 금지"),
+            (r'\b(ClassLoader|\.class\.getMethod|Method\s*\.\s*invoke)\b',
+             "리플렉션 금지"),
+            (r'\bnew\s+(File|FileReader|FileWriter|FileInputStream|FileOutputStream|RandomAccessFile|PrintWriter)\s*\(',
+             "파일 I/O 금지 (Scanner/System.in 사용)"),
+        ],
+        "c": [
+            (r'\b(system|popen|execl|execlp|execle|execv|execvp|execvpe|fork|vfork)\s*\(',
+             "시스템 명령/프로세스 실행 금지"),
+            (r'\b(socket|connect|bind|listen|accept|send|recv|sendto|recvfrom)\s*\(',
+             "네트워크 함수 사용 금지"),
+            (r'#\s*include\s*<\s*(sys/socket|netinet|arpa|netdb|unistd)',
+             "시스템/네트워크 헤더 사용 금지"),
+            (r'fopen\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)',
+             "시스템 경로 접근 금지"),
+        ],
+        "cpp": [
+            (r'\b(system|popen|execl|execlp|execle|execv|execvp|fork|vfork)\s*\(',
+             "시스템 명령/프로세스 실행 금지"),
+            (r'\b(socket|connect|bind|listen|accept|send|recv)\s*\(',
+             "네트워크 함수 사용 금지"),
+            (r'#\s*include\s*<\s*(sys/socket|netinet|arpa|netdb|unistd)',
+             "시스템/네트워크 헤더 사용 금지"),
+            (r'\bstd::filesystem\b',
+             "파일시스템 접근 금지"),
+            (r'fopen\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)',
+             "시스템 경로 접근 금지"),
+        ],
+    }
+
+    # 코드 크기 제한 (100KB)
+    MAX_CODE_SIZE = 100 * 1024
+
+    @classmethod
+    def sanitize(cls, code: str, language: str) -> Tuple[bool, Optional[str]]:
+        """코드 보안 검사. (safe, error_message) 반환."""
+        language = language.lower()
+
+        # 크기 제한
+        if len(code.encode('utf-8')) > cls.MAX_CODE_SIZE:
+            return False, "🔒 보안 위반: 코드 크기가 100KB를 초과합니다."
+
+        # 언어별 위험 패턴 검사
+        patterns = cls.DANGEROUS_PATTERNS.get(language, [])
+        for pattern, message in patterns:
+            match = re.search(pattern, code, re.IGNORECASE)
+            if match:
+                return False, f"🔒 보안 위반: {message} (감지: '{match.group()}')"
+
+        return True, None
+
+
+# ========== 리소스 모니터링 결과 ==========
+@dataclass
+class _RunResult:
+    """subprocess 실행 결과 (리소스 모니터링 포함)"""
+    returncode: int
+    stdout: str
+    stderr: str
+    execution_time_ms: float
+    memory_mb: float = 0.0
+    timed_out: bool = False
+    memory_exceeded: bool = False
+
+
 # ========== 모델 ==========
 class Language(str, Enum):
     PYTHON = "python"
@@ -66,6 +229,7 @@ class CodeExecutionRequest(BaseModel):
     language: str
     problem_id: Optional[str] = None
     test_cases: Optional[List[Dict]] = None
+    stdin: Optional[str] = None
 
 
 class CodeExecutionResult(BaseModel):
@@ -236,406 +400,495 @@ nums에서 두 수를 선택하여 더한 값이 target이 되는 두 수의 인
         return problem
 
 
-# ========== 코드 실행 엔진 ==========
+# ========== 코드 실행 엔진 (보안 강화) ==========
 class CodeExecutor:
-    """샌드박스 환경에서 코드 실행"""
-    
+    """Docker 격리 + 코드 검사 + 리소스 모니터링 기반 샌드박스 코드 실행"""
+
     def __init__(self):
         self.temp_dir = tempfile.mkdtemp()
-    
+        self.use_docker = DOCKER_AVAILABLE
+
+    # ───── 메인 진입점 ─────
+
     def execute(self, code: str, language: str, stdin: str = "") -> CodeExecutionResult:
-        """코드 실행"""
+        """코드 실행 (보안 검사 → Docker 격리 또는 모니터링 서브프로세스)"""
         language = language.lower()
-        
-        if language == "python":
-            return self._execute_python(code, stdin)
-        elif language == "javascript":
-            return self._execute_javascript(code, stdin)
-        elif language == "java":
-            return self._execute_java(code, stdin)
-        elif language == "c":
-            return self._execute_c(code, stdin)
-        elif language == "cpp":
-            return self._execute_cpp(code, stdin)
-        else:
+
+        if language not in SUPPORTED_LANGUAGES:
             return CodeExecutionResult(
-                success=False,
-                output="",
+                success=False, output="",
                 error=f"지원하지 않는 언어입니다: {language}",
                 execution_time=0
             )
-    
-    def _execute_python(self, code: str, stdin: str = "") -> CodeExecutionResult:
-        """Python 코드 실행"""
-        # 임시 파일 생성
-        file_path = os.path.join(self.temp_dir, "solution.py")
-        
-        # 보안을 위한 코드 래핑
-        safe_code = f'''
-import sys
-import io
-from contextlib import redirect_stdout, redirect_stderr
 
-# 위험한 모듈 제한
-BLOCKED_MODULES = ['os', 'subprocess', 'shutil', 'socket', 'requests']
+        # 1단계: 코드 보안 정적 검사 (모든 모드에서 실행)
+        safe, error_msg = CodeSanitizer.sanitize(code, language)
+        if not safe:
+            return CodeExecutionResult(
+                success=False, output="", error=error_msg, execution_time=0
+            )
 
-class SafeImporter:
-    def find_module(self, name, path=None):
-        if name in BLOCKED_MODULES:
-            raise ImportError(f"모듈 '{{name}}'은(는) 보안상 사용할 수 없습니다.")
-        return None
+        # 2단계: Docker 사용 가능 → 컨테이너 격리 실행
+        if self.use_docker:
+            return self._execute_in_docker(code, language, stdin)
 
-sys.meta_path.insert(0, SafeImporter())
+        # 3단계: Fallback → 모니터링 서브프로세스 실행
+        dispatch = {
+            "python": self._execute_python,
+            "javascript": self._execute_javascript,
+            "java": self._execute_java,
+            "c": self._execute_c,
+            "cpp": self._execute_cpp,
+        }
+        return dispatch[language](code, stdin)
 
-# 사용자 코드 실행
-{code}
-'''
-        
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(safe_code)
-        
+    # ───── Docker 컨테이너 격리 실행 ─────
+
+    def _execute_in_docker(self, code: str, language: str, stdin: str) -> CodeExecutionResult:
+        """
+        Docker 컨테이너에서 완전 격리 실행.
+        보안: --network none, --memory, --read-only, --cap-drop ALL,
+              --security-opt no-new-privileges, --pids-limit, non-root user
+        """
+        # 언어별 파일명/컴파일/실행 설정
+        lang_config = {
+            "python":     {"file": "solution.py",   "compile": None,
+                           "run": "python3 solution.py"},
+            "javascript": {"file": "solution.js",   "compile": None,
+                           "run": "node solution.js"},
+            "java":       {"file": "Solution.java", "compile": "javac Solution.java",
+                           "run": "java Solution"},
+            "c":          {"file": "solution.c",    "compile": "gcc solution.c -o solution -lm -O2",
+                           "run": "./solution"},
+            "cpp":        {"file": "solution.cpp",  "compile": "g++ solution.cpp -o solution -std=c++17 -O2",
+                           "run": "./solution"},
+        }
+
+        # Java: 클래스 이름에 따라 파일명 조정
+        if language == "java":
+            class_match = re.search(r'public\s+class\s+(\w+)', code)
+            class_name = class_match.group(1) if class_match else "Solution"
+            lang_config["java"]["file"] = f"{class_name}.java"
+            lang_config["java"]["compile"] = f"javac {class_name}.java"
+            lang_config["java"]["run"] = f"java -Xmx{SANDBOX_MEMORY_MB}m {class_name}"
+
+        # JavaScript: stdin 파이프 래핑
+        if language == "javascript":
+            code = self._wrap_js_stdin(code)
+
+        # Python: 런타임 SafeImporter 래핑
+        if language == "python":
+            code = self._wrap_python_safe(code)
+
+        cfg = lang_config[language]
+        code_dir = tempfile.mkdtemp()
+
         try:
+            # 코드 파일 + 입력 파일 작성
+            code_path = os.path.join(code_dir, cfg["file"])
+            input_path = os.path.join(code_dir, "input.txt")
+
+            with open(code_path, 'w', encoding='utf-8') as f:
+                f.write(code)
+            with open(input_path, 'w', encoding='utf-8') as f:
+                f.write(stdin)
+
+            # Docker 명령 구성
+            docker_cmd = [
+                "docker", "run", "--rm",
+                "--network", "none",                      # 네트워크 격리
+                "--memory", SANDBOX_MEMORY_LIMIT,          # 메모리 제한
+                "--memory-swap", SANDBOX_MEMORY_LIMIT,     # 스왑 제한 (= 메모리만 사용)
+                "--pids-limit", SANDBOX_PID_LIMIT,         # 프로세스 수 제한
+                "--cpus", SANDBOX_CPU_LIMIT,               # CPU 제한
+                "--read-only",                             # 루트 파일시스템 읽기 전용
+                "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",  # 임시 작업 공간
+                "--security-opt", "no-new-privileges",     # 권한 상승 방지
+                "--cap-drop", "ALL",                       # 모든 커널 권한 박탈
+                "--user", "sandbox",                       # non-root 실행
+                "-v", f"{code_dir}:/sandbox:ro",           # 코드 마운트 (읽기 전용)
+                "-w", "/tmp",
+                DOCKER_IMAGE,
+            ]
+
+            # 셸 명령: 코드 복사 → 컴파일(선택) → 실행
+            shell_parts = [f"cp /sandbox/{cfg['file']} /tmp/"]
+            if cfg["compile"]:
+                shell_parts.append(cfg["compile"])
+            shell_parts.append(
+                f"timeout {MAX_EXECUTION_TIME} {cfg['run']} < /sandbox/input.txt"
+            )
+            shell_cmd = " && ".join(shell_parts)
+            docker_cmd.extend(["bash", "-c", shell_cmd])
+
             start_time = time.time()
-            
             result = subprocess.run(
-                [sys.executable, file_path],
-                input=stdin,
+                docker_cmd,
                 capture_output=True,
                 text=True,
-                timeout=MAX_EXECUTION_TIME,
-                cwd=self.temp_dir
+                timeout=MAX_EXECUTION_TIME + 10,  # Docker 오버헤드 고려
             )
-            
-            execution_time = (time.time() - start_time) * 1000  # ms
-            
-            output = result.stdout[:MAX_OUTPUT_SIZE]
-            error = result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else None
-            
-            return CodeExecutionResult(
-                success=result.returncode == 0,
-                output=output.strip(),
-                error=error,
-                execution_time=round(execution_time, 2)
-            )
-            
-        except subprocess.TimeoutExpired:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=f"시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
-                execution_time=MAX_EXECUTION_TIME * 1000
-            )
-        except Exception as e:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=str(e),
-                execution_time=0
-            )
-        finally:
-            # 임시 파일 삭제
-            if os.path.exists(file_path):
-                os.remove(file_path)
-    
-    def _execute_javascript(self, code: str, stdin: str = "") -> CodeExecutionResult:
-        """JavaScript 코드 실행 (Node.js 필요)"""
-        file_path = os.path.join(self.temp_dir, "solution.js")
-        
-        # stdin 처리를 위한 코드 래핑
-        wrapped_code = f'''
-const readline = require('readline');
-const inputLines = `{stdin}`.trim().split('\\n');
-let lineIndex = 0;
-
-function input() {{
-    return inputLines[lineIndex++] || '';
-}}
-
-// 사용자 코드
-{code}
-'''
-        
-        with open(file_path, 'w', encoding='utf-8') as f:
-            f.write(wrapped_code)
-        
-        try:
-            start_time = time.time()
-            
-            result = subprocess.run(
-                ['node', file_path],
-                capture_output=True,
-                text=True,
-                timeout=MAX_EXECUTION_TIME,
-                cwd=self.temp_dir
-            )
-            
             execution_time = (time.time() - start_time) * 1000
-            
+
+            # Docker/Linux 종료 코드 해석
+            if result.returncode == 137:  # OOM Killed
+                return CodeExecutionResult(
+                    success=False, output="",
+                    error=f"💾 메모리 초과: {SANDBOX_MEMORY_MB}MB 제한을 초과했습니다.",
+                    execution_time=round(execution_time, 2)
+                )
+            if result.returncode == 124:  # timeout
+                return CodeExecutionResult(
+                    success=False, output="",
+                    error=f"⏱ 시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
+                    execution_time=round(execution_time, 2)
+                )
+
             return CodeExecutionResult(
                 success=result.returncode == 0,
                 output=result.stdout.strip()[:MAX_OUTPUT_SIZE],
                 error=result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else None,
                 execution_time=round(execution_time, 2)
             )
-            
-        except FileNotFoundError:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error="Node.js가 설치되어 있지 않습니다.",
-                execution_time=0
-            )
+
         except subprocess.TimeoutExpired:
             return CodeExecutionResult(
-                success=False,
-                output="",
-                error=f"시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
+                success=False, output="",
+                error=f"⏱ 시간 초과: Docker 실행 제한 시간을 초과했습니다.",
                 execution_time=MAX_EXECUTION_TIME * 1000
             )
         except Exception as e:
             return CodeExecutionResult(
-                success=False,
-                output="",
-                error=str(e),
+                success=False, output="",
+                error=f"Docker 실행 오류: {str(e)}",
                 execution_time=0
             )
         finally:
+            shutil.rmtree(code_dir, ignore_errors=True)
+
+    # ───── 리소스 모니터링 서브프로세스 실행 ─────
+
+    def _monitored_run(self, cmd: list, input: str = "",
+                       timeout: int = MAX_EXECUTION_TIME,
+                       cwd: Optional[str] = None) -> _RunResult:
+        """
+        리소스 모니터링이 적용된 서브프로세스 실행.
+        - psutil 기반 메모리 모니터링 (설치 시)
+        - 시간 제한 (timeout)
+        - 프로세스 트리 정리
+        """
+        start_time = time.time()
+
+        creation_flags = 0
+        if os.name == 'nt':
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=cwd or self.temp_dir,
+            creationflags=creation_flags,
+        )
+
+        memory_exceeded = threading.Event()
+        max_memory = [0.0]
+
+        def _monitor_memory():
+            """백그라운드 메모리 모니터링 스레드"""
+            try:
+                import psutil
+                ps_proc = psutil.Process(proc.pid)
+                while proc.poll() is None and not memory_exceeded.is_set():
+                    try:
+                        mem_info = ps_proc.memory_info()
+                        mem_mb = mem_info.rss / (1024 * 1024)
+                        max_memory[0] = max(max_memory[0], mem_mb)
+                        if mem_mb > SANDBOX_MEMORY_MB:
+                            memory_exceeded.set()
+                            # 프로세스 트리 전체 종료
+                            for child in ps_proc.children(recursive=True):
+                                try:
+                                    child.kill()
+                                except psutil.NoSuchProcess:
+                                    pass
+                            proc.kill()
+                            return
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        return
+                    time.sleep(0.1)
+            except ImportError:
+                pass  # psutil 미설치 시 메모리 모니터링 스킵
+
+        monitor_thread = threading.Thread(target=_monitor_memory, daemon=True)
+        monitor_thread.start()
+
+        try:
+            stdout, stderr = proc.communicate(input=input, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                stdout, stderr = proc.communicate(timeout=3)
+            except Exception:
+                stdout, stderr = "", ""
+            return _RunResult(
+                returncode=-1, stdout="", stderr="",
+                execution_time_ms=(time.time() - start_time) * 1000,
+                memory_mb=max_memory[0],
+                timed_out=True, memory_exceeded=False
+            )
+
+        monitor_thread.join(timeout=1)
+        execution_time_ms = (time.time() - start_time) * 1000
+
+        if memory_exceeded.is_set():
+            return _RunResult(
+                returncode=-1, stdout="", stderr="",
+                execution_time_ms=execution_time_ms,
+                memory_mb=max_memory[0],
+                timed_out=False, memory_exceeded=True
+            )
+
+        return _RunResult(
+            returncode=proc.returncode,
+            stdout=stdout or "",
+            stderr=stderr or "",
+            execution_time_ms=execution_time_ms,
+            memory_mb=max_memory[0],
+            timed_out=False, memory_exceeded=False
+        )
+
+    def _result_from_run(self, run: _RunResult) -> CodeExecutionResult:
+        """_RunResult → CodeExecutionResult 변환"""
+        if run.timed_out:
+            return CodeExecutionResult(
+                success=False, output="",
+                error=f"⏱ 시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
+                execution_time=round(run.execution_time_ms, 2),
+                memory_usage=run.memory_mb if run.memory_mb > 0 else None
+            )
+        if run.memory_exceeded:
+            return CodeExecutionResult(
+                success=False, output="",
+                error=f"💾 메모리 초과: {SANDBOX_MEMORY_MB}MB 제한 초과 (사용: {run.memory_mb:.1f}MB)",
+                execution_time=round(run.execution_time_ms, 2),
+                memory_usage=run.memory_mb
+            )
+        return CodeExecutionResult(
+            success=run.returncode == 0,
+            output=run.stdout.strip()[:MAX_OUTPUT_SIZE],
+            error=run.stderr[:MAX_OUTPUT_SIZE] if run.stderr else None,
+            execution_time=round(run.execution_time_ms, 2),
+            memory_usage=run.memory_mb if run.memory_mb > 0 else None
+        )
+
+    # ───── 코드 보안 래핑 헬퍼 ─────
+
+    @staticmethod
+    def _wrap_python_safe(code: str) -> str:
+        """Python 런타임 SafeImporter 래핑 (defense in depth)"""
+        return f'''
+import sys
+
+# 위험한 모듈, 서브모듈 런타임 차단
+_BLOCKED = frozenset([
+    'os', 'subprocess', 'shutil', 'socket', 'requests', 'urllib',
+    'http', 'ftplib', 'ctypes', 'cffi', 'multiprocessing', 'signal',
+    'importlib', 'pathlib', 'glob', 'tempfile', 'webbrowser',
+])
+
+class _Guard:
+    def find_module(self, name, path=None):
+        top = name.split('.')[0]
+        if top in _BLOCKED:
+            raise ImportError(f"보안상 '{{name}}' 모듈은 사용할 수 없습니다.")
+        return None
+
+sys.meta_path.insert(0, _Guard())
+
+{code}
+'''
+
+    @staticmethod
+    def _wrap_js_stdin(code: str) -> str:
+        """JavaScript stdin 파이프 래핑 (코드 인젝션 방지)"""
+        return f'''
+"use strict";
+const _rl = require('readline');
+const _iface = _rl.createInterface({{ input: process.stdin, terminal: false }});
+const _lines = [];
+_iface.on('line', l => _lines.push(l));
+_iface.on('close', () => {{
+    let _idx = 0;
+    globalThis.input = () => _lines[_idx++] || '';
+    {code}
+}});
+'''
+
+    # ───── 서브프로세스 Fallback: 언어별 실행 ─────
+
+    def _execute_python(self, code: str, stdin: str = "") -> CodeExecutionResult:
+        """Python 실행 (SafeImporter + 메모리 모니터링)"""
+        file_path = os.path.join(self.temp_dir, "solution.py")
+        safe_code = self._wrap_python_safe(code)
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(safe_code)
+
+        try:
+            run = self._monitored_run([sys.executable, file_path], input=stdin)
+            return self._result_from_run(run)
+        except Exception as e:
+            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
+        finally:
             if os.path.exists(file_path):
                 os.remove(file_path)
-    
+
+    def _execute_javascript(self, code: str, stdin: str = "") -> CodeExecutionResult:
+        """JavaScript 실행 (stdin 파이프 + 메모리 모니터링)"""
+        file_path = os.path.join(self.temp_dir, "solution.js")
+        wrapped_code = self._wrap_js_stdin(code)
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(wrapped_code)
+
+        try:
+            run = self._monitored_run(['node', file_path], input=stdin)
+            return self._result_from_run(run)
+        except FileNotFoundError:
+            return CodeExecutionResult(
+                success=False, output="",
+                error="Node.js가 설치되어 있지 않습니다.",
+                execution_time=0
+            )
+        except Exception as e:
+            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
+        finally:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
     def _execute_java(self, code: str, stdin: str = "") -> CodeExecutionResult:
-        """Java 코드 실행"""
-        # 클래스 이름 추출
+        """Java 실행 (Xmx 메모리 제한 + 메모리 모니터링)"""
         class_match = re.search(r'public\s+class\s+(\w+)', code)
         class_name = class_match.group(1) if class_match else "Solution"
-        
         file_path = os.path.join(self.temp_dir, f"{class_name}.java")
-        
+
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write(code)
-        
+
         try:
             # 컴파일
             compile_result = subprocess.run(
                 ['javac', file_path],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=self.temp_dir
+                capture_output=True, text=True, timeout=30, cwd=self.temp_dir
             )
-            
             if compile_result.returncode != 0:
                 return CodeExecutionResult(
-                    success=False,
-                    output="",
+                    success=False, output="",
                     error=f"컴파일 오류:\n{compile_result.stderr}",
                     execution_time=0
                 )
-            
-            # 실행
-            start_time = time.time()
-            
-            result = subprocess.run(
-                ['java', '-cp', self.temp_dir, class_name],
-                input=stdin,
-                capture_output=True,
-                text=True,
-                timeout=MAX_EXECUTION_TIME,
-                cwd=self.temp_dir
+
+            # 실행 (Xmx로 JVM 메모리 제한 + 모니터링)
+            run = self._monitored_run(
+                ['java', f'-Xmx{SANDBOX_MEMORY_MB}m', '-cp', self.temp_dir, class_name],
+                input=stdin
             )
-            
-            execution_time = (time.time() - start_time) * 1000
-            
-            return CodeExecutionResult(
-                success=result.returncode == 0,
-                output=result.stdout.strip()[:MAX_OUTPUT_SIZE],
-                error=result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else None,
-                execution_time=round(execution_time, 2)
-            )
-            
+            return self._result_from_run(run)
+
         except FileNotFoundError:
             return CodeExecutionResult(
-                success=False,
-                output="",
+                success=False, output="",
                 error="Java가 설치되어 있지 않습니다.",
                 execution_time=0
             )
-        except subprocess.TimeoutExpired:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=f"시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
-                execution_time=MAX_EXECUTION_TIME * 1000
-            )
         except Exception as e:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=str(e),
-                execution_time=0
-            )
+            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
         finally:
-            # 정리
             for ext in ['.java', '.class']:
                 path = os.path.join(self.temp_dir, f"{class_name}{ext}")
                 if os.path.exists(path):
                     os.remove(path)
-    
+
     def _execute_c(self, code: str, stdin: str = "") -> CodeExecutionResult:
-        """C 코드 실행"""
+        """C 실행 (gcc 컴파일 + 메모리 모니터링)"""
         source_path = os.path.join(self.temp_dir, "solution.c")
         exe_path = os.path.join(self.temp_dir, "solution.exe" if os.name == 'nt' else "solution")
-        
+
         with open(source_path, 'w', encoding='utf-8') as f:
             f.write(code)
-        
+
         try:
-            # 컴파일
             compile_result = subprocess.run(
-                ['gcc', source_path, '-o', exe_path, '-lm'],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=self.temp_dir
+                ['gcc', source_path, '-o', exe_path, '-lm', '-O2'],
+                capture_output=True, text=True, timeout=30, cwd=self.temp_dir
             )
-            
             if compile_result.returncode != 0:
                 return CodeExecutionResult(
-                    success=False,
-                    output="",
+                    success=False, output="",
                     error=f"컴파일 오류:\n{compile_result.stderr}",
                     execution_time=0
                 )
-            
-            # 실행
-            start_time = time.time()
-            
-            result = subprocess.run(
-                [exe_path],
-                input=stdin,
-                capture_output=True,
-                text=True,
-                timeout=MAX_EXECUTION_TIME,
-                cwd=self.temp_dir
-            )
-            
-            execution_time = (time.time() - start_time) * 1000
-            
-            return CodeExecutionResult(
-                success=result.returncode == 0,
-                output=result.stdout.strip()[:MAX_OUTPUT_SIZE],
-                error=result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else None,
-                execution_time=round(execution_time, 2)
-            )
-            
+
+            run = self._monitored_run([exe_path], input=stdin)
+            return self._result_from_run(run)
+
         except FileNotFoundError:
             return CodeExecutionResult(
-                success=False,
-                output="",
+                success=False, output="",
                 error="GCC가 설치되어 있지 않습니다. MinGW 또는 GCC를 설치해주세요.",
                 execution_time=0
             )
-        except subprocess.TimeoutExpired:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=f"시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
-                execution_time=MAX_EXECUTION_TIME * 1000
-            )
         except Exception as e:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=str(e),
-                execution_time=0
-            )
+            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
         finally:
-            # 정리
-            if os.path.exists(source_path):
-                os.remove(source_path)
-            if os.path.exists(exe_path):
-                os.remove(exe_path)
-    
+            for p in (source_path, exe_path):
+                if os.path.exists(p):
+                    os.remove(p)
+
     def _execute_cpp(self, code: str, stdin: str = "") -> CodeExecutionResult:
-        """C++ 코드 실행"""
+        """C++ 실행 (g++ 컴파일 + 메모리 모니터링)"""
         source_path = os.path.join(self.temp_dir, "solution.cpp")
         exe_path = os.path.join(self.temp_dir, "solution.exe" if os.name == 'nt' else "solution")
-        
+
         with open(source_path, 'w', encoding='utf-8') as f:
             f.write(code)
-        
+
         try:
-            # 컴파일
             compile_result = subprocess.run(
-                ['g++', source_path, '-o', exe_path, '-std=c++17'],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=self.temp_dir
+                ['g++', source_path, '-o', exe_path, '-std=c++17', '-O2'],
+                capture_output=True, text=True, timeout=30, cwd=self.temp_dir
             )
-            
             if compile_result.returncode != 0:
                 return CodeExecutionResult(
-                    success=False,
-                    output="",
+                    success=False, output="",
                     error=f"컴파일 오류:\n{compile_result.stderr}",
                     execution_time=0
                 )
-            
-            # 실행
-            start_time = time.time()
-            
-            result = subprocess.run(
-                [exe_path],
-                input=stdin,
-                capture_output=True,
-                text=True,
-                timeout=MAX_EXECUTION_TIME,
-                cwd=self.temp_dir
-            )
-            
-            execution_time = (time.time() - start_time) * 1000
-            
-            return CodeExecutionResult(
-                success=result.returncode == 0,
-                output=result.stdout.strip()[:MAX_OUTPUT_SIZE],
-                error=result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else None,
-                execution_time=round(execution_time, 2)
-            )
-            
+
+            run = self._monitored_run([exe_path], input=stdin)
+            return self._result_from_run(run)
+
         except FileNotFoundError:
             return CodeExecutionResult(
-                success=False,
-                output="",
+                success=False, output="",
                 error="G++가 설치되어 있지 않습니다. MinGW 또는 G++를 설치해주세요.",
                 execution_time=0
             )
-        except subprocess.TimeoutExpired:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=f"시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
-                execution_time=MAX_EXECUTION_TIME * 1000
-            )
         except Exception as e:
-            return CodeExecutionResult(
-                success=False,
-                output="",
-                error=str(e),
-                execution_time=0
-            )
+            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
         finally:
-            # 정리
-            if os.path.exists(source_path):
-                os.remove(source_path)
-            if os.path.exists(exe_path):
-                os.remove(exe_path)
+            for p in (source_path, exe_path):
+                if os.path.exists(p):
+                    os.remove(p)
 
 
 # ========== AI 코드 분석기 ==========
 class CodeAnalyzer:
     """AI 기반 코드 품질 분석"""
-    
+
     CODE_ANALYSIS_PROMPT = """당신은 시니어 소프트웨어 엔지니어이자 기술 면접관입니다.
 제출된 코드를 종합적으로 분석하고 평가해주세요.
 
@@ -687,7 +940,7 @@ class CodeAnalyzer:
     "feedback": ["종합 개선 제안1", "종합 개선 제안2", "종합 개선 제안3"],
     "detailed_analysis": "상세 분석 내용 (2-3문단)"
 }}"""
-    
+
     def __init__(self):
         self.llm = None
         if LLM_AVAILABLE:
@@ -699,7 +952,7 @@ class CodeAnalyzer:
                 )
             except Exception as e:
                 print(f"⚠️ CodeAnalyzer LLM 초기화 실패: {e}")
-    
+
     async def analyze(
         self,
         code: str,
@@ -708,11 +961,11 @@ class CodeAnalyzer:
         execution_results: List[Dict]
     ) -> CodeAnalysisResult:
         """코드 종합 분석"""
-        
+
         # 테스트 결과 요약
         passed = sum(1 for r in execution_results if r.get('passed', False))
         total = len(execution_results)
-        
+
         # LLM 분석
         if self.llm:
             try:
@@ -720,10 +973,10 @@ class CodeAnalyzer:
                 return analysis
             except Exception as e:
                 print(f"LLM 분석 오류: {e}")
-        
+
         # LLM 없으면 기본 분석
         return self._basic_analyze(code, language, passed, total)
-    
+
     async def _llm_analyze(
         self,
         code: str,
@@ -732,7 +985,7 @@ class CodeAnalyzer:
         execution_results: List[Dict]
     ) -> CodeAnalysisResult:
         """LLM 기반 상세 분석"""
-        
+
         # 문제 정보 구성
         problem_info = ""
         if problem:
@@ -742,14 +995,14 @@ class CodeAnalyzer:
 난이도: {problem.difficulty}
 설명: {problem.description}
 """
-        
+
         # 테스트 결과 구성
         test_results = "\n".join([
             f"- 테스트 {i+1}: {'통과 ✓' if r.get('passed') else '실패 ✗'} "
             f"(실행시간: {r.get('execution_time', 0):.2f}ms)"
             for i, r in enumerate(execution_results)
         ])
-        
+
         messages = [
             SystemMessage(content=self.CODE_ANALYSIS_PROMPT),
             HumanMessage(content=f"""
@@ -766,13 +1019,13 @@ class CodeAnalyzer:
 위 코드를 종합적으로 분석하고 JSON 형식으로 평가해주세요.
 """)
         ]
-        
+
         response = self.llm.invoke(messages)
         response_text = response.content
-        
+
         # JSON Resilience 파싱
         analysis = parse_code_analysis_json(response_text, context="CodeAnalyzer.analyze_code")
-        
+
         return CodeAnalysisResult(
             overall_score=analysis.get('overall_score', 0),
             correctness=analysis.get('correctness', {}),
@@ -784,7 +1037,7 @@ class CodeAnalyzer:
             feedback=analysis.get('feedback', []),
             detailed_analysis=analysis.get('detailed_analysis', '')
         )
-    
+
     def _basic_analyze(
         self,
         code: str,
@@ -793,31 +1046,31 @@ class CodeAnalyzer:
         total: int
     ) -> CodeAnalysisResult:
         """기본 코드 분석 (LLM 없이)"""
-        
+
         # 정확성 점수
         correctness_score = int((passed / total) * 25) if total > 0 else 0
-        
+
         # 코드 스타일 분석
         lines = code.split('\n')
         has_comments = any('#' in line or '//' in line or '/*' in line for line in lines)
         avg_line_length = sum(len(line) for line in lines) / len(lines) if lines else 0
-        
+
         style_score = 15
         style_issues = []
-        
+
         if avg_line_length > 100:
             style_score -= 5
             style_issues.append("줄 길이가 너무 깁니다 (100자 이하 권장)")
-        
+
         if not has_comments:
             style_issues.append("주석이 없습니다")
-        
+
         # 주석 점수
         comment_score = 8 if has_comments else 3
-        
+
         # 종합 점수
         overall = correctness_score + 15 + 10 + style_score + comment_score + 7
-        
+
         return CodeAnalysisResult(
             overall_score=min(100, overall),
             correctness={
@@ -862,14 +1115,73 @@ class CodeAnalyzer:
         )
 
 
+# ========== 스마트 출력 비교 ==========
+# 부동소수점 오차 허용 범위 (절대·상대)
+_FLOAT_ABS_TOL = 1e-6
+_FLOAT_REL_TOL = 1e-9
+
+
+def _is_float(s: str) -> bool:
+    """문자열이 부동소수점 숫자인지 판별"""
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+
+
+def _tokens_match(tok_a: str, tok_b: str) -> bool:
+    """토큰 단위 비교: 부동소수점이면 오차 허용, 아니면 정확 비교"""
+    if tok_a == tok_b:
+        return True
+    if _is_float(tok_a) and _is_float(tok_b):
+        fa, fb = float(tok_a), float(tok_b)
+        # 절대 오차 또는 상대 오차 중 하나라도 통과하면 OK
+        if abs(fa - fb) <= _FLOAT_ABS_TOL:
+            return True
+        if fb != 0 and abs((fa - fb) / fb) <= _FLOAT_REL_TOL:
+            return True
+    return False
+
+
+def _smart_compare(actual: str, expected: str) -> bool:
+    """
+    스마트 출력 비교:
+    1. Trim & Clean — 각 줄의 trailing whitespace 제거, 빈 줄 무시
+    2. Line-by-Line — 줄 단위로 비교하여 메모리 효율적
+    3. 부동소수점 오차 허용 — 토큰별 float 판별 후 ±1e-6 허용
+    """
+    # 줄 분리 → trailing whitespace 제거 → 빈 줄 스킵
+    a_lines = [ln.rstrip() for ln in actual.splitlines() if ln.strip()]
+    e_lines = [ln.rstrip() for ln in expected.splitlines() if ln.strip()]
+
+    if len(a_lines) != len(e_lines):
+        return False
+
+    for a_line, e_line in zip(a_lines, e_lines):
+        # 빠른 경로: 줄 전체가 동일하면 통과
+        if a_line == e_line:
+            continue
+        # 토큰 분리 비교 (공백 기준)
+        a_tokens = a_line.split()
+        e_tokens = e_line.split()
+        if len(a_tokens) != len(e_tokens):
+            return False
+        for at, et in zip(a_tokens, e_tokens):
+            if not _tokens_match(at, et):
+                return False
+
+    return True
+
+
 # ========== 코드 실행 서비스 ==========
 class CodeExecutionService:
     """코드 실행 및 분석 통합 서비스"""
-    
+
     def __init__(self):
         self.executor = CodeExecutor()
         self.analyzer = CodeAnalyzer()
-    
+
     async def run_and_analyze(
         self,
         code: str,
@@ -878,13 +1190,13 @@ class CodeExecutionService:
         custom_test_cases: Optional[List[Dict]] = None
     ) -> Dict:
         """코드 실행 및 분석"""
-        
+
         # 문제 가져오기 (캐시에서 조회)
         problem = _generated_problems.get(problem_id) if problem_id else None
-        
+
         # 테스트 케이스 결정
         test_cases = custom_test_cases or (problem.test_cases if problem else [])
-        
+
         if not test_cases:
             # 테스트 케이스 없으면 단순 실행
             result = self.executor.execute(code, language, "")
@@ -893,16 +1205,16 @@ class CodeExecutionService:
                 "analysis": None,
                 "test_results": []
             }
-        
+
         # 각 테스트 케이스 실행
         test_results = []
         for i, tc in enumerate(test_cases):
             result = self.executor.execute(code, language, tc.get('input', ''))
-            
+
             expected = tc.get('expected', '').strip()
             actual = result.output.strip()
-            passed = actual == expected
-            
+            passed = _smart_compare(actual, expected)
+
             test_results.append({
                 "test_id": i + 1,
                 "input": tc.get('input', '')[:100] + ('...' if len(tc.get('input', '')) > 100 else ''),
@@ -912,10 +1224,10 @@ class CodeExecutionService:
                 "execution_time": result.execution_time,
                 "error": result.error
             })
-        
+
         # AI 분석
         analysis = await self.analyzer.analyze(code, language, problem, test_results)
-        
+
         return {
             "problem": problem.dict() if problem else None,
             "test_results": test_results,
@@ -932,11 +1244,11 @@ class CodeExecutionService:
 # ========== FastAPI 라우터 ==========
 def create_coding_router():
     """코딩 테스트 API 라우터"""
-    
+
     router = APIRouter(prefix="/api/coding", tags=["Coding Test"])
     service = CodeExecutionService()
     generator = CodingProblemGenerator()
-    
+
     @router.get("/generate")
     async def generate_problem(difficulty: str = "medium"):
         """LLM으로 코딩 문제 1개 생성"""
@@ -947,19 +1259,19 @@ def create_coding_router():
         public_problem = problem.dict()
         public_problem['test_cases'] = problem.test_cases[:2]
         return public_problem
-    
+
     @router.get("/problems/{problem_id}")
     async def get_problem(problem_id: str):
         """캐시된 문제 상세 조회"""
         problem = _generated_problems.get(problem_id)
         if not problem:
             raise HTTPException(status_code=404, detail="문제를 찾을 수 없습니다. 새 문제를 생성해주세요.")
-        
+
         # 테스트 케이스는 일부만 공개
         public_problem = problem.dict()
         public_problem['test_cases'] = problem.test_cases[:2]
         return public_problem
-    
+
     @router.post("/execute")
     async def execute_code(request: CodeExecutionRequest):
         """코드 실행"""
@@ -968,23 +1280,23 @@ def create_coding_router():
                 status_code=400,
                 detail=f"지원하지 않는 언어입니다. 지원 언어: {SUPPORTED_LANGUAGES}"
             )
-        
+
         result = await service.run_and_analyze(
             code=request.code,
             language=request.language,
             problem_id=request.problem_id,
             custom_test_cases=request.test_cases
         )
-        
+
         return result
-    
+
     @router.post("/run")
     async def run_code_simple(request: CodeExecutionRequest):
-        """단순 코드 실행 (분석 없이)"""
+        """단순 코드 실행 (분석 없이, stdin 지원)"""
         executor = CodeExecutor()
-        result = executor.execute(request.code, request.language, "")
+        result = executor.execute(request.code, request.language, request.stdin or "")
         return result.dict()
-    
+
     @router.post("/submit")
     async def submit_code(request: CodeExecutionRequest):
         """코드 제출 (실행 + 분석 + 테스트케이스 평가)"""
@@ -1000,7 +1312,7 @@ def create_coding_router():
             custom_test_cases=request.test_cases
         )
         return result
-    
+
     @router.get("/templates/{language}")
     async def get_template(language: str, problem_id: Optional[str] = None):
         """언어별 코드 템플릿"""
@@ -1117,26 +1429,26 @@ int main() {
 }
 '''
         }
-        
+
         return {
             "language": language,
             "template": templates.get(language.lower(), "// 템플릿 없음")
         }
-    
+
     return router
 
 
 # 테스트용
 if __name__ == "__main__":
     import asyncio
-    
+
     async def test():
         # LLM 문제 생성 테스트
         generator = CodingProblemGenerator()
         problem = await generator.generate("easy")
         print("=== 생성된 문제 ===")
         print(json.dumps(problem.dict(), indent=2, ensure_ascii=False))
-        
+
         # 코드 실행 테스트
         service = CodeExecutionService()
         code = '''
@@ -1156,9 +1468,9 @@ def two_sum(nums, target):
 result = two_sum(nums, target)
 print(result[0], result[1])
 '''
-        
+
         result = await service.run_and_analyze(code, "python", problem.id)
         print("\n=== 실행 결과 ===")
         print(json.dumps(result, indent=2, ensure_ascii=False))
-    
+
     asyncio.run(test())
