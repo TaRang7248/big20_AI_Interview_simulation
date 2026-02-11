@@ -123,16 +123,42 @@
 - **Verification**: `python scripts/verify_task_011.py` Pass
 
 ---
+
+### TASK-012 평가 결과 리포팅 / 해석 계층 설계 (Reporting Layer)
+- **Goal**: EvaluationResult(+Evidence)를 사용자 친화적 **InterviewReport(JSON)**로 변환하는 리포팅/해석 계층 구축
+- **Scope**:
+  - `packages/imh_report` 구현 (DTO / Mapping / Report Generator)
+  - Score → Total Score(100점 환산) / Grade 매핑
+  - `tag_code` 기반 Feedback/Insight 매핑
+  - Mock 기반 Report 생성 및 구조 검증
+- **Verification**: `python scripts/verify_task_012.py` Pass
+
+---
 ## ACTIVE
 
-### TASK-012 평가 근거 데이터 구조 (Evidence)
-- 평가 점수 산출 근거 데이터 구조 정의
-- 결과 리포트 / 감사를 위한 Evidence JSON 설계
+### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
+- **Goal**: 생성된 `InterviewReport`를 서비스 데이터로 보존하고, 면접 회차별 조회/리스트/상세 조회 기반을 마련
+- **Scope (초안)**:
+  - InterviewReport 저장 구조(식별자/면접ID/세션ID 등) 및 이력 정책(버전/타임스탬프) 정의
+  - 저장 및 조회를 위한 최소 인터페이스/검증 스크립트
+- **Out of Scope**:
+  - UI 화면 구현
+  - 실제 LLM/RAG 연동
 
 ---
 
 ## HOLD
 
-### TASK-013 TTS Provider (Text → Speech)
-- 면접관 음성 출력(TTS) Provider 인터페이스 및 Mock
-- 실시간 면접 / 세션 단계에서만 착수
+### TASK-016 TTS Provider (Text → Speech)
+- **Goal**:
+  - 면접 결과 또는 실시간 피드백을 음성으로 출력하기 위한 TTS Provider 계층 준비
+- **Scope (예정)**:
+  - TTS Provider 인터페이스 정의
+  - Mock 기반 Text → Speech 변환 파이프라인
+- **보류 사유**:
+  - 현재 Phase에서는 리포트 저장/이력 및 리포트 소비 계약(API/UI) 확정이 우선
+  - 출력 텍스트의 책임 경계(Reporting vs UI)가 아직 완전히 고정되지 않음
+- **재개 조건**:
+  - 리포트 저장 / 이력 관리 완료 (TASK-013)
+  - 리포트 API 노출 계약 정의 (TASK-014)
+  - UI 소비 규격 정의 완료 (TASK-015)

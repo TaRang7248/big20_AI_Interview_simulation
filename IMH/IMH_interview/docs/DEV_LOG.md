@@ -237,4 +237,18 @@ Plan 수립
 - **로그 파일**: `logs/agent/verify_task_011.log`
 
 
-
+### TASK-012 평가 결과 리포팅 / 해석 계층 설계 (Reporting Layer)
+- **요약**: `packages/imh_report` 패키지 구현. Evaluation Result를 입력받아 사용자 친화적인 리포트(JSON)를 생성하는 Logic 구현.
+- **변경 사항**:
+  - `packages/imh_report/dto.py`: `InterviewReport`, `ReportHeader`, `ReportDetail` 등 DTO 정의.
+  - `packages/imh_report/mapping.py`: `tag_code` -> Feedback/Insight 매핑 및 등급 산출 로직 구현.
+  - `packages/imh_report/engine.py`: `ReportGenerator.generate()` 구현 (5점 척도 -> 100점 환산, 등급 부여, Insight 결합).
+  - `scripts/verify_task_012.py`: Mock Data 기반 리포트 생성 및 필드 검증 스크립트 작성.
+- **검증 증거**:
+  - **스크립트 실행 결과**: `python scripts/verify_task_012.py`
+    - Mock Evaluation Result (3.5점) -> Report Total Score 70.0점, Grade "B" 확인.
+    - 직무 역량(4점) -> "우수합니다" 피드백, Strength 추가 확인.
+    - 태도(2점) -> "보완이 필요합니다" 피드백, Weakness 및 Actionable Insight 추가 확인.
+    - JSON Output 구조(`header`, `details`, `footer`) 정합성 확인.
+- **로그 및 산출물**:
+  - `packages/imh_report/__init__.py` 포함 패키지 구조화.

@@ -67,18 +67,22 @@
 
 ## 2. 현재 개발 단계
 
-- 상태: **Phase 3 진입 (Evaluation Layer 구현 완료)**
+- 상태: **Phase 4 진행 중 (Reporting Layer 완료, Storage/UI 진입 준비)**
 - 완료 항목:
   - Analysis 결과를 입력으로 받아
     정량 점수 및 평가 근거(Evidence)를 산출하는
-    Rule-based Evaluation Engine 구현 및 검증 완료
+    Rule-based Evaluation Engine 구현 및 검증 완료 (TASK-011)
+  - **평가 결과를 사용자 친화적 리포트(JSON)로 변환하는 Reporting Layer 구현 완료 (TASK-012)**
+
 - 미포함 항목:
   - DB 저장 / 벡터 저장
   - 실제 LLM / RAG 연동
-  - Reporting / UI 출력
+  - UI 화면 구현
+
 - 현재 Phase의 목적:
-  - 분석 → 평가(Evaluation) 경계 확립
-  - 평가 계약(`tag_code`, `evidence_data`) 고정
+  - 리포트 데이터 구조(JSON) 확정 ✅
+  - 해석(Interpretation) 로직 1차 구현 완료 ✅
+  - **다음 단계(TASK-013)에서 리포트의 활용/확장 계층으로 진입**
 ---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -242,77 +246,53 @@ IMH/IMH_Interview/
 > 현재는 “운영/통제/기반 구조”를 먼저 고정해야 한다.
 
 ---
-
 ## 10. 현재 최우선 목표
 
-### ACTIVE
-- TASK-012 평가 근거 데이터 구조 (Evidence) 착수
-  - (TASK-011에서 정의된 EvidenceData를 기반으로 리포팅용 구조 확정 필요)
+## ACTIVE
+
+### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
+- **Goal**: 생성된 `InterviewReport`를 서비스 데이터로 보존하고, 면접 회차별 조회/리스트/상세 조회 기반을 마련
+- **Scope**:
+  - InterviewReport 저장 구조 정의 (식별자 / 면접ID / 세션ID)
+  - 이력 정책 정의 (버전 / 타임스탬프)
+  - 저장/조회 최소 인터페이스 및 검증 스크립트
+- **Out of Scope**:
+  - UI 화면 구현
+  - 실제 LLM / RAG 연동
 
 ---
 
 ## BACKLOG
 
-### 최근 완료
-
-- TASK-011 정량 평가 엔진 (루브릭 기반) ✅ DONE
-  - `packages/imh_eval` 구현 완료
-  - 직무/문제해결/의사소통/태도 4대 영역 정량 평가 로직 검증
-  - `verify_task_011.py` 테스트 케이스 3종 Pass
-  - JSON Schema 및 가중치 적용 로직 확정
-
-- TASK-010 Visual 분석 (MediaPipe) ✅ DONE
-  - `POST /api/v1/playground/visual` 구현 완료
-  - MediaPipe (FaceMesh, Pose) 기반 시선/자세 분석 Pipeline 검증
-  - `verify_task_010` 검증 통과 (No Face 시나리오 포함)
-  - Reproduction Baseline (`mediapipe==0.10.5` 등) 준수 확인
-
-- TASK-009 Voice 분석 (Parselmouth) ✅ DONE
-  - Mock Voice Provider를 실제 Parselmouth 기반 분석 로직으로 교체
-  - Pitch / Intensity / Jitter / Shimmer / HNR 음성 특성 추출 구현
-  - 정상 음성 / 무음 / 비정상 파일 입력에 대한 예외 처리 정책 검증 완료
-  - Playground 환경에서 검증 스크립트 기반 동작 확인
-
-- TASK-008 Emotion 분석 (DeepFace) ✅ DONE
-  - `POST /api/v1/playground/emotion` 구현 완료
-  - DeepFace 기반 1fps 영상 분석 및 이미지 분석 검증
-  - `tf-keras` 의존성 해결 및 DTO 구조화 완료
-
-- TASK-007 Playground Embedding → Query Focus ✅ DONE
-  - `POST /api/v1/playground/embedding` 구현 완료
-  - 검색용 Query Text → Embedding 벡터 변환 파이프라인 검증
-  - Mock Provider 기반 처리
-  - 저장/검색/RAG 연동 제외
-
-- TASK-006 Playground PDF → Text (문서 업로드) ✅ DONE
-  - `POST /api/v1/playground/pdf-text` 구현
-  - 안정성 제약(50페이지, 10MB) 적용
-  - `pypdf` 기반 Local Provider 연동
-
-- TASK-005 Playground STT (파일 업로드) ✅ DONE
-  - Mock STT Provider 연동 및 DI 구조 적용
-  - 파일 업로드 및 임시 파일 관리(100MB 제한)
-  - `POST /api/v1/playground/stt` 검증 완료
-
-- TASK-004 FastAPI 최소 엔트리 + Healthcheck ✅ DONE
-  - FastAPI 실행 진입점 확정
-  - `/health` 엔드포인트 구현
-  - Python 3.10.11 / interview_env 기준 검증 완료
-
-- TASK-003 Provider 인터페이스 + Mock 구현 ✅ DONE
-  - STT / LLM / Emotion / Visual / Voice Provider 인터페이스 정의
-  - Async Mock Provider 구현
-  - `scripts/verify_task_003.py` 통과
-
-- TASK-002 imh_core 최소 패키지 구성 (config / errors / dto) ✅ DONE
-- TASK-001 로깅 기반 구축 ✅ DONE
+### TASK-014 리포트 API 노출 (BFF Endpoint)
+- **Goal**:
+  - InterviewReport를 외부(UI/관리자/서비스)에서 소비할 수 있도록 API 계약을 확정
+- **Scope (예정)**:
+  - 단건 조회 / 목록 조회 API 계약
+  - 응답 스키마 고정 (Report DTO 재사용)
+- **Out of Scope**:
+  - UI 구현
+  - 인증/권한 고도화
 
 ---
 
-## BACKLOG
+### TASK-015 UI 계약 및 소비 규격 정의
+- **Goal**:
+  - 프론트엔드 소비 관점에서 Report JSON 사용 규칙을 확정
+- **Scope (예정)**:
+  - 시각화(Radar Chart 등) 필드 의미/범위 정의
+  - 텍스트 길이, 요약 필드 등 UI 친화 규칙 정의
 
-- 후보 작업:
-  - TASK-012 평가 근거 데이터 구조 (Evidence)
-  - TASK-013 TTS Provider (Text → Speech)  (HOLD 성격 유지)
-- 비고:
-  - Phase 2 Playground 검증(010) 이후 평가/리포트 계층 착수 검토
+---
+
+## HOLD
+
+### TASK-016 TTS Provider (Text → Speech)
+- **Goal**:
+  - 면접 결과 또는 실시간 피드백을 음성으로 출력하기 위한 TTS Provider 계층 준비
+- **보류 사유**:
+  - 리포트 저장/조회/API/UI 계약이 확정되지 않음
+- **재개 조건**:
+  - TASK-013 (Persistence) 완료
+  - TASK-014 (API 계약) 완료
+  - TASK-015 (UI 소비 규격) 완료
