@@ -168,7 +168,10 @@ function loginUser(user) {
 
 // --- 6. Dashboard & Jobs ---
 function initDashboard() {
-    $('#link-my-info').addEventListener('click', () => navigateTo('myinfo-page'));
+    $('#link-my-info').addEventListener('click', () => {
+        navigateTo('myinfo-page');
+        loadMyInfo();
+    });
 }
 
 async function fetchJobs() {
@@ -223,6 +226,140 @@ window.viewJobDetail = async (jobId) => {
 $('#btn-back-to-list').addEventListener('click', () => navigateTo('applicant-dashboard-page'));
 $('#btn-apply-job').addEventListener('click', () => {
     if (AppState.currentJobId) startInterviewSetup(AppState.currentJobId);
+});
+
+// --- 6.1 My Info Logic ---
+async function loadMyInfo() {
+    if (!AppState.currentUser) return;
+
+    try {
+        const response = await fetch(`/api/user/${AppState.currentUser.id_name}`);
+        const result = await response.json();
+
+        if (result.success) {
+            const user = result.user;
+            // Fill form
+            $('#edit-id').value = user.id_name;
+            $('#edit-name').value = user.name;
+            $('#edit-dob').value = user.dob || '';
+            $('#edit-gender').value = user.gender === 'male' ? '남성' : (user.gender === 'female' ? '여성' : user.gender);
+            $('#edit-email').value = user.email || '';
+            $('#edit-addr').value = user.address || '';
+
+            if (user.phone) {
+                const parts = user.phone.split('-');
+                if (parts.length === 3) {
+                    $('#edit-phone-1').value = parts[0];
+                    $('#edit-phone-2').value = parts[1];
+                    $('#edit-phone-3').value = parts[2];
+                } else {
+                    $('#edit-phone-1').value = '';
+                    $('#edit-phone-2').value = '';
+                    $('#edit-phone-3').value = '';
+                }
+            }
+        } else {
+            showToast('회원 정보를 불러오지 못했습니다.', 'error');
+        }
+    } catch (error) {
+        console.error('Load MyInfo Error:', error);
+        showToast('서버 통신 오류', 'error');
+    }
+}
+
+$('#myinfo-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!confirm('정말 수정하시겠습니까?')) return;
+
+    // We need current password to update info? The API requires 'pw' field in UserUpdate model.
+    // However, the UI does not have a password field in 'myinfo-form'.
+    // We should probably prompt for password or fetch it if possible (security risk), 
+    // OR we can ask user to input password to confirm update.
+    // For now, let's assume we need to prompt for password or add a password field to the form.
+    // Checking server.py: UserUpdate requires 'pw'.
+    // Let's ask via prompt or add a hidden field if we rely on session logic (which we don't fully have safely).
+    // Better UX: Add a password confirm modal or field.
+    // SHORTCUT for this task: prompt user for password.
+
+    const pw = prompt("정보 수정을 위해 현재 비밀번호를 입력해주세요:");
+    if (!pw) return;
+
+    const updatedData = {
+        pw: pw, // Validation on server
+        email: $('#edit-email').value,
+        address: $('#edit-addr').value,
+        phone: `${$('#edit-phone-1').value}-${$('#edit-phone-2').value}-${$('#edit-phone-3').value}`
+    };
+
+    try {
+        const response = await fetch(`/api/user/${AppState.currentUser.id_name}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedData)
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast('정보가 수정되었습니다.', 'success');
+            // Update local state if needed
+            AppState.currentUser.email = updatedData.email;
+            AppState.currentUser.address = updatedData.address;
+            AppState.currentUser.phone = updatedData.phone;
+        } else {
+            showToast(result.message || '수정 실패', 'error');
+        }
+    } catch (error) {
+        console.error(error);
+        showToast('서버 오류', 'error');
+    }
+});
+
+// Password Change Button
+$('#btn-change-pw').addEventListener('click', () => {
+    navigateTo('password-change-page');
+});
+
+$('#btn-cancel-myinfo').addEventListener('click', () => {
+    if (AppState.currentUser.type === 'admin') navigateTo('admin-dashboard-page');
+    else navigateTo('applicant-dashboard-page');
+});
+
+// Password Change Logic
+$('#password-change-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const newPw = $('#new-pw').value;
+    const confirmPw = $('#confirm-new-pw').value;
+
+    if (newPw !== confirmPw) {
+        alert('새 비밀번호가 일치하지 않습니다.');
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/change-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_name: AppState.currentUser.id_name,
+                new_pw: newPw
+            })
+        });
+        const result = await response.json();
+        if (result.success) {
+            alert('비밀번호가 변경되었습니다. 다시 로그인해주세요.');
+            AppState.currentUser = null;
+            $('#navbar').classList.add('hidden');
+            navigateTo('login-page');
+        } else {
+            alert(result.message);
+        }
+    } catch (error) {
+        console.error(error);
+        alert('오류 발생');
+    }
+});
+
+$('#btn-cancel-pw-change').addEventListener('click', () => {
+    navigateTo('myinfo-page');
 });
 
 // --- 7. Interview Setup ---
@@ -671,6 +808,11 @@ function initAdmin() {
         $('#admin-job-register-page').classList.add('hidden');
         $('#admin-job-edit-page').classList.add('hidden');
         fetchJobs();
+    });
+
+    $('#admin-link-my-info').addEventListener('click', () => {
+        navigateTo('myinfo-page');
+        loadMyInfo();
     });
 
     $('#btn-add-job').addEventListener('click', () => {
