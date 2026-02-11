@@ -86,6 +86,7 @@ function initRouter() {
 
             if (pageId === 'applicant-dashboard-page') fetchJobs();
             if (pageId === 'admin-dashboard-page') fetchJobs();
+            if (pageId === 'my-records-page') fetchMyRecords();
 
             // Auto-start device test when entering setup page
             if (pageId === 'interview-setup-page') {
@@ -225,6 +226,17 @@ function initDashboard() {
         $('#check-pw-input').value = '';
         $('#check-pw-input').focus();
     });
+
+    $('#link-my-info-side').addEventListener('click', () => {
+        navigateTo('password-check-page');
+        $('#check-pw-input').value = '';
+        $('#check-pw-input').focus();
+    });
+
+    $('#link-my-records').addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateTo('my-records-page');
+    });
 }
 
 async function fetchJobs() {
@@ -280,6 +292,44 @@ $('#btn-back-to-list').addEventListener('click', () => navigateTo('applicant-das
 $('#btn-apply-job').addEventListener('click', () => {
     if (AppState.currentJobId) startInterviewSetup(AppState.currentJobId);
 });
+
+async function fetchMyRecords() {
+    if (!AppState.currentUser) return;
+
+    try {
+        const response = await fetch(`/api/interview-results/${AppState.currentUser.id_name}`);
+        const result = await response.json();
+        if (result.success) {
+            renderMyRecords(result.results);
+        }
+    } catch (error) {
+        console.error('Fetch My Records Error:', error);
+        showToast('면접 기록을 가져오는데 실패했습니다.', 'error');
+    }
+}
+
+function renderMyRecords(records) {
+    const list = $('#my-records-list');
+    list.innerHTML = '';
+
+    if (records.length === 0) {
+        list.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">면접 기록이 없습니다.</td></tr>';
+        return;
+    }
+
+    records.forEach(record => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${record.announcement_title}</td>
+            <td>${record.announcement_job}</td>
+            <td>${record.interview_time}</td>
+            <td style="color: ${record.pass_fail === '합격' ? 'green' : (record.pass_fail === '불합격' ? 'red' : 'orange')}; font-weight: bold;">
+                ${record.pass_fail}
+            </td>
+        `;
+        list.appendChild(tr);
+    });
+}
 
 // --- 6.1 My Info Logic ---
 async function loadMyInfo() {

@@ -838,7 +838,27 @@ def get_interview_result(interview_number: str):
         if row:
             return {"success": True, "result": dict(row)}
         else:
-             return {"success": False, "message": "결과 분석 중입니다."}
+            return {"success": False, "message": "결과 분석 중입니다."}
+    finally:
+        conn.close()
+
+@app.get("/api/interview-results/{id_name}")
+def get_user_interview_results(id_name: str):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        # Select title, job description (announcement_job), created_at (interview time), and pass/fail
+        query = """
+            SELECT announcement_title, announcement_job, 
+                   to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time, 
+                   pass_fail
+            FROM Interview_Result 
+            WHERE applicant_id = %s 
+            ORDER BY created_at DESC
+        """
+        c.execute(query, (id_name,))
+        rows = c.fetchall()
+        return {"success": True, "results": [dict(row) for row in rows]}
     finally:
         conn.close()
 
