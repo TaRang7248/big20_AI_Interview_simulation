@@ -476,9 +476,9 @@ def start_interview(data: StartInterviewRequest):
         # Save to DB
         c.execute('''
             INSERT INTO Interview_Progress (
-                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question
-            ) VALUES (%s, %s, %s, %s, %s)
-        ''', (interview_number, applicant_name, data.job_title, resume_text[:1000], first_question))
+                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, applicant_id
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+        ''', (interview_number, applicant_name, data.job_title, resume_text[:1000], first_question, data.id_name))
         # Note: Saving truncated resume text to avoid huge DB size if text is long.
         
         conn.commit()
@@ -549,7 +549,7 @@ async def submit_answer(
         
         # We find the latest row for this interview
         c.execute("""
-            SELECT id, Create_Question, Resume FROM Interview_Progress 
+            SELECT id, Create_Question, Resume, applicant_id FROM Interview_Progress 
             WHERE Interview_Number = %s 
             ORDER BY id DESC LIMIT 1
         """, (interview_number,))
@@ -564,6 +564,7 @@ async def submit_answer(
         current_row_id = row[0]
         prev_question = row[1]
         resume_context = row[2] if row[2] else ""
+        applicant_id = row[3] # Get applicant_id from progress record
         
         # 3. Evaluate & 4. Next Question
         # 3. Determine Question Phase
@@ -670,15 +671,15 @@ async def submit_answer(
         if next_phase == "END":
              interview_finished = True
              # Trigger Final Analysis (Background Task)
-             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name)
+             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, applicant_id)
         else:
             # 6. Insert New Row (Next Question) ONLY if not finished
             # resume context is copied for simplicity or we can just ignore it for subsequent rows
             c.execute('''
                 INSERT INTO Interview_Progress (
-                    Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume
-                ) VALUES (%s, %s, %s, %s, %s)
-            ''', (interview_number, applicant_name, job_title, next_question, resume_context))
+                    Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume, applicant_id
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+            ''', (interview_number, applicant_name, job_title, next_question, resume_context, applicant_id))
         
         conn.commit()
         conn.close()
@@ -695,7 +696,7 @@ async def submit_answer(
         return {"success": False, "message": f"오류 발생: {str(e)}"}
 
 # --- Logic: Analyze Interview Result ---
-def analyze_interview_result(interview_number, job_title, applicant_name):
+def analyze_interview_result(interview_number, job_title, applicant_name, applicant_id):
     logger.info(f"Analyzing interview result for {interview_number}...")
     conn = get_db_connection()
     c = conn.cursor()
@@ -787,8 +788,9 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
                 communication_score, communication_eval, 
                 non_verbal_score, non_verbal_eval, 
                 pass_fail,
-                announcement_title, announcement_job
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                announcement_title, announcement_job,
+                applicant_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             interview_number,
             int(result.get("tech_score", 0)), result.get("tech_eval", ""),
@@ -796,7 +798,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
             int(result.get("communication_score", 0)), result.get("communication_eval", ""),
             int(result.get("non_verbal_score", 0)), result.get("non_verbal_eval", ""),
             pass_fail,
-            announcement_title, announcement_job
+            announcement_title, announcement_job,
+            applicant_id
         ))
         
         conn.commit()
@@ -814,9 +817,10 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
                     communication_score, communication_eval, 
                     non_verbal_score, non_verbal_eval, 
                     pass_fail,
-                    announcement_title, announcement_job
-                ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류', %s, '분석 중 오류 발생')
-            """, (interview_number, job_title))
+                    announcement_title, announcement_job,
+                    applicant_id
+                ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류', %s, '분석 중 오류 발생', %s)
+            """, (interview_number, job_title, applicant_id))
              conn.commit()
         except Exception as db_e:
              logger.error(f"Failed to write error record: {db_e}")
