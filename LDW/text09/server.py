@@ -473,12 +473,17 @@ def start_interview(data: StartInterviewRequest):
         # 1. First Question: Self Introduction (Fixed)
         first_question = f"안녕하세요, {applicant_name}님. 면접을 시작하겠습니다. 먼저 간단하게 자기소개를 부탁드립니다."
         
+        # Determine Session Name (e.g., 면접-1)
+        c.execute("SELECT COUNT(DISTINCT interview_number) FROM Interview_Progress WHERE applicant_id = %s", (data.id_name,))
+        interview_count = c.fetchone()[0]
+        session_name = f"면접-{interview_count + 1}"
+
         # Save to DB
         c.execute('''
             INSERT INTO Interview_Progress (
-                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, applicant_id
-            ) VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (interview_number, applicant_name, data.job_title, resume_text[:1000], first_question, data.id_name))
+                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, applicant_id, session_name
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (interview_number, applicant_name, data.job_title, resume_text[:1000], first_question, data.id_name, session_name))
         # Note: Saving truncated resume text to avoid huge DB size if text is long.
         
         conn.commit()
@@ -486,7 +491,8 @@ def start_interview(data: StartInterviewRequest):
         return {
             "success": True,
             "interview_number": interview_number,
-            "question": first_question
+            "question": first_question,
+            "session_name": session_name
         }
         
     except Exception as e:
@@ -565,6 +571,10 @@ async def submit_answer(
         prev_question = row[1]
         resume_context = row[2] if row[2] else ""
         applicant_id = row[3] # Get applicant_id from progress record
+        
+        # Get session_name from current row to propagate it
+        c.execute("SELECT session_name FROM Interview_Progress WHERE id = %s", (current_row_id,))
+        session_name = c.fetchone()[0]
         
         # 3. Evaluate & 4. Next Question
         # 3. Determine Question Phase
@@ -677,9 +687,9 @@ async def submit_answer(
             # resume context is copied for simplicity or we can just ignore it for subsequent rows
             c.execute('''
                 INSERT INTO Interview_Progress (
-                    Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume, applicant_id
-                ) VALUES (%s, %s, %s, %s, %s, %s)
-            ''', (interview_number, applicant_name, job_title, next_question, resume_context, applicant_id))
+                    Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume, applicant_id, session_name
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (interview_number, applicant_name, job_title, next_question, resume_context, applicant_id, session_name))
         
         conn.commit()
         conn.close()
@@ -688,7 +698,8 @@ async def submit_answer(
             "success": True,
             "next_question": next_question,
             "transcript": applicant_answer,
-            "interview_finished": interview_finished
+            "interview_finished": interview_finished,
+            "session_name": session_name
         }
         
     except Exception as e:
