@@ -653,7 +653,7 @@ function startQuestionSequence(question) {
     // 1. TTS
     speakText(question, () => {
         // 2. Start Timer & Recording after TTS
-        startTimer(15); // 90 seconds (increased for speech)타이머
+        startTimer(120); // 90 seconds (increased for speech)타이머
         startRecording();
     });
 }
@@ -789,7 +789,7 @@ async function handleSubmitAnswer(forced = false) {
     formData.append('job_title', job.job);
 
     // Calc time used
-    const timeUsed = 15 - AppState.interview.timeLeft;
+    const timeUsed = 120 - AppState.interview.timeLeft;
     formData.append('answer_time', `${timeUsed}초`);
     formData.append('audio', audioFile);
 

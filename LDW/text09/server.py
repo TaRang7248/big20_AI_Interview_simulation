@@ -737,14 +737,16 @@ def analyze_interview_result(interview_number, job_title, applicant_name, applic
         announcement_title = announcement_row[0] if announcement_row else job_title
         announcement_job = announcement_row[1] if announcement_row else "직무 내용 없음"
 
-        # Fetch all Q&A
+        # Fetch all Q&A and session_name
         c.execute("""
-            SELECT Create_Question, Question_answer, Answer_Evaluation 
+            SELECT Create_Question, Question_answer, Answer_Evaluation, session_name
             FROM Interview_Progress 
             WHERE Interview_Number = %s 
             ORDER BY id ASC
         """, (interview_number,))
         rows = c.fetchall()
+        
+        session_name = rows[0][3] if rows else "알 수 없음" # session_name is same for all rows in a session
         
         interview_log = ""
         for row in rows:
@@ -810,8 +812,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name, applic
                 non_verbal_score, non_verbal_eval, 
                 pass_fail,
                 announcement_title, announcement_job,
-                applicant_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                applicant_id, session_name
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             interview_number,
             int(result.get("tech_score", 0)), result.get("tech_eval", ""),
@@ -820,7 +822,7 @@ def analyze_interview_result(interview_number, job_title, applicant_name, applic
             int(result.get("non_verbal_score", 0)), result.get("non_verbal_eval", ""),
             pass_fail,
             announcement_title, announcement_job,
-            applicant_id
+            applicant_id, session_name
         ))
         
         conn.commit()
@@ -839,9 +841,9 @@ def analyze_interview_result(interview_number, job_title, applicant_name, applic
                     non_verbal_score, non_verbal_eval, 
                     pass_fail,
                     announcement_title, announcement_job,
-                    applicant_id
-                ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류', %s, '분석 중 오류 발생', %s)
-            """, (interview_number, job_title, applicant_id))
+                    applicant_id, session_name
+                ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류', %s, '분석 중 오류 발생', %s, %s)
+            """, (interview_number, job_title, applicant_id, session_name))
              conn.commit()
         except Exception as db_e:
              logger.error(f"Failed to write error record: {db_e}")

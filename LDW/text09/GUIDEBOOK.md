@@ -1,97 +1,94 @@
-# AI 면접 시뮬레이션 프로그램 가이드북
+# AI 면접 시뮬레이션 가이드북 (AI Interview Simulation Guidebook)
 
-이 가이드북은 **웹 기반 AI 면접 시뮬레이션 프로그램**의 구성 요소와 실행 방법, 주요 기능 및 기술 스택에 대해 설명합니다.
+본 프로젝트는 OpenAI의 GPT-4o와 Whisper 모델을 활용하여 실시간으로 면접 질문을 생성하고 답변을 평가하는 웹 기반 AI 면접 시뮬레이션 시스템입니다.
 
----
-
-## 1. 프로그램 개요
-본 프로그램은 지원자가 업로드한 이력서를 기반으로 AI 면접관이 직무 맞춤형 질문을 던지고, 답변을 실시간으로 분석하여 최종 평가 결과를 제공하는 지능형 인터뷰 시뮬레이션 시스템입니다. 
-
-실제 면접과 유사한 환경을 제공하기 위해 **음성 인식(STT)**과 **음성 합성(TTS)** 기술이 통합되어 있으며, 영상 피드 녹화 기능을 지원합니다.
-
----
+## 1. 프로젝트 개요
+사용자가 직접 이력서를 업로드하고 원하는 직무의 공고에 지원하면, AI 면접관이 이력서와 직무 내용을 바탕으로 맞춤형 질문을 던집니다. 면접 종료 후에는 기술 능력, 문제 해결 능력, 의사소통 능력 등에 대한 종합적인 평가 결과를 제공합니다.
 
 ## 2. 개발 및 실행 환경
--   **운영체제(OS)**: Windows (개발 환경 기준)
--   **언어**: Python 3.9+, JavaScript (ES6+)
--   **데이터베이스**: PostgreSQL (또는 호환되는 데이터베이스)
--   **웹 프레임워크**: FastAPI (Python), Vanilla JS (Frontend)
--   **인증 및 환경 설정**: `.env` 파일을 통한 API 키 및 DB 정보 관리
-
----
+- **OS**: Windows (테스트 완료)
+- **Backend**: Python 3.9+ (FastAPI)
+- **Frontend**: Vanilla JS, HTML5, CSS3
+- **Database**: PostgreSQL
+- **AI API**: OpenAI API (GPT-4o, Whisper-1)
 
 ## 3. 프로그램 실행 방법
 
-### 서버 실행
-1.  필요한 라이브러리를 설치합니다.
-    ```bash
-    pip install -r requirements.txt
-    ```
-2.  `server.py`가 있는 디렉토리에서 서버를 가동합니다.
-    ```bash
-    python server.py
-    ```
-3.  브라우저를 열고 `http://localhost:5000` (기본 설정)에 접속합니다.
+### 3.1 사전 준비
+1. PostgreSQL 데이터베이스를 설치하고 `interview_db`를 생성합니다.
+2. 프로젝트 루트 디렉토리에 `.env` 파일을 생성하고 다음 정보를 입력합니다:
+   ```env
+   OPENAI_API_KEY=your_openai_api_key_here
+   POSTGRES_PASSWORD=your_db_password
+   DB_HOST=localhost
+   DB_NAME=interview_db
+   DB_USER=postgres
+   DB_PORT=5432
+   ```
 
-### 데이터베이스 초기화 (최초 실행 시)
--   `create_table.py` 또는 제공된 마이그레이션 스크립트를 사용하여 DB 테이블을 생성합니다.
--   `setup_interview_data.py`를 실행하여 초기 질문 데이터를 구성할 수 있습니다.
+### 3.2 패키지 설치
+터미널에서 필요한 라이브러리를 설치합니다:
+```bash
+pip install -r requirements.txt
+```
 
----
+### 3.3 초기 데이터베이스 설정
+테이블을 생성하고 초기 데이터를 설정합니다:
+```bash
+python create_table.py
+python migrate_db_v3.py  # Interview_Result 테이블 생성 등
+```
 
-## 4. 사용하는 모델 및 라이브러리
+### 3.4 서버 실행
+서버를 실행하면 자동으로 브라우저(`http://localhost:5000`)가 열립니다:
+```bash
+python server.py
+```
 
-### AI 모델
--   **OpenAI GPT-4o**: 면접 질문 생성, 지원자 답변 평가, 최종 인터뷰 결과 분석 등에 사용됩니다.
--   **OpenAI Whisper-1**: 지원자의 음성 답변을 텍스트로 변환하는 STT(Speech-to-Text) 엔진입니다.
+## 4. 사용하는 주요 모델 및 라이브러리
 
-### Python 라이브러리 (Backend)
--   `fastapi`, `uvicorn`: 웹 서버 구성 및 API 엔드포인트 관리
--   `openai`: OpenAI API 연동
--   `psycopg2`: PostgreSQL 데이터베이스 연결 및 쿼리 실행
--   `pypdf`: PDF 이력서 텍스트 추출
--   `pydantic`: 데이터 검증 및 스키마 정의
+### 4.1 AI 모델
+- **GPT-4o**: 면접 질문 생성, 답변 평가, 최종 결과 분석 수행
+- **Whisper-1**: 지원자의 음성 답변을 텍스트로 변환 (STT)
 
-### 웹 기술 및 라이브러리 (Frontend)
--   **Vanilla JS**: 핵심 로직 및 SPA 라우팅 구현
--   **HTML5/CSS3**: 사용자 인터페이스 구성 및 디자인
--   **Web Speech API**: 브라우저 기반 실시간 자막 표시
--   **MediaStream Recording API**: 오디오 및 비디오 녹화
-
----
+### 4.2 주요 라이브러리
+- **FastAPI**: 효율적인 비동기 API 서버 구축
+- **psycopg2**: PostgreSQL 데이터베이스 연동
+- **OpenAI SDK**: OpenAI API 통신
+- **PyPDF**: PDF 이력서 텍스트 추출
+- **Web Speech API (Browser)**: AI 질문을 음성으로 출력 (TTS)
 
 ## 5. 주요 기능 사용법
 
-### 지원자(Applicant)
-1.  **로그인/회원가입**: 계정을 생성하고 접속합니다.
-2.  **공고 확인**: 관리자가 등록한 면접 공고 목록을 확인합니다.
-3.  **이력서 업로드**: 면접 전에 PDF 형식의 이력서를 등록합니다.
-4.  **AI 면접 진행**:
-    -   질문을 들은 후 마이크를 통해 답변합니다.
-    -   상단 프로그레스 바를 통해 진행률을 확인합니다.
-    -   총 12개의 질문(자기소개, 직무 기술, 인성, 마무리)으로 구성됩니다.
-5.  **결과 확인**: 면접 종료 후 AI의 상세 평가와 합격 여부를 확인합니다.
+### 5.1 회원 관리
+- **회원가입/로그인**: 면접자와 관리자 유형으로 가입 가능
+- **정보 수정**: 이메일, 주소, 전화번호 및 비밀번호 변경 기능
 
-### 관리자(Admin)
-1.  **공고 관리**: 새로운 면접 공고를 등록하거나 수정/삭제합니다.
-2.  **지원자 관리**: 면접에 참여한 지원자 목록과 대화 기록, 상세 평가 점수를 조회합니다.
+### 5.2 면접 준비 (지원자)
+- **공고 확인**: 등록된 채용 공고 리스트 확인 및 상세 정보 조회
+- **이력서 업로드**: 지원 시 PDF 형식의 이력서 등록 필수
+- **환경 테스트**: 카메라 및 마이크 작동 여부 자동 확인
 
----
+### 5.3 면접 진행
+- **실시간 Q&A**: AI 면접관의 음성 질문에 음성으로 답변
+- **자동 타이머**: 각 질문당 제한 시간(기존 15초 -> 120초로 변경됨) 내 답변
+- **진행 단계**: 자기소개 -> 직무 기술 -> 인성 -> 마무리 단계로 총 12개 질문 구성
+
+### 5.4 결과 확인
+- **최종 평가**: 면접 종료 후 4가지 지표(기술, 문제해결, 의사소통, 태도) 점수 및 합격 여부 확인
+- **관리자 기능**: 전체 지원자의 면접 기록(질문, 답변, 개별 평가) 및 이력서 상세 조회
 
 ## 6. 파일 구조 설명
 
 ```text
 LDW/text09/
-├── server.py             # FastAPI 기반 백엔드 서버 (API 및 비즈니스 로직)
-├── app.js                # 프론트엔드 메인 로직 (상태 관리, API 통신, UI 업데이트)
-├── index.html            # 메인 HTML 구조 및 페이지 정의
-├── styles.css            # 웹 애플리케이션 스타일 시트
-├── create_table.py       # 데이터베이스 테이블 생성 스크립트
-├── requirements.txt      # Python 의존성 라이브러리 목록
-├── GUIDEBOOK.md          # 프로그램 가이드북 (본 문서)
-├── db/                   # DB 관련 정적 파일 또는 설정
-├── uploads/              # 업로드된 이력서 및 음성 파일 저장소
-│   ├── resumes/
-│   └── audio/
-└── data.json             # 초기 데이터 또는 백업 데이터
+├── server.py              # FastAPI 백엔드 서버 (API 엔드포인트 및 LLM 로직)
+├── index.html             # 메인 웹 페이지 구조
+├── app.js                 # 프론트엔드 비동기 로직 및 UI 제어
+├── styles.css             # 웹 페이지 스타일 시트
+├── requirements.txt       # 설치가 필요한 Python 패키지 목록
+├── create_table.py        # 기본 테이블 생성 스크립트
+├── migrate_db_v*.py       # 데이터베이스 구조 변경(마이그레이션) 스크립트
+├── uploads/               # 업로드된 이력서(resumes) 및 녹음 파일(audio) 저장소
+└── verify_*.py            # 각 기능별 API 작동 검증 스크립트
 ```
