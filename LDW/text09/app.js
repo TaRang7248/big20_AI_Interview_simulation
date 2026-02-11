@@ -169,8 +169,10 @@ function loginUser(user) {
 // --- 6. Dashboard & Jobs ---
 function initDashboard() {
     $('#link-my-info').addEventListener('click', () => {
-        navigateTo('myinfo-page');
-        loadMyInfo();
+        // [Modified] Show Password Check Page first
+        navigateTo('password-check-page');
+        $('#check-pw-input').value = '';
+        $('#check-pw-input').focus();
     });
 }
 
@@ -360,6 +362,42 @@ $('#password-change-form').addEventListener('submit', async (e) => {
 
 $('#btn-cancel-pw-change').addEventListener('click', () => {
     navigateTo('myinfo-page');
+});
+
+// --- 6.2 Password Check Logic (New) ---
+$('#password-check-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const pw = $('#check-pw-input').value;
+
+    try {
+        const response = await fetch('/api/verify-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_name: AppState.currentUser.id_name,
+                pw: pw
+            })
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            // Password Correct -> Go to My Info
+            loadMyInfo(); // Load data
+            navigateTo('myinfo-page'); // Show page
+        } else {
+            alert(result.message || '비밀번호가 일치하지 않습니다.');
+            $('#check-pw-input').value = '';
+            $('#check-pw-input').focus();
+        }
+    } catch (error) {
+        console.error(error);
+        alert('서버 오류 발생');
+    }
+});
+
+$('#btn-cancel-pw-check').addEventListener('click', () => {
+    if (AppState.currentUser.type === 'admin') navigateTo('admin-dashboard-page');
+    else navigateTo('applicant-dashboard-page');
 });
 
 // --- 7. Interview Setup ---
