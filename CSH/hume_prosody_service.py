@@ -656,7 +656,7 @@ class HumeProsodyService:
         self,
         prosody_indicators: Dict[str, float],
         deepface_emotion: Dict[str, Any],
-        prosody_weight: float = 0.6,
+        prosody_weight: float = 0.5,
     ) -> Dict[str, Any]:
         """
         Prosody 면접 지표와 DeepFace 감정을 융합합니다.
@@ -664,7 +664,7 @@ class HumeProsodyService:
         Args:
             prosody_indicators: 10종 Prosody 면접 지표
             deepface_emotion: DeepFace 결과 {dominant_emotion, probabilities}
-            prosody_weight: Prosody 가중치 (0-1, 기본 0.6)
+            prosody_weight: Prosody 가중치 (0-1, 기본 0.5)
 
         Returns:
             융합된 감정 데이터

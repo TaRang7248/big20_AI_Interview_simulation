@@ -291,12 +291,32 @@ class InterviewNodes:
         # 병렬 실행
         await asyncio.gather(_run_evaluation(), _run_emotion(), _run_prosody())
 
-        # ── 감정 기반 적응 모드 결정 (★ Prosody 우선) ──
+        # ── 감정 기반 적응 모드 결정 (★ 멀티모달 융합: Prosody + DeepFace 동시) ──
         emotion_adaptive_mode = ws.get("emotion_adaptive_mode", "normal")
-        if prosody_result and prosody_result.get("adaptive_mode"):
-            # Prosody는 48감정 기반으로 DeepFace(7감정)보다 정밀
-            emotion_adaptive_mode = prosody_result["adaptive_mode"]
+        multimodal_fusion: Optional[Dict] = None
+
+        if prosody_result and emotion_result:
+            # ── 양쪽 다 있을 때: 멀티모달 가중 융합 (Prosody 60% + DeepFace 40%) ──
+            try:
+                from hume_prosody_service import get_prosody_service
+                svc = get_prosody_service()
+                if svc:
+                    prosody_indicators = prosody_result.get("interview_indicators", {})
+                    fusion = svc.merge_with_deepface(
+                        prosody_indicators=prosody_indicators,
+                        deepface_emotion=emotion_result,
+                        prosody_weight=0.5,
+                    )
+                    emotion_adaptive_mode = fusion.get("emotion_adaptive_mode", "normal")
+                    multimodal_fusion = fusion
+            except Exception:
+                # 융합 실패 시 Prosody 단독 사용
+                emotion_adaptive_mode = prosody_result.get("adaptive_mode", "normal")
+        elif prosody_result:
+            # ── Prosody만 있을 때: 48감정 10지표 기반 결정 ──
+            emotion_adaptive_mode = prosody_result.get("adaptive_mode", "normal")
         elif emotion_result:
+            # ── DeepFace만 있을 때: 7감정 기반 결정 (폴백) ──
             dominant = emotion_result.get("dominant_emotion", "neutral")
             if dominant in ("sad", "fear", "disgust"):
                 emotion_adaptive_mode = "encouraging"
@@ -333,6 +353,7 @@ class InterviewNodes:
             f"celery_task={pending_task_id or 'N/A'}, "
             f"emotion={emotion_adaptive_mode}, "
             f"prosody={prosody_result.get('dominant_indicator') if prosody_result else 'N/A'}, "
+            f"fusion={'yes' if multimodal_fusion else 'no'}, "
             f"eval_score={eval_result.get('total_score') if eval_result else 'pending'}",
             elapsed,
         ))

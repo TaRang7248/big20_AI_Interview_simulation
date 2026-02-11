@@ -604,7 +604,7 @@ function ProsodyRadarChart({ prosody }: { prosody: ProsodyAnalysis }) {
       {prosody.multimodal_fusion && Object.keys(prosody.multimodal_fusion).length > 0 && (
         <div className="mt-4 pt-4 border-t border-[rgba(255,255,255,0.06)]">
           <p className="text-xs text-[var(--text-secondary)] mb-2">
-            🔗 멀티모달 융합 (Prosody 60% + DeepFace 40%)
+            🔗 멀티모달 융합 (Prosody 50% + DeepFace 50%)
           </p>
           <div className="flex flex-wrap gap-2">
             {Object.entries(prosody.multimodal_fusion)
