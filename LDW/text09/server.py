@@ -552,6 +552,7 @@ async def submit_answer(
         # Count how many questions have been asked including this one
         c.execute("SELECT COUNT(*) FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
         current_q_count = c.fetchone()[0]
+        logger.info(f"Answer Submission. Interview={interview_number}, Count={current_q_count}")
         
         # Phase Logic
         # Q1 (Done): Self Intro
@@ -586,6 +587,7 @@ async def submit_answer(
              )
              evaluation = completion.choices[0].message.content
              next_question = "면접이 종료되었습니다. 수고하셨습니다."
+             logger.info(f"Phase END reached. current_q_count={current_q_count}")
              
         else:
             prompt = f"""
@@ -767,6 +769,22 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
         
     except Exception as e:
         logger.error(f"Analysis Error: {e}")
+        # Ensure we write a failure record so frontend doesn't hang
+        try:
+             c.execute("""
+                INSERT INTO Interview_Result (
+                    interview_number, 
+                    tech_score, tech_eval, 
+                    problem_solving_score, problem_solving_eval, 
+                    communication_score, communication_eval, 
+                    non_verbal_score, non_verbal_eval, 
+                    pass_fail
+                ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류')
+            """, (interview_number,))
+             conn.commit()
+        except Exception as db_e:
+            logger.error(f"Failed to write error record: {db_e}")
+
     finally:
         conn.close()
 

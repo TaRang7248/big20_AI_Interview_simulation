@@ -47,8 +47,9 @@ body {
 }
 
 .btn-primary:disabled {
-    background-color: #ccc;
+    background-color: #999; /* Darker gray for better visibility */
     cursor: not-allowed;
+    opacity: 0.7;
 }
 
 .btn-secondary {

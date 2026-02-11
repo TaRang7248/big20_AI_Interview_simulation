@@ -542,19 +542,28 @@ async function handleSubmitAnswer(forced = false) {
 
             // Use a flag to prevent double-calling finishInterview
             let finished = false;
+
+            // Call finish after TTS with timeout safety
             const doFinish = () => {
                 if (finished) return;
                 finished = true;
+                console.log("Finishing interview...");
                 finishInterview();
             };
 
-            // Call finish after TTS
+            // 1. Try TTS
             speakText(closingRemark, () => {
+                console.log("TTS Finished, calling doFinish");
                 doFinish();
             });
 
-            // Fallback: If TTS fails or takes too long (> 10s), force finish
-            setTimeout(doFinish, 10000);
+            // 2. Safety Timeout (3 seconds)
+            setTimeout(() => {
+                if (!finished) {
+                    console.log("TTS Timeout, forcing finish");
+                    doFinish();
+                }
+            }, 3000);
 
         } else {
             AppState.interview.currentQuestion = result.next_question;
