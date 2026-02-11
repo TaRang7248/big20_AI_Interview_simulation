@@ -191,6 +191,40 @@ def _register_emotion_handlers(bus: EventBus):
             event.session_id, event.data.get("message"),
         )
 
+    # ── Hume Prosody 음성 감정 핸들러 ──
+
+    @bus.on(EventType.PROSODY_ANALYZED)
+    async def on_prosody_analyzed(event: Event):
+        """Prosody 분석 완료 → 적응 모드 결정 보조"""
+        dominant = event.data.get("dominant_indicator", "")
+        mode = event.data.get("adaptive_mode", "normal")
+        logger.debug(
+            "[Prosody] 🎵 음성 감정 분석: session=%s | %s (mode=%s)",
+            event.session_id, dominant, mode,
+        )
+        # 불안·긴장 높으면 알림
+        indicators = event.data.get("indicators", {})
+        anxiety = indicators.get("anxiety", 0)
+        if anxiety > 0.6:
+            await bus.publish(
+                EventType.PROSODY_ALERT,
+                session_id=event.session_id,
+                data={
+                    "alert_type": "high_anxiety",
+                    "anxiety_score": anxiety,
+                    "message": f"면접자의 음성에서 높은 긴장/불안({anxiety:.0%})이 감지되었습니다.",
+                },
+                source="prosody_handler",
+            )
+
+    @bus.on(EventType.PROSODY_ALERT)
+    async def on_prosody_alert(event: Event):
+        """Prosody 알림 → 개입 시스템 연동"""
+        logger.warning(
+            "[Prosody] ⚠️ 음성 감정 알림: session=%s | %s",
+            event.session_id, event.data.get("message"),
+        )
+
 
 # ========== STT / TTS 핸들러 ==========
 
