@@ -12,6 +12,7 @@ from packages.imh_core.errors import IMHBaseError
 # API Routers
 from IMH.api.health import router as health_router
 from IMH.api.playground import router as playground_router
+from IMH.api.reports import router as reports_router
 
 # Configuration Load
 config = IMHConfig.load()
@@ -78,6 +79,7 @@ def create_app() -> FastAPI:
     # Routers
     app.include_router(health_router, prefix="", tags=["Status"])
     app.include_router(playground_router, prefix="/api/v1/playground", tags=["Playground"])
+    app.include_router(reports_router, prefix="/api/v1/reports", tags=["Reports"])
 
     return app
 

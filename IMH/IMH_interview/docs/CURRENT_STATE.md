@@ -63,6 +63,13 @@
   - 파일명 Timestamp 기준 목록 조회(Find All) 및 정렬 정책 검증 완료
   - 별도 인덱스 파일 없이 파일명 + JSON 파싱 기반 메타데이터 구성 정책 확인
 
+- TASK-014 기준:
+  - `scripts/verify_task_014.py`를 Python 3.10.11 + interview_env 환경에서 실행
+  - 리포트 생성 및 저장 후, 목록(`GET /reports`) 및 상세(`GET /reports/{id}`) API 정상 응답 확인
+  - 404 Not Found 에러 처리 검증 완료
+  - `HistoryMetadata` 및 `InterviewReport` DTO 직렬화 정상 확인
+  - 검증 스크립트는 구현 결과 확인을 위한 보조 도구이며, API Contract에는 영향을 주지 않음
+
 ## 1. 프로젝트 목적 (확정)
 
 - 목적: **AI 모의면접 시스템**
@@ -74,24 +81,29 @@
 ---
 
 ## 2. 현재 개발 단계
+- 상태: **Phase 5 진행 중 (결과 소비 계층 진입)**
 
-- 상태: **Phase 4 진행 중 (Reporting Layer 완료, Storage/UI 진입 준비)**
 - 완료 항목:
   - Analysis 결과를 입력으로 받아
     정량 점수 및 평가 근거(Evidence)를 산출하는
     Rule-based Evaluation Engine 구현 및 검증 완료 (TASK-011)
-  - **평가 결과를 사용자 친화적 리포트(JSON)로 변환하는 Reporting Layer 구현 완료 (TASK-012)**
+  - 평가 결과를 사용자 친화적 리포트(JSON)로 변환하는
+    Reporting Layer 구현 완료 (TASK-012)
+  - 리포트의 저장 및 이력 관리 계층 구현 완료 (TASK-013)
+  - 리포트 조회 API 노출 및 검증 완료 (TASK-014)
 
 - 미포함 항목:
-  - DB 저장 / 벡터 저장
   - 실제 LLM / RAG 연동
   - UI 화면 구현
+  - 외부 사용자 인증/권한 체계
 
 - 현재 Phase의 목적:
   - 리포트 데이터 구조(JSON) 확정 ✅
   - 해석(Interpretation) 로직 1차 구현 완료 ✅
-  - 리포트의 저장 및 이력 관리 계층(TASK-013) 구현 완료
-  - 다음 단계(TASK-014)에서 리포트 조회 API 및 활용 계층으로 확장 예정
+  - 리포트의 저장 · 조회 · 이력 관리 흐름 완성 ✅
+  - 다음 단계(TASK-015)에서
+    UI 소비 규격 및 화면 계약 정의로 확장 예정
+
 ---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -195,6 +207,12 @@ IMH/IMH_Interview/
   - TASK-013: 리포트 저장소(FileHistoryRepository) 구현 완료
   - JSON 파일 기반 영구 저장 및 이력 조회 검증됨
 
+- `IMH/api/`: ✅ DONE
+  - TASK-014: 리포트 조회 API 노출
+    - 리포트 목록(List) / 상세(Detail) 조회 API 구현
+    - 저장된 리포트(JSON)를 외부 소비 계층에서 조회 가능하도록 노출
+    - List / Detail 데이터 노출 정책 분리
+    - Read-only API 동작 검증 스크립트 기반 검증 완료
 
 
 
@@ -261,34 +279,6 @@ IMH/IMH_Interview/
 ## 10. 현재 최우선 목표
 
 ## ACTIVE
-
-### TASK-014 리포트 API 노출 (BFF Endpoint)
-- **Goal**:
-  - InterviewReport를 외부(UI/관리자/서비스)에서 소비할 수 있도록 API 계약을 확정
-- **Scope (예정)**:
-  - 단건 조회 / 목록 조회 API 계약
-  - 응답 스키마 고정 (Report DTO 재사용)
-- **Out of Scope**:
-  - UI 구현
-  - 인증/권한 고도화
-
----
-
-## DONE
-
-### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
-- **Goal**: 생성된 `InterviewReport`를 서비스 데이터로 보존하고, 면접 회차별 조회/리스트/상세 조회 기반을 마련
-- **Scope**:
-  - InterviewReport 저장 구조 정의 (식별자 / 면접ID / 세션ID)
-  - 이력 정책 정의 (버전 / 타임스탬프)
-  - 저장/조회 최소 인터페이스 및 검증 스크립트
-- **Out of Scope**:
-  - UI 화면 구현
-  - 실제 LLM / RAG 연동
-
----
-
-## BACKLOG
 
 ### TASK-015 UI 계약 및 소비 규격 정의
 - **Goal**:

@@ -70,3 +70,12 @@ async def get_visual_provider() -> "MediaPipeVisualProvider":
     # config = get_config()
     from packages.imh_providers.visual.mediapipe_impl import MediaPipeVisualProvider
     return MediaPipeVisualProvider()
+
+def get_history_repository() -> "HistoryRepository":
+    """
+    Dependency to get an instance of the History Repository.
+    For TASK-014, uses FileHistoryRepository.
+    """
+    from packages.imh_history.repository import FileHistoryRepository, HistoryRepository
+    # Base dir defaults to project standard, or can comes from config
+    return FileHistoryRepository()

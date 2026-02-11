@@ -133,6 +133,8 @@
   - Mock 기반 Report 생성 및 구조 검증
 - **Verification**: `python scripts/verify_task_012.py` Pass
 
+---
+
 ### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
 - **Goal**: 생성된 `InterviewReport`를 서비스 데이터로 보존하고, 면접 회차별 조회/리스트/상세 조회를 위한 Persistence 계층 구축
 - **Scope**:
@@ -143,7 +145,7 @@
 - **Verification**: `python scripts/verify_task_013.py` Pass
 
 ---
-## ACTIVE
+
 ### TASK-014 리포트 조회 API 노출 (Report API Contract)
 
 - **Goal**:
@@ -165,9 +167,9 @@
 
 - **Dependencies**:
   - TASK-013 (리포트 저장 / 이력 관리) 완료
----
 
-## HOLD
+---
+## ACTIVE
 
 ### TASK-015 리포트 소비 규격 정의 (UI / Client Contract)
 
@@ -190,6 +192,9 @@
 - **Dependencies**:
   - TASK-012 (Reporting Layer) 완료
   - TASK-014 (리포트 조회 API 계약) 완료
+
+---
+## HOLD
   
 ### TASK-016 TTS Provider (Text → Speech)
 - **Goal**:

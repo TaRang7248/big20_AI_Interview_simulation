@@ -268,3 +268,23 @@ Plan 수립
     - 메타데이터 정합성(Score, Grade 등) 확인 완료.
 - **로그 및 산출물**:
   - `packages/imh_history/` 패키지 구조화.
+
+### TASK-014 리포트 조회 API 노출 (Report API)
+- **요약**: 저장(TASK-013)된 리포트 데이터를 조회하기 위한 API Contract 구현 (BFF Endpoint).
+- **변경 사항**:
+  - `IMH/api/reports.py`: `GET /api/v1/reports` (목록) 및 `/{id}` (상세) 구현.
+  - `IMH/api/dependencies.py`: `get_history_repository` 추가.
+  - `IMH/main.py`: Report Router 등록.
+  - `scripts/verify_task_014.py`: 통합 검증 스크립트 작성 (생성 -> 저장 -> 조회 -> 삭제 파이프라인).
+- **검증 증거**:
+  - **스크립트 실행 결과**: `python scripts/verify_task_014.py` -> `ALL TESTS PASSED`
+    1. List API: 생성된 리포트가 목록에 포함됨 확인.
+    2. Detail API: 상세 필드(점수, 등급 등)가 원본과 일치함 확인.
+    3. Error Handling: 존재하지 않는 ID 요청 시 404 정상 반환 확인.
+  - **참고**
+    -  Windows 환경에서 테스트 로그 로테이션 시 `PermissionError` 발생 가능하나 로직 무관함.
+    - 검증 스크립트(scripts/verify_task_014.py)는 Plan에 명시되진 않았으나, 
+      구현 검증 목적의 보조 도구로 사용되었으며 Contract에는 영향을 주지 않는다.”
+- **로그 및 산출물**:
+  - `packages/imh_history/` 및 `packages/imh_report/` 기존 코드 활용.
+  - API Layer 추가.
