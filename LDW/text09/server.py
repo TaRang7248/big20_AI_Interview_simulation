@@ -701,6 +701,20 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
     c = conn.cursor()
     
     try:
+        # Fetch Announcement Details (Title & Job Description)
+        # We assume job_title passed here matches the 'title' in interview_announcement
+        c.execute("""
+            SELECT title, job 
+            FROM interview_announcement 
+            WHERE title = %s 
+            ORDER BY created_at DESC 
+            LIMIT 1
+        """, (job_title,))
+        announcement_row = c.fetchone()
+        
+        announcement_title = announcement_row[0] if announcement_row else job_title
+        announcement_job = announcement_row[1] if announcement_row else "직무 내용 없음"
+
         # Fetch all Q&A
         c.execute("""
             SELECT Create_Question, Question_answer, Answer_Evaluation 
@@ -722,7 +736,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
         
         [면접 정보]
         지원자: {applicant_name}
-        지원 직무: {job_title}
+        지원 직무: {announcement_title}
+        직무 내용: {announcement_job}
         
         [면접 기록]
         {interview_log}
@@ -771,15 +786,17 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
                 problem_solving_score, problem_solving_eval, 
                 communication_score, communication_eval, 
                 non_verbal_score, non_verbal_eval, 
-                pass_fail
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                pass_fail,
+                announcement_title, announcement_job
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             interview_number,
             int(result.get("tech_score", 0)), result.get("tech_eval", ""),
             int(result.get("problem_solving_score", 0)), result.get("problem_solving_eval", ""),
             int(result.get("communication_score", 0)), result.get("communication_eval", ""),
             int(result.get("non_verbal_score", 0)), result.get("non_verbal_eval", ""),
-            pass_fail
+            pass_fail,
+            announcement_title, announcement_job
         ))
         
         conn.commit()
@@ -796,12 +813,13 @@ def analyze_interview_result(interview_number, job_title, applicant_name):
                     problem_solving_score, problem_solving_eval, 
                     communication_score, communication_eval, 
                     non_verbal_score, non_verbal_eval, 
-                    pass_fail
-                ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류')
-            """, (interview_number,))
+                    pass_fail,
+                    announcement_title, announcement_job
+                ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류', %s, '분석 중 오류 발생')
+            """, (interview_number, job_title))
              conn.commit()
         except Exception as db_e:
-            logger.error(f"Failed to write error record: {db_e}")
+             logger.error(f"Failed to write error record: {db_e}")
 
     finally:
         conn.close()
