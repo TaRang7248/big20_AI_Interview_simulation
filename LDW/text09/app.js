@@ -53,6 +53,17 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+function clearSignupForm() {
+    const form = $('#signup-form');
+    if (form) {
+        form.reset();
+        const msgBox = $('#id-check-msg');
+        if (msgBox) {
+            msgBox.textContent = '';
+        }
+    }
+}
+
 // --- 3. Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
     initRouter();
@@ -79,6 +90,11 @@ function initRouter() {
             // Auto-start device test when entering setup page
             if (pageId === 'interview-setup-page') {
                 testDevices();
+            }
+
+            // Clear signup form when entering signup page
+            if (pageId === 'signup-page') {
+                clearSignupForm();
             }
         }
     };
