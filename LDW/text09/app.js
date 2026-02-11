@@ -307,6 +307,12 @@ $('#myinfo-form').addEventListener('submit', async (e) => {
             AppState.currentUser.email = updatedData.email;
             AppState.currentUser.address = updatedData.address;
             AppState.currentUser.phone = updatedData.phone;
+
+            // Redirect to Dashboard
+            setTimeout(() => {
+                if (AppState.currentUser.type === 'admin') navigateTo('admin-dashboard-page');
+                else navigateTo('applicant-dashboard-page');
+            }, 1000); // Wait 1 sec for toast
         } else {
             showToast(result.message || '수정 실패', 'error');
         }

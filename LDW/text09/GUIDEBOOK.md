@@ -1,83 +1,90 @@
-# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK.md)
+# 웹 기반 AI 면접 시뮬레이션 가이드북 (GUIDEBOOK.md)
 
 ## 1. 개요 (Overview)
-본 프로그램은 **웹 기반 AI 면접 시뮬레이션** 플랫폼입니다. 사용자는 실제 면접과 유사한 환경에서 AI 면접관과 음성으로 대화하며 면접을 진행할 수 있습니다. OpenAI의 GPT-4o와 Whisper 모델을 활용하여 실시간 질문 생성, 답변 인식, 그리고 심층적인 결과 분석을 제공합니다.
+본 프로젝트는 웹 기반의 **AI 면접 시뮬레이션** 프로그램입니다. 사용자는 이력서를 업로드하고 AI 면접관과 음성 및 화상으로 면접을 진행할 수 있습니다. 면접 종료 후에는 AI가 답변을 분석하여 평가 결과를 제공합니다.
 
-## 2. 환경 (Environment)
-본 프로그램은 다음 환경에서 개발 및 테스트되었습니다.
+## 2. 환경 설정 (Environment Setup)
 
-*   **OS**: Windows
-*   **Backend Language**: Python 3.x
-*   **Frontend Language**: HTML5, CSS3, Vanilla JavaScript (ES6+)
-*   **Database**: PostgreSQL
-*   **Browser**: Chrome, Edge 등 모던 브라우저
+### 필수 요구 사항
+- Python 3.8 이상
+- PostgreSQL 데이터베이스
+- OpenAI API Key
+
+### 설치 라이브러리
+`requirements.txt`에 명시된 라이브러리를 설치해야 합니다.
+```bash
+pip install -r requirements.txt
+```
+주요 라이브러리:
+- `fastapi`, `uvicorn`: 웹 서버 프레임워크
+- `psycopg2`: PostgreSQL 데이터베이스 연동
+- `openai`: AI 모델 사용 (GPT-4o, Whisper)
+- `pypdf`: PDF 이력서 텍스트 추출
+- `python-dotenv`: 환경 변수 관리
+
+### 환경 변수 (.env)
+프로젝트 루트 경로에 `.env` 파일을 생성하고 다음 정보를 입력해야 합니다.
+```env
+DB_HOST=localhost
+DB_NAME=interview_db
+DB_USER=postgres
+POSTGRES_PASSWORD=your_password
+DB_PORT=5432
+OPENAI_API_KEY=sk-proj-...
+```
 
 ## 3. 프로그램 실행 방법 (How to Run)
+터미널에서 `server.py`를 실행하면 웹 서버가 시작되고 자동으로 브라우저가 열립니다.
 
-1.  **데이터베이스 실행**: PostgreSQL 데이터베이스가 실행 중이어야 합니다.
-2.  **가상 환경 진입 (선택 사항)**: 필요한 경우 Python 가상 환경을 활성화합니다.
-3.  **필수 패키지 설치**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  **서버 실행**:
-    프로젝트 루트 디렉토리(`C:\big20\big20_AI_Interview_simulation\LDW\text09`)에서 터미널을 열고 다음 명령어를 입력합니다.
-    ```bash
-    python server.py
-    ```
-5.  **접속**:
-    브라우저를 열고 `http://localhost:5000` 주소로 접속합니다.
+```bash
+python server.py
+```
+- 서버 주소: `http://localhost:5000`
 
-## 4. 사용하는 모델 및 라이브러리 (Models & Libraries)
+## 4. 사용 모델 및 라이브러리 (Models & Libraries)
+- **OpenAI GPT-4o**: 
+    - 면접 질문 생성 (직무 맞춤형 질문)
+    - 답변 평가 및 피드백 생성
+    - 면접 결과 종합 분석
+- **OpenAI Whisper (whisper-1)**:
+    - 지원자의 음성 답변을 텍스트로 변환 (STT)
+- **FastAPI**: 비동기 처리를 지원하는 고성능 Python 웹 프레임워크
+- **Vanilla JS**: 프론트엔드는 별도의 프레임워크 없이 순수 JavaScript로 구현되어 가볍고 빠릅니다.
 
-### Backend (Python)
-*   **FastAPI**: 고성능 웹 프레임워크 (API 서버 역할)
-*   **Uvicorn**: ASGI 웹 서버
-*   **Psycopg2**: PostgreSQL 데이터베이스 어댑터
-*   **OpenAI API**: AI 모델 연동
-    *   **GPT-4o**: 면접 질문 생성, 답변 평가, 결과 분석
-    *   **Whisper-1**: 음성 인식 (STT, Speech-to-Text)
-*   **Pypdf**: 이력서(PDF) 텍스트 추출
-*   **Python-dotenv**: 환경 변수 관리 (.env)
+## 5. 주요 기능 사용법 (Features)
 
-### Frontend
-*   **Web Speech API**: 브라우저 내장 음성 인식 (실시간 피드백 용)
-*   **MediaRecorder API**: 사용자 답변 음성 녹음
-*   **Navigator MediaDevices**: 카메라 및 마이크 장치 제어
+### [지원자]
+1.  **회원가입/로그인**: 계정을 생성하고 로그인합니다.
+2.  **이력서 업로드**: 지원하려는 공고를 선택하고 이력서(PDF)를 업로드합니다.
+3.  **환경 테스트**: 카메라와 마이크 작동 여부를 확인합니다.
+4.  **AI 면접 진행**:
+    - AI 면접관이 질문을 제시하고 음성으로 읽어줍니다 (TTS).
+    - 지원자는 마이크를 통해 답변을 녹음합니다.
+    - 약 5~10개의 질문이 이어지며, 꼬리 질문이나 심층 질문이 나올 수 있습니다.
+5.  **결과 확인**: 면접 종료 후 AI가 분석한 평가 점수(기술, 문제해결, 의사소통, 태도)와 합격 여부를 확인합니다.
+6.  **내 정보 수정**: 주소, 전화번호 등 개인정보를 수정할 수 있습니다.
 
-## 5. 주요 기능 사용법 (Key Features)
-
-### 5.1 회원가입 및 로그인
-*   **회원가입**: ID, 비밀번호, 이름, 생년월일, 연락처 등을 입력하여 계정을 생성합니다. '면접자'와 '관리자' 유형을 선택할 수 있습니다.
-*   **로그인**: 생성한 계정으로 로그인합니다.
-
-### 5.2 (면접자) 내 정보 수정
-*   로그인 후 좌측 메뉴의 **내 정보**를 클릭합니다.
-*   이메일, 주소, 전화번호를 수정하고 **정보 수정 완료** 버튼을 누르면 즉시 반영됩니다. (비밀번호 확인 절차 생략됨)
-*   비밀번호 변경은 별도의 **비밀번호 변경** 버튼을 통해 가능합니다.
-
-### 5.3 (면접자) 면접 진행
-1.  **공고 확인**: 대시보드에서 지원할 공고를 확인하고 **확인하기** -> **지원하기**를 클릭합니다.
-2.  **환경 설정**: 이력서(PDF)를 업로드하고 카메라/마이크 상태를 확인합니다.
-3.  **면접 시작**: AI 면접관이 자기소개를 시작으로 질문을 합니다.
-4.  **답변**: 질문을 듣고 마이크를 통해 답변합니다. 답변이 끝나면 **답변 제출** 버튼을 누릅니다.
-5.  **결과 확인**: 모든 질문이 끝나면 면접 결과 페이지로 이동하며, 나중에 **내 면접 기록**에서도 결과를 확인할 수 있습니다.
-
-### 5.4 (관리자) 공고 및 지원자 관리
-*   **공고 관리**: 새로운 면접 공고를 등록, 수정, 삭제할 수 있습니다.
-*   **지원자 현황**: 지원자들의 면접 진행 상황과 상세 결과(기술/인성 점수, 평가 내용)를 조회할 수 있습니다.
+### [관리자]
+1.  **공고 관리**: 채용 공고를 등록, 수정, 삭제할 수 있습니다.
+2.  **지원자 현황**: 지원자들의 면접 진행 상황과 결과를 조회할 수 있습니다.
 
 ## 6. 파일 구조 설명 (File Structure)
 
 ```
-C:\big20\big20_AI_Interview_simulation\LDW\text09
-├── server.py               # 핵심 백엔드 서버 코드 (FastAPI)
-├── app.js                  # 프론트엔드 로직 (SPA 라우팅, API 호출, 면접 로직)
-├── index.html              # 메인 웹 페이지 구조
-├── styles.css              # 스타일시트
-├── requirements.txt        # 파이썬 의존성 패키지 목록
-├── create_table.py         # 데이터베이스 테이블 초기화 스크립트
-├── setup_interview_data.py # 기초 면접 데이터(면접 질문 등) 셋업
-├── uploads/                # 업로드된 파일 저장소 (이력서, 음성 파일)
-└── db/                     # 데이터베이스 관련 파일
+C:\big20\big20_AI_Interview_simulation\LDW\text09\
+├── server.py                # 메인 백엔드 서버 (FastAPI)
+├── index.html               # 메인 프론트엔드 HTML
+├── app.js                   # 프론트엔드 로직 (SPA 라우팅, API 호출, 녹음 등)
+├── styles.css               # 스타일 시트
+├── create_table.py          # 데이터베이스 테이블 생성 스크립트
+├── requirements.txt         # 파이썬 의존성 패키지 목록
+├── uploads/                 # 업로드된 파일 저장소
+│   ├── resumes/             # 이력서 PDF 파일
+│   └── audio/               # 면접 답변 오디오 파일
+└── GUIDEBOOK.md             # 프로젝트 가이드북 (본 파일)
 ```
+
+## 7. 문제 해결 (Troubleshooting)
+- **DB 연결 오류**: `.env` 파일의 DB 설정이 올바른지 확인하세요. PostgreSQL 서비스가 실행 중이어야 합니다.
+- **OpenAI API 오류**: API Key가 유효한지 확인하고 잔액이 충분한지 확인하세요.
+- **브라우저 권한**: 카메라/마이크 권한을 허용해야 면접을 진행할 수 있습니다.
