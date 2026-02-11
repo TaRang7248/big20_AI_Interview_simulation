@@ -1,7 +1,7 @@
 """
 LangGraph 기반 면접 워크플로우 상태머신
 =======================================
-SAD-7: 워크플로우 상태머신 구현
+워크플로우 상태머신 구현
 
 기능:
   1. 조건부 분기  — add_conditional_edges 로 감정·점수 기반 라우팅
@@ -352,10 +352,12 @@ class InterviewNodes:
             if topic_count >= 2:
                 needs_follow_up = False
                 follow_up_reason = "주제 전환 필요"
-
+                
+                
+        # LangGraph의 노드(Node) 내부에서 실행되는 로직으로, 사용자의 감정 상태에 따라 그래프의 흐름(다음 동작)을 결정하는 오케스트레이션의 핵심 로직
         # ── 감정 기반 적응 (조건부 분기 확장) ──
         emotion_mode = ws.get("emotion_adaptive_mode", "normal")
-        # 불안/공포 감지 시 → 꼬리질문 완화
+        # 불안/공포 감지 시 → 꼬리질문/압박 질문 완화
         if emotion_mode == "encouraging" and needs_follow_up:
             needs_follow_up = False
             follow_up_reason = "감정 적응: 격려 모드 (꼬리질문 완화)"

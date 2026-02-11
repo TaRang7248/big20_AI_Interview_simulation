@@ -255,15 +255,8 @@ eval_result, emotion_result = await asyncio.gather(
 )
 ```
 
-### 6-2. 5개 평가 기준 (25점 만점)
+### 6-2. 평가 기준
 
-| 기준 | 설명 |
-|---|---|
-| `specificity` (구체성) | 구체적 사례/수치 포함 여부 |
-| `logic` (논리성) | 논리적 흐름의 일관성 |
-| `technical` (기술 이해도) | 기술 개념 이해 정확도 |
-| `star` (STAR 기법) | 상황-과제-행동-결과 구조 |
-| `communication` (전달력) | 명확성과 이해 용이성 |
 
 ### 6-3. Celery 백그라운드 오프로드
 
