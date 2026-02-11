@@ -525,7 +525,7 @@ async function handleSubmitAnswer(forced = false) {
         }
 
         // Check if finished
-        if (result.next_question.includes("면접을 마칩니다")) {
+        if (result.interview_finished) {
             finishInterview();
         } else {
             AppState.interview.currentQuestion = result.next_question;
@@ -554,6 +554,52 @@ function finishInterview() {
         video.srcObject.getTracks().forEach(track => track.stop());
         video.srcObject = null;
     }
+
+    // Fetch Result
+    loadInterviewResult();
+}
+
+async function loadInterviewResult() {
+    const resultContainer = $('#result-desc');
+    resultContainer.innerHTML = '면접 결과를 분석 중입니다...<br>잠시만 기다려주세요.';
+
+    // Poll for result
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const interval = setInterval(async () => {
+        attempts++;
+        try {
+            const response = await fetch(`/api/interview/result/${AppState.interview.interviewNumber}`);
+            const data = await response.json();
+
+            if (data.success) {
+                clearInterval(interval);
+                renderResult(data.result);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                resultContainer.innerHTML = '결과 분석에 시간이 걸리고 있습니다.<br>나중에 마이페이지에서 확인해주세요.';
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }, 2000); // Check every 2 seconds
+}
+
+function renderResult(result) {
+    const resultContainer = $('#result-desc');
+    const isPass = result.pass_fail === '합격';
+    const color = isPass ? '#2ecc71' : '#e74c3c';
+
+    resultContainer.innerHTML = `
+        <div style="font-size: 2rem; font-weight: bold; color: ${color}; margin-bottom: 20px;">
+            ${result.pass_fail}
+        </div>
+        <p>
+            ${isPass ? '축하합니다! 면접에 합격하셨습니다.' : '아쉽게도 불합격하셨습니다.'}<br>
+            수고하셨습니다.
+        </p>
+    `;
 }
 
 function addChatLog(sender, text) {

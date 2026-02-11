@@ -644,13 +644,22 @@ async def submit_answer(
             WHERE id = %s
         """, (applicant_answer, answer_time, evaluation, current_row_id))
         
-        # 6. Insert New Row (Next Question)
-        # resume context is copied for simplicity or we can just ignore it for subsequent rows
-        c.execute('''
-            INSERT INTO Interview_Progress (
-                Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume
-            ) VALUES (%s, %s, %s, %s, %s)
-        ''', (interview_number, applicant_name, job_title, next_question, resume_context))
+        # Check if interview is finished
+        interview_finished = False
+        if next_phase == "END":
+             interview_finished = True
+             # Trigger Final Analysis (Background Task? No, user wants simple flow, maybe synchronous for now or just trigger and poll)
+             # To keep it simple and given the user request "test after completion", let's do it synchronously or call it here.
+             # However, analyze_interview_result needs to be defined. I will define it below.
+             analyze_interview_result(interview_number, job_title, applicant_name)
+        else:
+            # 6. Insert New Row (Next Question) ONLY if not finished
+            # resume context is copied for simplicity or we can just ignore it for subsequent rows
+            c.execute('''
+                INSERT INTO Interview_Progress (
+                    Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume
+                ) VALUES (%s, %s, %s, %s, %s)
+            ''', (interview_number, applicant_name, job_title, next_question, resume_context))
         
         conn.commit()
         conn.close()
@@ -658,12 +667,123 @@ async def submit_answer(
         return {
             "success": True,
             "next_question": next_question,
-            "transcript": applicant_answer # Optional: show back to user?
+            "transcript": applicant_answer,
+            "interview_finished": interview_finished
         }
         
     except Exception as e:
         logger.error(f"Answer Submission Error: {e}")
         return {"success": False, "message": f"오류 발생: {str(e)}"}
+
+# --- Logic: Analyze Interview Result ---
+def analyze_interview_result(interview_number, job_title, applicant_name):
+    logger.info(f"Analyzing interview result for {interview_number}...")
+    conn = get_db_connection()
+    c = conn.cursor()
+    
+    try:
+        # Fetch all Q&A
+        c.execute("""
+            SELECT Create_Question, Question_answer, Answer_Evaluation 
+            FROM Interview_Progress 
+            WHERE Interview_Number = %s 
+            ORDER BY id ASC
+        """, (interview_number,))
+        rows = c.fetchall()
+        
+        interview_log = ""
+        for row in rows:
+            q = row[0]
+            a = row[1] if row[1] else "답변 없음"
+            e = row[2] if row[2] else "평가 없음"
+            interview_log += f"Q: {q}\nA: {a}\nEval: {e}\n\n"
+            
+        prompt = f"""
+        당신은 면접관입니다. 다음은 지원자의 전체 면접 기록입니다.
+        
+        [면접 정보]
+        지원자: {applicant_name}
+        지원 직무: {job_title}
+        
+        [면접 기록]
+        {interview_log}
+        
+        [요청 사항]
+        위 기록을 바탕으로 다음 4가지 항목을 평가하고 점수(0~100점)를 매겨주세요.
+        1. 기술(직무 적합성): Tech
+        2. 문제해결능력: Problem Solving
+        3. 의사소통능력: Communication
+        4. 비언어적 요소(태도, 성실성 등 답변 내용에서 유추): Non-verbal
+        
+        그리고 최종적으로 '합격' 또는 '불합격'을 결정해주세요.
+        
+        반드시 JSON 형식으로 반환해주세요.
+        {{
+            "tech_score": 85,
+            "tech_eval": "기술적 이해도가 높음...",
+            "problem_solving_score": 80,
+            "problem_solving_eval": "논리적으로 접근함...",
+            "communication_score": 90,
+            "communication_eval": "명확하게 의사를 전달함...",
+            "non_verbal_score": 88,
+            "non_verbal_eval": "성실한 태도가 보임...",
+            "pass_fail": "합격"
+        }}
+        pass_fail 값은 반드시 "합격" 또는 "불합격" 이어야 합니다.
+        """
+        
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"}
+        )
+        
+        content = completion.choices[0].message.content
+        result = json.loads(content)
+        
+        pass_fail = result.get("pass_fail", "불합격")
+        if pass_fail not in ["합격", "불합격"]:
+             pass_fail = "불합격"
+             
+        c.execute("""
+            INSERT INTO Interview_Result (
+                interview_number, 
+                tech_score, tech_eval, 
+                problem_solving_score, problem_solving_eval, 
+                communication_score, communication_eval, 
+                non_verbal_score, non_verbal_eval, 
+                pass_fail
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            interview_number,
+            int(result.get("tech_score", 0)), result.get("tech_eval", ""),
+            int(result.get("problem_solving_score", 0)), result.get("problem_solving_eval", ""),
+            int(result.get("communication_score", 0)), result.get("communication_eval", ""),
+            int(result.get("non_verbal_score", 0)), result.get("non_verbal_eval", ""),
+            pass_fail
+        ))
+        
+        conn.commit()
+        logger.info(f"Interview result saved for {interview_number}")
+        
+    except Exception as e:
+        logger.error(f"Analysis Error: {e}")
+    finally:
+        conn.close()
+
+@app.get("/api/interview/result/{interview_number}")
+def get_interview_result(interview_number: str):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        c.execute("SELECT * FROM Interview_Result WHERE interview_number = %s", (interview_number,))
+        row = c.fetchone()
+        if row:
+            return {"success": True, "result": dict(row)}
+        else:
+             return {"success": False, "message": "결과 분석 중입니다."}
+    finally:
+        conn.close()
 
 
 # --- Static Files ---
