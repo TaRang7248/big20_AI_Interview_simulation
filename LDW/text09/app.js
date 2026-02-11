@@ -651,8 +651,10 @@ function startQuestionSequence(question) {
     $('#user-answer').placeholder = "답변을 말씀해주세요 (녹음 중...)";
 
     // 1. TTS
+    $('#btn-submit-answer').disabled = true; // AI가 말하는 동안 버튼 비활성화
     speakText(question, () => {
         // 2. Start Timer & Recording after TTS
+        $('#btn-submit-answer').disabled = false; // AI가 말을 마치면 버튼 활성화
         startTimer(120); // 90 seconds (increased for speech)타이머
         startRecording();
     });
@@ -773,6 +775,9 @@ function stopRecording() {
 async function handleSubmitAnswer(forced = false) {
     if (!AppState.interview.inProgress) return;
 
+    // [Prevent Double Submission]
+    $('#btn-submit-answer').disabled = true;
+
     clearInterval(AppState.interview.timer);
     await stopRecording();
 
@@ -839,6 +844,7 @@ async function handleSubmitAnswer(forced = false) {
             };
 
             // 1. Try TTS
+            $('#btn-submit-answer').disabled = true; // 마지막 멘트 동안에도 비활성화 유지
             speakText(closingRemark, () => {
                 console.log("TTS Finished, calling doFinish");
                 doFinish();
