@@ -5,7 +5,7 @@ import psycopg2
 import json
 import logging
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -480,6 +480,7 @@ def start_interview(data: StartInterviewRequest):
 # --- Logic: Submit Answer & Next Question ---
 @app.post("/api/interview/answer")
 async def submit_answer(
+    background_tasks: BackgroundTasks,
     interview_number: str = Form(...),
     applicant_name: str = Form(...),
     job_title: str = Form(...),
@@ -648,10 +649,8 @@ async def submit_answer(
         interview_finished = False
         if next_phase == "END":
              interview_finished = True
-             # Trigger Final Analysis (Background Task? No, user wants simple flow, maybe synchronous for now or just trigger and poll)
-             # To keep it simple and given the user request "test after completion", let's do it synchronously or call it here.
-             # However, analyze_interview_result needs to be defined. I will define it below.
-             analyze_interview_result(interview_number, job_title, applicant_name)
+             # Trigger Final Analysis (Background Task)
+             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name)
         else:
             # 6. Insert New Row (Next Question) ONLY if not finished
             # resume context is copied for simplicity or we can just ignore it for subsequent rows

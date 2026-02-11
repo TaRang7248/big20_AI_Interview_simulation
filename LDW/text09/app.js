@@ -526,7 +526,36 @@ async function handleSubmitAnswer(forced = false) {
 
         // Check if finished
         if (result.interview_finished) {
-            finishInterview();
+            // Play closing remark properly
+            const closingRemark = result.next_question || "면접이 종료되었습니다. 수고하셨습니다.";
+            addChatLog('AI', closingRemark);
+            $('#ai-message').textContent = closingRemark;
+
+            // [Prevent Double Submission] Disable controls immediately
+            $('#btn-submit-answer').disabled = true;
+            $('#user-answer').disabled = true;
+            $('#feed-label').textContent = "면접 종료 (Redirecting...)";
+
+            // Clear timer just in case
+            if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+            stopRecording(); // Ensure recording is stopped
+
+            // Use a flag to prevent double-calling finishInterview
+            let finished = false;
+            const doFinish = () => {
+                if (finished) return;
+                finished = true;
+                finishInterview();
+            };
+
+            // Call finish after TTS
+            speakText(closingRemark, () => {
+                doFinish();
+            });
+
+            // Fallback: If TTS fails or takes too long (> 10s), force finish
+            setTimeout(doFinish, 10000);
+
         } else {
             AppState.interview.currentQuestion = result.next_question;
             startQuestionSequence(result.next_question);
@@ -536,15 +565,14 @@ async function handleSubmitAnswer(forced = false) {
         showLoading(false);
         console.error(error);
         showToast('답변 제출 실패. 다시 시도해주세요.', 'error');
-        // Restart recording? Or just let them retry? 
-        // For simplicity, let's just let them retry clicking submit? 
-        // But audio is gone. 
-        // Ideally should allow re-record. 
-        // But for this simulation, we just error out.
     }
 }
 
 function finishInterview() {
+    // Already finished check handles the double-call from fallback
+    // But we also need to ensure we don't re-run if already gone.
+    // However, we set inProgress = false here.
+
     AppState.interview.inProgress = false;
     navigateTo('result-page');
 
