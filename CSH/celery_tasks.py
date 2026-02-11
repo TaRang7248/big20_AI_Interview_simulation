@@ -116,22 +116,29 @@ EVALUATION_PROMPT = """당신은 IT 기업의 30년차 수석 개발자 면접�
 지원자의 답변을 분석하고 평가해주세요.
 
 [평가 기준]
-1. 구체성 (1-5점): 답변이 구체적인 사례와 수치를 포함하는가?
-2. 논리성 (1-5점): 답변의 논리적 흐름이 일관성 있는가?
+1. 문제 해결력 (1-5점): 지원자가 문제를 어떻게 접근하고 해결하는지를 평가합니다.
+2. 논리성 (1-5점): 답변의 논리적 흐름이 일관성 있는지를 평가합니다.
 3. 기술 이해도 (1-5점): 기술적 개념에 대한 이해가 정확한가?
 4. STAR 기법 (1-5점): 상황-과제-행동-결과 구조로 답변했는가?
-5. 전달력 (1-5점): 답변이 명확하고 이해하기 쉬운가?
+5. 의사소통능력 (1-5점): 답변이 명확하고 이해하기 쉬운가?
+
+[합격 추천 기준]
+- "합격": 총점 20점 이상이고 모든 항목 3점 이상
+- "보류": 총점 15~19점이거나 일부 항목 2점
+- "불합격": 총점 14점 이하이거나 2개 이상 항목 2점 이하
 
 [출력 형식 - 반드시 JSON으로 응답]
 {{
     "scores": {{
-        "specificity": 숫자,
+        "problem_solving": 숫자,
         "logic": 숫자,
         "technical": 숫자,
         "star": 숫자,
         "communication": 숫자
     }},
     "total_score": 숫자(25점 만점),
+    "recommendation": "합격" 또는 "보류" 또는 "불합격",
+    "recommendation_reason": "추천 사유를 한 줄로 작성",
     "strengths": ["강점1", "강점2"],
     "improvements": ["개선점1", "개선점2"],
     "brief_feedback": "한 줄 피드백"
@@ -227,13 +234,15 @@ def _default_evaluation(reason: str = "") -> Dict:
     """기본 평가 결과 반환"""
     return {
         "scores": {
-            "specificity": 3,
+            "problem_solving": 3,
             "logic": 3,
             "technical": 3,
             "star": 3,
             "communication": 3
         },
         "total_score": 15,
+        "recommendation": "보류",
+        "recommendation_reason": reason or "LLM 서비스 미사용으로 기본 평가 적용",
         "strengths": ["답변을 완료했습니다."],
         "improvements": ["더 구체적인 예시를 들어보세요."],
         "brief_feedback": reason or "답변을 분석 중입니다.",
@@ -492,7 +501,7 @@ def generate_report_task(
         
         # 평가 점수 집계
         if evaluations:
-            avg_scores = {"specificity": 0, "logic": 0, "technical": 0, "star": 0, "communication": 0}
+            avg_scores = {"problem_solving": 0, "logic": 0, "technical": 0, "star": 0, "communication": 0}
             for ev in evaluations:
                 for key in avg_scores:
                     avg_scores[key] += ev.get("scores", {}).get(key, 0)
@@ -610,7 +619,7 @@ def _generate_recommendations(avg_scores: Dict, star_analysis: Dict) -> List[str
     """개선 권장사항 생성"""
     recommendations = []
     
-    if avg_scores.get('specificity', 0) < 3:
+    if avg_scores.get('problem_solving', 0) < 3:
         recommendations.append("답변에 구체적인 수치와 사례를 더 포함해보세요.")
     
     if avg_scores.get('star', 0) < 3:
