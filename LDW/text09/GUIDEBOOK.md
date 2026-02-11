@@ -1,109 +1,87 @@
-# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK)
+# AI 면접 시뮬레이션 프로그램 가이드북
 
-## 1. 개요 (Overview)
-본 프로젝트는 웹 기반의 **AI 면접 시뮬레이션** 프로그램입니다. 사용자는 이력서를 업로드하고, AI 면접관과 음성으로 대화하며 실제 면접과 유사한 경험을 할 수 있습니다. 면접이 종료되면 AI가 답변 내용을 분석하여 직무 적합성, 문제 해결 능력, 의사소통 능력 등을 평가하고 피드백을 제공합니다.
+본 가이드북은 웹 기반 AI 면접 시뮬레이션 프로그램의 개요, 시스템 환경, 실행 방법 및 주요 기능에 대해 설명합니다.
 
-## 2. 환경 요구사항 (Environment)
-이 프로그램을 실행하기 위해서는 다음과 같은 환경이 필요합니다.
+## 1. 프로젝트 개요
+이 프로그램은 지원자가 웹을 통해 AI 면접관과 대화하며 실시간 면접을 경험할 수 있도록 돕는 시스템입니다. 지원자의 답변을 음성으로 인식(STT)하고, GPT-4o 모델을 통해 실시간으로 평가 및 다음 질문을 생성하며, 최종적으로 면접 결과를 분석하여 리포트를 제공합니다.
 
-- **OS**: Windows (테스트 환경), Mac/Linux 호환 가능
-- **Python**: 3.8 이상
-- **Database**: PostgreSQL (기본 설정: localhost:5432)
-- **API Key**: OpenAI API Key (GPT-4o, Whisper 모델 사용)
+## 2. 개발 및 실행 환경
+*   **Operating System**: Windows (권장)
+*   **Language**: Python 3.9+, JavaScript (ES6+), HTML5, CSS3
+*   **Framework**: FastAPI (Backend), Vanilla JS (Frontend)
+*   **Database**: PostgreSQL
+*   **API**: OpenAI API (GPT-4o, Whisper-1)
 
-## 3. 프로그램 실행 방법 (How to Run)
+## 3. 프로그램 실행 방법
 
-### 3.1. 사전 준비
-1. **PostgreSQL 설치 및 실행**: 로컬 환경에 PostgreSQL이 설치되어 있어야 하며, `.env` 파일에 설정된 정보로 접속 가능해야 합니다.
-2. **`.env` 파일 설정**: 프로젝트 루트(또는 상위 디렉토리)에 `.env` 파일을 생성하고 다음 정보를 입력하세요.
-   ```env
-   OPENAI_API_KEY=sk-...
-   DB_HOST=localhost
-   DB_NAME=interview_db
-   DB_USER=postgres
-   # POSTGRES_PASSWORD=yourpassword
-   DB_PORT=5432
-   ```
+### 1) 사전 준비
+- PostgreSQL 서버가 실행 중이어야 합니다.
+- `.env` 파일에 `OPENAI_API_KEY`, `POSTGRES_PASSWORD` 등 필요한 설정이 완료되어 있어야 합니다.
 
-### 3.2. 의존성 설치
-터미널에서 다음 명령어를 실행하여 필요한 패키지를 설치합니다.
+### 2) 데이터베이스 설정
+처음 실행하거나 테이블을 생성해야 할 경우 다음 스크립트를 순서대로 실행합니다.
 ```bash
-pip install -r requirements.txt
+python create_table.py
+python migrate_db_v2.py
+python migrate_db_v3.py
+python migrate_db_v4.py
+python migrate_db_v5.py
 ```
-*(참고: `requirements.txt` 파일이 없는 경우, `server.py`에 명시된 라이브러리를 직접 설치해야 합니다: fastapi, uvicorn, psycopg2-binary, pydantic, python-dotenv, openai, pypdf 등)*
 
-### 3.3. 서버 실행
-프로젝트 디렉토리에서 다음 명령어로 서버를 실행합니다.
+### 3) 서버 실행
 ```bash
 python server.py
-# 또는 uvicorn 사용 시
-# uvicorn server:app --reload
 ```
-서버가 정상적으로 실행되면 브라우저에서 `http://localhost:8000` (또는 설정된 포트, `server.py` 실행 시 포트 확인 필요)로 접속합니다. `server.py` 직접 실행 시 보통 `http://localhost:5000` 또는 `8000`을 사용하도록 설정되어 있을 수 있습니다.
+서버가 실행되면 자동으로 브라우저가 열리며 `http://localhost:5000`으로 접속됩니다.
 
-## 4. 사용하는 모델 및 라이브러리 (Models & Libraries)
+## 4. 사용하는 주요 모델 및 라이브러리
 
-### AI Models (OpenAI)
-- **GPT-4o**: 
-    - 면접 질문 생성 (직무 및 이전 답변 기반)
-    - 답변 평가 및 점수 산정
-    - 직무별 면접 질문 풀(Pool) 생성
-- **Whisper (whisper-1)**:
-    - 사용자 음성 답변을 텍스트로 변환 (STT: Speech-to-Text)
+| 구분 | 기술 / 모델 | 용도 |
+| :--- | :--- | :--- |
+| **AI LLM** | GPT-4o | 질문 추천, 답변 평가, 면접 결과 최종 분석 |
+| **STT** | Whisper-1 | 지원자의 음성 답변을 텍스트로 변환 |
+| **TTS** | Web Speech API | AI 면접관의 질문을 음성으로 출력 (브라우저 내장) |
+| **Backend** | FastAPI | 비동기 API 서버 구축 |
+| **Database** | psycopg2 | PostgreSQL 데이터베이스 연동 |
+| **Frontend** | Vanilla JavaScript | SPA(Single Page Application) 구조 구현 |
 
-### Backend Libraries
-- **FastAPI**: 고성능 웹 프레임워크
-- **Psycopg2**: PostgreSQL 데이터베이스 연동
-- **Pydantic**: 데이터 유효성 검사 및 설정 관리
-- **PyPDF**: PDF 이력서 텍스트 추출
-- **Python-dotenv**: 환경 변수 관리
+## 5. 주요 기능 사용법
 
-### Frontend
-- **HTML/CSS/JS**: 바닐라 자바스크립트 및 CSS 사용
+### 1) 회원가입 및 로그인
+- 관리자(Admin)와 지원자(Applicant) 유형을 선택하여 가입할 수 있습니다.
+- 중복 확인 기능을 통해 유효한 아이디를 생성합니다.
 
-## 5. 주요 기능 사용법 (Key Features)
+### 2) 공고 관리 (관리자 전용)
+- 관리자는 면접 공고를 등록, 수정, 삭제할 수 있습니다.
+- 각 공고에 대해 지원 직무와 마감일을 설정합니다.
 
-### 5.1. 회원가입 및 로그인
-- 접속 초기 화면에서 회원가입을 진행합니다.
-- 아이디, 비밀번호, 이름 등 기본 정보를 입력합니다.
-- 가입 후 로그인하여 메인 대시보드로 이동합니다.
+### 3) AI 면접 진행 (지원자)
+- 원하는 공고를 선택하고 **이력서(PDF)**를 업로드합니다.
+- 카메라와 마이크 테스트를 거친 후 면접을 시작합니다.
+- AI 면접관이 질문을 하면 음성으로 답변하고 **답변 제출** 버튼을 누릅니다.
 
-### 5.2. 기업(관리자) 모드: 공고 등록 (시뮬레이션)
-- 채용 공고를 등록할 수 있습니다.
-- 직무 제목(Title), 직무 내용(Job Description), 마감일 등을 입력합니다.
-- 등록된 공고는 지원자가 면접을 시작할 때 선택할 수 있습니다.
+### 4) 면접 결과 확인
+- 면접이 종료되면 AI가 전체 대화 내용을 분석합니다.
+- 기술(Tech), 문제해결, 의사소통, 비언어적 요소에 대한 점수와 총평이 제공됩니다.
+- **수정 사항**: 이제 면접 결과 테이블(`interview_result`)에 지원자의 아이디가 함께 저장되어 관리가 용이해졌습니다.
 
-### 5.3. 지원자 모드: 면접 체험
-1. **이력서 업로드**: 지원하고자 하는 공고를 선택하고 PDF 형식의 이력서를 업로드합니다.
-2. **면접 시작**: '면접 시작' 버튼을 누르면 AI 면접관이 첫 질문(자기소개 등)을 합니다.
-3. **답변 하기**: 마이크를 통해 음성으로 답변합니다. 답변이 끝나면 '답변 완료' 등의 버튼을 눌러 전송합니다.
-4. **꼬리 질문**: AI는 사용자의 답변과 이력서 내용을 바탕으로 심층 질문을 이어갑니다.
-5. **면접 종료**: 정해진 질문 횟수 또는 단계(인성, 직무 등)가 끝나면 면접이 종료됩니다.
+## 6. 파일 구조 설명
 
-### 5.4. 결과 확인
-- 면접이 종료된 후, AI가 분석한 **종합 평가 결과**를 확인할 수 있습니다.
-- **평가 항목**: 기술(Tech), 문제해결능력, 의사소통능력, 비언어적 요소(태도)
-- **합격/불합격 여부**: AI가 판단한 예측 결과를 보여줍니다.
-- **면접 기록**: 진행했던 질의응답 내용을 다시 볼 수 있습니다.
-
-## 6. 파일 구조 설명 (File Structure)
-
-```
-/
-├── server.py                # 메인 백엔드 서버 (FastAPI) & 로직 포함
-├── index.html               # 메인 프론트엔드 페이지 (SPA 구조)
-├── style.css                # 스타일 시트
-├── app.js                   # 프론트엔드 로직 (API 호출, UI 제어)
-├── migrate_db_v4.py         # DB 마이그레이션 스크립트 (최신)
-├── requirements.txt         # 파이썬 의존성 목록
-├── /db                      # 데이터베이스 스크립트 모음
-│   ├── create_table.py      # 초기 테이블 생성
-│   └── ...
-├── /uploads                 # 업로드된 이력서 및 오디오 파일 저장소
-│   ├── /resumes             # 이력서 PDF
-│   └── /audio               # 면접 답변 오디오 (.webm)
-└── GUIDEBOOK.md             # 본 가이드북 파일
+```text
+.
+├── server.py               # FastAPI 서버 및 비즈니스 로직
+├── index.html              # 메인 웹 페이지 구조
+├── styles.css              # 전반적인 UI 스타일링
+├── app.js                  # 프론트엔드 라우팅 및 인터랙션 로직
+├── data.json               # 면접 질문 풀 기초 데이터
+├── create_table.py         # 초기 테이블 생성 스크립트
+├── migrate_db_v*.py        # 버전별 DB 스키마 변경 스크립트
+├── uploads/                # 업로드된 이력서 및 오디오 파일 저장소
+│   ├── resumes/
+│   └── audio/
+└── requirements.txt        # 필요한 Python 패키지 목록
 ```
 
----
-*Created by AI Assistant*
+## 7. 주요 문의 및 문제 해결
+- **DB 연동 에러**: `.env` 파일의 설정 정보와 DB 서버의 실제 설정이 일치하는지 확인하십시오.
+- **API 에러**: OpenAI API 키의 유효성과 잔액을 확인하십시오.
