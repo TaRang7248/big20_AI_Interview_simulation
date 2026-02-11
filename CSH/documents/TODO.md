@@ -17,7 +17,6 @@
 
 | ID | 요구사항 | 실제 구현 | 판정 | 핵심 근거 |
 |---|---|---|---|---|
-| **N-001** | 초저지연 (1.5초 이내) | ThreadPoolExecutor 병렬 ✔, Celery 오프로딩 ✔, **지연 시간 측정 미들웨어 ✔**, **SLA 모니터링 API ✔** | ✅ 구현 | latency_monitor.py: 모든 /api/** 요청 자동 측정, 1.5초 SLA 위반 감지·로깅, 단계별(LLM·TTS) Phase 측정, `/api/monitoring/latency` 대시보드 |
 | **N-002** | 동시 접속 / 수평 확장 (K8s) | docker-compose에 DB만 포함 | ❌ 미구현 | Dockerfile·K8s manifest·HPA 없음 |
 | **N-003** | 생체 데이터 보호 (TLS/AES) | SHA-256 비밀번호 해싱만 존재 | ❌ 미구현 | TLS 없음, AES 없음, 무인증 API, 데이터 삭제 없음 |
 | **N-004** | 공정성 / 편향 방지 | 없음 | ❌ 미구현 | 편향 검증·설명가능성·감사 로깅 없음 |
