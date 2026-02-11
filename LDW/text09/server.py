@@ -214,7 +214,28 @@ def get_job_questions(job_title):
         return ["자기소개를 부탁드립니다.", "성격의 장단점은 무엇인가요?"]
 
 
+
+class IdCheckRequest(BaseModel):
+    id_name: str
+
 # --- API Endpoints ---
+
+@app.post("/api/check-id")
+def check_id_duplicate(request: IdCheckRequest):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        c.execute('SELECT id_name FROM users WHERE id_name = %s', (request.id_name,))
+        if c.fetchone():
+            return {"available": False, "message": "이미 존재하는 아이디입니다."}
+        else:
+            return {"available": True, "message": "사용 가능한 아이디입니다."}
+    except Exception as e:
+        logger.error(f"ID Check Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
 
 @app.post("/api/register")
 def register(user: UserRegister):
@@ -223,7 +244,7 @@ def register(user: UserRegister):
         c = conn.cursor()
         c.execute('SELECT id_name FROM users WHERE id_name = %s', (user.id_name,))
         if c.fetchone():
-            raise HTTPException(status_code=400, detail="이미 존재하는 아이디입니다.")
+            return {"success": False, "message": "이미 존재하는 아이디입니다."}
         
         c.execute('''
             INSERT INTO users (id_name, pw, name, dob, gender, email, address, phone, type)

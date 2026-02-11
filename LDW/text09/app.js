@@ -53,6 +53,17 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+function clearSignupForm() {
+    const form = $('#signup-form');
+    if (form) {
+        form.reset();
+        const msgBox = $('#id-check-msg');
+        if (msgBox) {
+            msgBox.textContent = '';
+        }
+    }
+}
+
 // --- 3. Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
     initRouter();
@@ -80,6 +91,11 @@ function initRouter() {
             if (pageId === 'interview-setup-page') {
                 testDevices();
             }
+
+            // Clear signup form when entering signup page
+            if (pageId === 'signup-page') {
+                clearSignupForm();
+            }
         }
     };
 
@@ -93,6 +109,41 @@ function initRouter() {
 
 // --- 5. Auth ---
 function initAuth() {
+    // ID Duplicate Check
+    $('#btn-check-id').addEventListener('click', async () => {
+        const idInput = $('#reg-id');
+        const msgBox = $('#id-check-msg');
+        const idValue = idInput.value.trim();
+
+        if (!idValue) {
+            msgBox.textContent = '아이디를 입력해주세요.';
+            msgBox.style.color = 'red';
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/check-id', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_name: idValue })
+            });
+            const result = await response.json();
+
+            if (result.available) {
+                msgBox.textContent = result.message; // "사용 가능한 아이디입니다."
+                msgBox.style.color = 'green';
+                // Optional: Lock ID input or set a flag (not strictly required by prompt but good practice)
+            } else {
+                msgBox.textContent = result.message; // "이미 존재하는 아이디입니다."
+                msgBox.style.color = 'red';
+            }
+        } catch (error) {
+            console.error('ID Check Error:', error);
+            msgBox.textContent = '서버 오류가 발생했습니다.';
+            msgBox.style.color = 'red';
+        }
+    });
+
     $('#login-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const id = $('#login-id').value;
@@ -874,6 +925,12 @@ function initAdmin() {
         $('#admin-view-jobs').classList.remove('hidden');
     });
 
+    // Job Edit Cancel
+    $('#btn-cancel-job-edit').addEventListener('click', () => {
+        $('#admin-job-edit-page').classList.add('hidden');
+        $('#admin-view-jobs').classList.remove('hidden');
+    });
+
     $('#admin-job-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
@@ -897,6 +954,34 @@ function initAdmin() {
             }
         } catch (e) { console.error(e); }
     });
+
+    // Job Edit Submit
+    $('#admin-job-edit-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id = $('#edit-job-id').value;
+        try {
+            const resp = await fetch(`/api/jobs/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: $('#edit-job-title').value,
+                    job: $('#edit-job-job').value,
+                    content: $('#edit-job-content').value,
+                    deadline: $('#edit-job-deadline').value,
+                    id_name: AppState.currentUser.id_name
+                })
+            });
+            const res = await resp.json();
+            if (res.success) {
+                showToast('수정 완료', 'success');
+                $('#admin-job-edit-page').classList.add('hidden');
+                $('#admin-view-jobs').classList.remove('hidden');
+                fetchJobs();
+            } else {
+                showToast(res.message || '수정 실패', 'error');
+            }
+        } catch (e) { console.error(e); showToast('오류 발생', 'error'); }
+    });
 }
 
 function renderAdminJobList() {
@@ -904,6 +989,18 @@ function renderAdminJobList() {
     tbody.innerHTML = '';
     MOCK_DB.jobs.forEach(job => {
         const tr = document.createElement('tr');
+        const isOwner = job.id_name === AppState.currentUser.id_name;
+
+        let actionButtons = '';
+        if (isOwner) {
+            actionButtons = `
+                <button class="btn-small btn-original" style="background-color: #95a5a6; color: white; margin-right: 5px;" onclick="editJob(${job.id})">수정</button>
+                <button class="btn-small btn-secondary" onclick="deleteJob(${job.id})">삭제</button>
+            `;
+        } else {
+            actionButtons = `<span style="color: #ccc; font-size: 0.9em;">권한 없음</span>`;
+        }
+
         tr.innerHTML = `
             <td>${job.id}</td>
             <td>${job.job || '-'}</td>
@@ -911,9 +1008,7 @@ function renderAdminJobList() {
             <td>${job.id_name || '-'}</td>
             <td>${job.created_at}</td>
             <td>${job.deadline}</td>
-            <td>
-                <button class="btn-small btn-secondary" onclick="deleteJob(${job.id})">삭제</button>
-            </td>
+            <td>${actionButtons}</td>
         `;
         tbody.appendChild(tr);
     });
@@ -927,4 +1022,24 @@ window.deleteJob = async (id) => {
         if (res.success) fetchJobs();
         else showToast(res.message, 'error');
     } catch (e) { showToast('오류 발생', 'error'); }
+};
+
+window.editJob = (id) => {
+    const job = MOCK_DB.jobs.find(j => j.id === id);
+    if (!job) return;
+
+    // Check permission again (Client-side)
+    if (job.id_name !== AppState.currentUser.id_name) {
+        showToast('수정 권한이 없습니다.', 'error');
+        return;
+    }
+
+    $('#edit-job-id').value = job.id;
+    $('#edit-job-title').value = job.title;
+    $('#edit-job-job').value = job.job || '';
+    $('#edit-job-content').value = job.content || '';
+    $('#edit-job-deadline').value = job.deadline || '';
+
+    $('#admin-view-jobs').classList.add('hidden');
+    $('#admin-job-edit-page').classList.remove('hidden');
 };

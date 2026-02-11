@@ -1,90 +1,100 @@
-# 웹 기반 AI 면접 시뮬레이션 가이드북 (GUIDEBOOK.md)
+# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK)
+
+이 가이드북은 웹 기반 AI 면접 시뮬레이션 프로그램의 개요, 환경 설정, 실행 방법 및 주요 기능에 대해 설명합니다.
 
 ## 1. 개요 (Overview)
-본 프로젝트는 웹 기반의 **AI 면접 시뮬레이션** 프로그램입니다. 사용자는 이력서를 업로드하고 AI 면접관과 음성 및 화상으로 면접을 진행할 수 있습니다. 면접 종료 후에는 AI가 답변을 분석하여 평가 결과를 제공합니다.
+본 프로그램은 사용자가 가상의 AI 면접관과 실시간으로 대화하며 면접 연습을 할 수 있는 웹 애플리케이션입니다.
+- **주요 목표**: 실제 면접 상황과 유사한 환경 제공, 사용자 답변에 대한 실시간 피드백 및 평가.
+- **특징**:
+  - 음성 인식(STT) 및 음성 합성(TTS)을 통한 대화형 인터페이스.
+  - GPT-4o 기반의 동적 질문 생성 및 답변 평가.
+  - 직무별 맞춤형 면접 진행.
 
-## 2. 환경 설정 (Environment Setup)
-
-### 필수 요구 사항
-- Python 3.8 이상
-- PostgreSQL 데이터베이스
-- OpenAI API Key
-
-### 설치 라이브러리
-`requirements.txt`에 명시된 라이브러리를 설치해야 합니다.
-```bash
-pip install -r requirements.txt
-```
-주요 라이브러리:
-- `fastapi`, `uvicorn`: 웹 서버 프레임워크
-- `psycopg2`: PostgreSQL 데이터베이스 연동
-- `openai`: AI 모델 사용 (GPT-4o, Whisper)
-- `pypdf`: PDF 이력서 텍스트 추출
-- `python-dotenv`: 환경 변수 관리
-
-### 환경 변수 (.env)
-프로젝트 루트 경로에 `.env` 파일을 생성하고 다음 정보를 입력해야 합니다.
-```env
-DB_HOST=localhost
-DB_NAME=interview_db
-DB_USER=postgres
-POSTGRES_PASSWORD=your_password
-DB_PORT=5432
-OPENAI_API_KEY=sk-proj-...
-```
+## 2. 개발 환경 (Environment)
+- **O/S**: Windows (테스트 환경)
+- **Language**: Python 3.9+, JavaScript (ES6+)
+- **Database**: PostgreSQL
+- **Key Libraries**:
+  - Backend: `FastAPI`, `Uvicorn`, `Psycopg2`, `OpenAI`, `PyPDF`
+  - Frontend: Vanilla JS, HTML5, CSS3
 
 ## 3. 프로그램 실행 방법 (How to Run)
-터미널에서 `server.py`를 실행하면 웹 서버가 시작되고 자동으로 브라우저가 열립니다.
+1. **데이터베이스 실행**: PostgreSQL 서버가 실행 중이어야 하며 `.env` 파일에 설정된 정보와 일치해야 합니다.
+2. **가상 환경 활성화 (선택 사항)**:
+   ```bash
+   python -m venv venv
+   .\venv\Scripts\activate
+   ```
+3. **패키지 설치**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. **서버 실행**:
+   ```bash
+   python server.py
+   ```
+   - 서버가 시작되면 자동으로 브라우저가 열리며 `http://localhost:5000`으로 접속됩니다.
+   - 만약 자동으로 열리지 않으면 브라우저 주소창에 직접 입력하세요.
 
-```bash
-python server.py
-```
-- 서버 주소: `http://localhost:5000`
+## 4. 사용하는 모델 및 라이브러리 (Models & Libraries)
+| 구분 | 항목 | 설명 |
+|---|---|---|
+| **AI Model** | **OpenAI GPT-4o** | 면접 질문 생성, 답변 평가, 최종 결과 분석 |
+| | **OpenAI Whisper** | 사용자 음성 답변을 텍스트로 변환 (STT) |
+| **Backend** | **FastAPI** | 고성능 Python 웹 프레임워크 |
+| | **Uvicorn** | ASGI 웹 서버 |
+| | **Psycopg2** | PostgreSQL 데이터베이스 어댑터 |
+| | **PyPDF** | 이력서(PDF) 텍스트 추출 |
+| **Frontend** | **Vanilla JS** | 별도의 프레임워크 없이 순수 자바스크립트로 구현하여 가볍고 빠른 성능 제공 |
 
-## 4. 사용 모델 및 라이브러리 (Models & Libraries)
-- **OpenAI GPT-4o**: 
-    - 면접 질문 생성 (직무 맞춤형 질문)
-    - 답변 평가 및 피드백 생성
-    - 면접 결과 종합 분석
-- **OpenAI Whisper (whisper-1)**:
-    - 지원자의 음성 답변을 텍스트로 변환 (STT)
-- **FastAPI**: 비동기 처리를 지원하는 고성능 Python 웹 프레임워크
-- **Vanilla JS**: 프론트엔드는 별도의 프레임워크 없이 순수 JavaScript로 구현되어 가볍고 빠릅니다.
+## 5. 주요 기능 사용법 (Key Features)
+### A. 회원가입 및 로그인
+1. **회원가입**: ID 중복 확인 후 개인정보를 입력하여 가입합니다. '면접자' 또는 '관리자' 유형을 선택할 수 있습니다.
+2. **로그인**: 가입한 ID와 비밀번호로 로그인합니다.
 
-## 5. 주요 기능 사용법 (Features)
+### B. 면접관 (관리자)
+1. **공고 관리**: 새로운 채용 공고를 등록, 수정, 삭제할 수 있습니다.
+2. **지원자 현황**: 면접을 완료한 지원자들의 평가 결과를 조회할 수 있습니다.
 
-### [지원자]
-1.  **회원가입/로그인**: 계정을 생성하고 로그인합니다.
-2.  **이력서 업로드**: 지원하려는 공고를 선택하고 이력서(PDF)를 업로드합니다.
-3.  **환경 테스트**: 카메라와 마이크 작동 여부를 확인합니다.
-4.  **AI 면접 진행**:
-    - AI 면접관이 질문을 제시하고 음성으로 읽어줍니다 (TTS).
-    - 지원자는 마이크를 통해 답변을 녹음합니다.
-    - 약 5~10개의 질문이 이어지며, 꼬리 질문이나 심층 질문이 나올 수 있습니다.
-5.  **결과 확인**: 면접 종료 후 AI가 분석한 평가 점수(기술, 문제해결, 의사소통, 태도)와 합격 여부를 확인합니다.
-6.  **내 정보 수정**: 주소, 전화번호 등 개인정보를 수정할 수 있습니다.
-
-### [관리자]
-1.  **공고 관리**: 채용 공고를 등록, 수정, 삭제할 수 있습니다.
-2.  **지원자 현황**: 지원자들의 면접 진행 상황과 결과를 조회할 수 있습니다.
+### C. 면접자 (지원자)
+1. **공고 조회 및 지원**: 등록된 공고를 확인하고 '지원하기' 버튼을 누릅니다.
+2. **이력서 업로드**: PDF 형식의 이력서를 제출합니다.
+3. **환경 테스트**: 카메라와 마이크 작동 여부를 확인합니다.
+4. **실전 면접**:
+   - AI 면접관이 자기소개를 시작으로 질문을 던집니다.
+   - 사용자는 음성으로 답변합니다.
+   - 총 10~12개의 질문(직무, 인성, 마무리)이 진행됩니다.
+5. **결과 확인**: 면접 종료 후 종합 평가 점수(기술, 문제해결, 의사소통 등)와 합격 여부를 확인할 수 있습니다.
 
 ## 6. 파일 구조 설명 (File Structure)
-
 ```
-C:\big20\big20_AI_Interview_simulation\LDW\text09\
-├── server.py                # 메인 백엔드 서버 (FastAPI)
-├── index.html               # 메인 프론트엔드 HTML
-├── app.js                   # 프론트엔드 로직 (SPA 라우팅, API 호출, 녹음 등)
-├── styles.css               # 스타일 시트
-├── create_table.py          # 데이터베이스 테이블 생성 스크립트
-├── requirements.txt         # 파이썬 의존성 패키지 목록
-├── uploads/                 # 업로드된 파일 저장소
-│   ├── resumes/             # 이력서 PDF 파일
-│   └── audio/               # 면접 답변 오디오 파일
-└── GUIDEBOOK.md             # 프로젝트 가이드북 (본 파일)
+/ (Root)
+│
+├── server.py             # 메인 백엔드 서버 (FastAPI Application)
+│                          - API 엔드포인트 정의
+│                          - 데이터베이스 연결 및 쿼리 처리
+│                          - OpenAI API 연동 로직
+│
+├── index.html            # 메인 프론트엔드 페이지 (SPA 구조)
+│                          - 화면 레이아웃 및 각종 UI 컴포넌트
+│
+├── app.js                # 프론트엔드 로직
+│                          - 페이지 라우팅 (SPA)
+│                          - API 호출 및 데이터 바인딩
+│                          - 웹캠/마이크 제어 및 녹음 처리
+│
+├── styles.css            # 스타일 시트
+│
+├── requirements.txt      # 파이썬 의존성 패키지 목록
+│
+├── setup_interview_data.py # 초기 데이터 설정 스크립트 (기초 면접 질문 데이터 등)
+│
+├── migrate_db_v3.py      # 데이터베이스 마이그레이션 스크립트 (테이블 생성 등)
+│
+└── uploads/              # 업로드된 파일 저장소
+    ├── resumes/          # 사용자 이력서 PDF
+    └── audio/            # 면접 답변 오디오 파일
 ```
 
-## 7. 문제 해결 (Troubleshooting)
-- **DB 연결 오류**: `.env` 파일의 DB 설정이 올바른지 확인하세요. PostgreSQL 서비스가 실행 중이어야 합니다.
-- **OpenAI API 오류**: API Key가 유효한지 확인하고 잔액이 충분한지 확인하세요.
-- **브라우저 권한**: 카메라/마이크 권한을 허용해야 면접을 진행할 수 있습니다.
+---
+*작성일: 2026-02-11*
