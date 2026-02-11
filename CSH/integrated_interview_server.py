@@ -1110,20 +1110,29 @@ class AIInterviewer:
 지원자의 답변을 분석하고 평가해주세요. 답변을 분석하고 평가할 때는 반드시 아래 평가 기준을 엄격히 준수하세요.
 
 [평가 기준]
-1. 문제 해결력 및 논리성 (1-5점): 지원자가 문제를 어떻게 접근하고 해결하는지, 그리고 답변의 논리적 흐름이 일관성 있는지를 평가합니다. 
-2. 의사소통능력 (1-5점): 지원자가 자신의 생각을 명확하게 전달하는지, 그리고 면접관의 질문에 적절히 반응하는지를 평가합니다. 
+1. 문제 해결력 (1-5점): 지원자가 문제를 어떻게 접근하고 해결하는지를 평가합니다.
+2. 논리성 (1-5점): 답변의 논리적 흐름이 일관성 있는지를 평가합니다.
 3. 직무 역량 및 기술 이해도 (1-5점): 기술적 개념이나 원리에 대한 이해가 정확한가? 설명이나 예시가 충분하고 적절한가?
 4. STAR 기법 (1-5점): 상황-과제-행동-결과 구조로 답변했는가?
+5. 의사소통능력 (1-5점): 지원자가 자신의 생각을 명확하게 전달하는지, 그리고 면접관의 질문에 적절히 반응하는지를 평가합니다.
+
+[합격 추천 기준]
+- "합격": 총점 20점 이상이고 모든 항목 3점 이상
+- "보류": 총점 15~19점이거나 일부 항목 2점
+- "불합격": 총점 14점 이하이거나 2개 이상 항목 2점 이하
 
 [출력 형식 - 반드시 JSON으로 응답]
 {{
     "scores": {{
-        "problem_solving_and_logic": 숫자,
-        "communication": 숫자,
+        "problem_solving": 숫자,
+        "logic": 숫자,
         "technical": 숫자,
-        "star": 숫자
+        "star": 숫자,
+        "communication": 숫자
     }},
-    "total_score": 숫자,
+    "total_score": 숫자(25점 만점),
+    "recommendation": "합격" 또는 "보류" 또는 "불합격",
+    "recommendation_reason": "추천 사유를 한 줄로 작성",
     "strengths": ["강점1", "강점2"],
     "improvements": ["개선점1", "개선점2"],
     "brief_feedback": "한 줄 피드백"
@@ -1493,13 +1502,15 @@ class AIInterviewer:
             # LLM 없으면 기본 평가 반환
             return {
                 "scores": {
-                    "specificity": 3,
+                    "problem_solving": 3,
                     "logic": 3,
                     "technical": 3,
                     "star": 3,
                     "communication": 3
                 },
                 "total_score": 15,
+                "recommendation": "보류",
+                "recommendation_reason": "LLM 서비스 미사용으로 기본 평가 적용",
                 "strengths": ["답변을 완료했습니다."],
                 "improvements": ["더 구체적인 예시를 들어보세요."],
                 "brief_feedback": "괜찮은 답변입니다."
@@ -1548,13 +1559,15 @@ class AIInterviewer:
             print(f"평가 오류: {e}")
             return {
                 "scores": {
-                    "specificity": 3,
+                    "problem_solving": 3,
                     "logic": 3,
                     "technical": 3,
                     "star": 3,
                     "communication": 3
                 },
                 "total_score": 15,
+                "recommendation": "보류",
+                "recommendation_reason": "평가 오류로 기본 평가 적용",
                 "strengths": ["답변을 완료했습니다."],
                 "improvements": ["더 구체적인 예시를 들어보세요."],
                 "brief_feedback": "답변을 분석 중입니다."
@@ -3477,6 +3490,56 @@ async def chat_with_intervention(request: ChatRequestWithIntervention, current_u
     }
 
 
+# ========== 평가 통계 헬퍼 ==========
+
+EVAL_SCORE_KEYS = ["problem_solving", "logic", "technical", "star", "communication"]
+
+def _compute_evaluation_summary(evaluations: List[Dict]) -> Dict:
+    """평가 목록에서 평균 점수, 종합 추천 등을 계산하는 공통 헬퍼"""
+    if not evaluations:
+        return {}
+
+    avg_scores = {k: 0.0 for k in EVAL_SCORE_KEYS}
+    for ev in evaluations:
+        for key in avg_scores:
+            avg_scores[key] += ev.get("scores", {}).get(key, 0)
+    for key in avg_scores:
+        avg_scores[key] = round(avg_scores[key] / len(evaluations), 1)
+
+    total_average = round(sum(avg_scores.values()) / len(EVAL_SCORE_KEYS), 1)
+
+    # 종합 합격 추천 결정 (개별 평가의 추천을 집계)
+    rec_counts = {"합격": 0, "보류": 0, "불합격": 0}
+    for ev in evaluations:
+        r = ev.get("recommendation", "보류")
+        if r in rec_counts:
+            rec_counts[r] += 1
+        else:
+            rec_counts["보류"] += 1
+
+    # 과반수 기반 최종 추천
+    n = len(evaluations)
+    if rec_counts["불합격"] > n / 2:
+        final_recommendation = "불합격"
+    elif rec_counts["합격"] > n / 2:
+        final_recommendation = "합격"
+    else:
+        final_recommendation = "보류"
+
+    # 추천 사유: 마지막 평가의 사유 사용 + 점수 요약
+    last_reason = evaluations[-1].get("recommendation_reason", "")
+    recommendation_reason = f"평균 {total_average}/5.0 | {last_reason}"
+
+    return {
+        "answer_count": len(evaluations),
+        "average_scores": avg_scores,
+        "total_average": total_average,
+        "recommendation": final_recommendation,
+        "recommendation_reason": recommendation_reason,
+        "all_evaluations": evaluations
+    }
+
+
 # ========== Report API ==========
 
 @app.get("/api/report/{session_id}")
@@ -3498,24 +3561,7 @@ async def get_report(session_id: str, current_user: Dict = Depends(get_current_u
     # 세션의 평가 결과 포함
     evaluations = session.get("evaluations", [])
     if evaluations:
-        # 평균 점수 계산
-        avg_scores = {
-            "specificity": 0, "logic": 0, "technical": 0, "star": 0, "communication": 0
-        }
-        for ev in evaluations:
-            for key in avg_scores:
-                avg_scores[key] += ev.get("scores", {}).get(key, 0)
-        
-        if len(evaluations) > 0:
-            for key in avg_scores:
-                avg_scores[key] = round(avg_scores[key] / len(evaluations), 1)
-        
-        report["llm_evaluation"] = {
-            "answer_count": len(evaluations),
-            "average_scores": avg_scores,
-            "total_average": round(sum(avg_scores.values()) / 5, 1),
-            "all_evaluations": evaluations
-        }
+        report["llm_evaluation"] = _compute_evaluation_summary(evaluations)
     
     # REQ-F-006: 발화 분석 데이터 추가
     if SPEECH_ANALYSIS_AVAILABLE and speech_service:
@@ -3570,21 +3616,7 @@ async def get_report_pdf(session_id: str, current_user: Dict = Depends(get_curre
     # 평가 결과 포함
     evaluations = session.get("evaluations", [])
     if evaluations:
-        avg_scores = {
-            "specificity": 0, "logic": 0, "technical": 0, "star": 0, "communication": 0
-        }
-        for ev in evaluations:
-            for key in avg_scores:
-                avg_scores[key] += ev.get("scores", {}).get(key, 0)
-        if len(evaluations) > 0:
-            for key in avg_scores:
-                avg_scores[key] = round(avg_scores[key] / len(evaluations), 1)
-        report["llm_evaluation"] = {
-            "answer_count": len(evaluations),
-            "average_scores": avg_scores,
-            "total_average": round(sum(avg_scores.values()) / 5, 1),
-            "all_evaluations": evaluations
-        }
+        report["llm_evaluation"] = _compute_evaluation_summary(evaluations)
     
     # 발화 분석 데이터 추가
     if SPEECH_ANALYSIS_AVAILABLE and speech_service:
@@ -3631,6 +3663,8 @@ class EvaluateResponse(BaseModel):
     session_id: str
     scores: Dict[str, int]
     total_score: int
+    recommendation: str = "보류"
+    recommendation_reason: str = ""
     strengths: List[str]
     improvements: List[str]
     brief_feedback: str
@@ -3667,6 +3701,8 @@ async def evaluate_answer(request: EvaluateRequest, current_user: Dict = Depends
         session_id=request.session_id,
         scores=evaluation.get("scores", {}),
         total_score=evaluation.get("total_score", 0),
+        recommendation=evaluation.get("recommendation", "보류"),
+        recommendation_reason=evaluation.get("recommendation_reason", ""),
         strengths=evaluation.get("strengths", []),
         improvements=evaluation.get("improvements", []),
         brief_feedback=evaluation.get("brief_feedback", "")
@@ -3684,18 +3720,14 @@ async def get_evaluations(session_id: str, current_user: Dict = Depends(get_curr
     
     # 통계 계산
     if evaluations:
-        avg_scores = {"specificity": 0, "logic": 0, "technical": 0, "star": 0, "communication": 0}
-        for ev in evaluations:
-            for key in avg_scores:
-                avg_scores[key] += ev.get("scores", {}).get(key, 0)
-        for key in avg_scores:
-            avg_scores[key] = round(avg_scores[key] / len(evaluations), 1)
-        
+        summary = _compute_evaluation_summary(evaluations)
         return {
             "session_id": session_id,
-            "total_answers": len(evaluations),
-            "average_scores": avg_scores,
-            "total_average": round(sum(avg_scores.values()) / 5, 1),
+            "total_answers": summary["answer_count"],
+            "average_scores": summary["average_scores"],
+            "total_average": summary["total_average"],
+            "recommendation": summary["recommendation"],
+            "recommendation_reason": summary["recommendation_reason"],
             "evaluations": evaluations
         }
     

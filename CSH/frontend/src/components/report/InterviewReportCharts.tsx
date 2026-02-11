@@ -22,16 +22,20 @@ interface StarAnalysis {
 interface LLMEvaluation {
   answer_count: number;
   average_scores: {
-    specificity: number;
+    problem_solving: number;
     logic: number;
     technical: number;
     star: number;
     communication: number;
   };
   total_average: number;
+  recommendation?: string;
+  recommendation_reason?: string;
   all_evaluations: Array<{
     scores?: Record<string, number>;
     total_score?: number;
+    recommendation?: string;
+    recommendation_reason?: string;
     question?: string;
     answer?: string;
     brief_feedback?: string;
@@ -143,11 +147,11 @@ const EMOTION_COLORS: Record<string, string> = {
 };
 
 const SCORE_LABELS: Record<string, string> = {
-  specificity: "구체성",
+  problem_solving: "문제해결력",
   logic: "논리성",
   technical: "기술이해도",
   star: "STAR",
-  communication: "전달력",
+  communication: "의사소통",
 };
 
 const PROSODY_LABELS: Record<string, string> = {
@@ -228,11 +232,11 @@ function EvalRadarChart({ scores }: { scores: Record<string, number> }) {
 function EvalBarChart({ evaluations }: { evaluations: LLMEvaluation["all_evaluations"] }) {
   const data = evaluations.map((ev, idx) => ({
     name: `Q${idx + 1}`,
-    구체성: ev.scores?.specificity ?? 0,
+    문제해결력: ev.scores?.problem_solving ?? 0,
     논리성: ev.scores?.logic ?? 0,
     기술이해도: ev.scores?.technical ?? 0,
     STAR: ev.scores?.star ?? 0,
-    전달력: ev.scores?.communication ?? 0,
+    의사소통: ev.scores?.communication ?? 0,
   }));
 
   return (
@@ -252,11 +256,11 @@ function EvalBarChart({ evaluations }: { evaluations: LLMEvaluation["all_evaluat
             }}
           />
           <Legend wrapperStyle={{ color: "#8892b0", fontSize: 11 }} />
-          <Bar dataKey="구체성" fill={COLORS.cyan} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="문제해결력" fill={COLORS.cyan} radius={[3, 3, 0, 0]} />
           <Bar dataKey="논리성" fill={COLORS.green} radius={[3, 3, 0, 0]} />
           <Bar dataKey="기술이해도" fill={COLORS.purple} radius={[3, 3, 0, 0]} />
           <Bar dataKey="STAR" fill={COLORS.orange} radius={[3, 3, 0, 0]} />
-          <Bar dataKey="전달력" fill={COLORS.pink} radius={[3, 3, 0, 0]} />
+          <Bar dataKey="의사소통" fill={COLORS.pink} radius={[3, 3, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -650,6 +654,8 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
   const evalScores = report.llm_evaluation?.average_scores;
   const totalAvg = report.llm_evaluation?.total_average ?? 0;
   const allEvals = report.llm_evaluation?.all_evaluations ?? [];
+  const recommendation = report.llm_evaluation?.recommendation;
+  const recommendationReason = report.llm_evaluation?.recommendation_reason;
 
   // 등급 계산
   const grade =
@@ -664,6 +670,23 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
     B: "text-cyan-400",
     C: "text-orange-400",
     D: "text-red-400",
+  };
+
+  // 합불 추천 색상
+  const recColors: Record<string, string> = {
+    "합격": "from-green-500 to-emerald-600",
+    "보류": "from-yellow-500 to-amber-600",
+    "불합격": "from-red-500 to-rose-600",
+  };
+  const recTextColors: Record<string, string> = {
+    "합격": "text-green-400",
+    "보류": "text-yellow-400",
+    "불합격": "text-red-400",
+  };
+  const recIcons: Record<string, string> = {
+    "합격": "✅",
+    "보류": "⏸️",
+    "불합격": "❌",
   };
 
   return (
@@ -688,6 +711,25 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
           unit="자"
         />
       </div>
+
+      {/* ── 합격 추천 배지 ── */}
+      {recommendation && (
+        <div className="glass-card text-center py-6">
+          <div className="flex items-center justify-center gap-4 mb-3">
+            <span className="text-5xl">{recIcons[recommendation] || "⏸️"}</span>
+            <div>
+              <span className={`text-4xl font-black bg-gradient-to-r ${recColors[recommendation] || recColors["보류"]} bg-clip-text text-transparent`}>
+                {recommendation}
+              </span>
+            </div>
+          </div>
+          {recommendationReason && (
+            <p className="text-sm text-[var(--text-secondary)] mt-2">
+              {recommendationReason}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* ── 등급 배지 ── */}
       {totalAvg > 0 && (

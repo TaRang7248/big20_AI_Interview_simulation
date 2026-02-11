@@ -307,9 +307,23 @@ def generate_pdf_report(report_data: Dict[str, Any]) -> bytes:
         avg_scores = llm_eval.get("average_scores", {})
         total_avg = llm_eval.get("total_average", 0)
         
+        # 합격 추천
+        recommendation = llm_eval.get("recommendation", "")
+        recommendation_reason = llm_eval.get("recommendation_reason", "")
+        if recommendation:
+            rec_color_map = {"합격": "#4CAF50", "보류": "#FF9800", "불합격": "#F44336"}
+            rec_color = rec_color_map.get(recommendation, "#FF9800")
+            elements.append(Paragraph(
+                f'<font color="{rec_color}" size="14"><b>▶ 합격 추천: {recommendation}</b></font>',
+                styles["body"]
+            ))
+            if recommendation_reason:
+                elements.append(Paragraph(f"<i>{recommendation_reason}</i>", styles["body"]))
+            elements.append(Spacer(1, 3 * mm))
+        
         score_labels = {
-            "specificity": "구체성", "logic": "논리성",
-            "technical": "기술 이해도", "star": "STAR 기법", "communication": "전달력"
+            "problem_solving": "문제 해결력", "logic": "논리성",
+            "technical": "기술 이해도", "star": "STAR 기법", "communication": "의사소통"
         }
         
         for key, label in score_labels.items():
