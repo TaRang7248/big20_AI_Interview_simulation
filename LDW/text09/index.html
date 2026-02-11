@@ -26,9 +26,11 @@
             align-items: center;
             z-index: 9999;
         }
+
         #loading-overlay.hidden {
             display: none;
         }
+
         .spinner {
             border: 8px solid #f3f3f3;
             border-top: 8px solid #3498db;
@@ -38,10 +40,17 @@
             animation: spin 1s linear infinite;
             margin-bottom: 20px;
         }
+
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
+
         .loading-text {
             font-size: 1.2rem;
             color: #333;
@@ -103,7 +112,8 @@
                         <label for="reg-id">아이디</label>
                         <div style="display: flex; align-items: center; gap: 10px;">
                             <input type="text" id="reg-id" required style="flex: 1;">
-                            <button type="button" id="btn-check-id" class="btn-secondary" style="white-space: nowrap;">중복확인</button>
+                            <button type="button" id="btn-check-id" class="btn-secondary"
+                                style="white-space: nowrap;">중복확인</button>
                         </div>
                         <div id="id-check-msg" style="font-size: 0.9em; margin-top: 5px; min-height: 20px;"></div>
 
@@ -274,6 +284,39 @@
             </div>
         </section>
 
+        <!-- 2.1.0 My Interview Records -->
+        <section id="my-records-page" class="page hidden">
+            <div class="container dashboard-layout">
+                <aside class="sidebar">
+                    <h3>지원자 메뉴</h3>
+                    <ul>
+                        <li><a href="#" onclick="navigateTo('applicant-dashboard-page'); return false;">지원 공고 목록</a>
+                        </li>
+                        <li><a href="#" class="active" onclick="return false;">내 면접 기록</a></li>
+                        <li><a href="#" id="link-my-info-side">내 정보</a></li>
+                    </ul>
+                </aside>
+                <main class="content">
+                    <h2>내 면접 기록</h2>
+                    <div class="profile-card" style="padding: 0; overflow: hidden;">
+                        <table class="table" id="my-records-table">
+                            <thead>
+                                <tr>
+                                    <th>공고 제목</th>
+                                    <th>공고 직업</th>
+                                    <th>면접한 시간</th>
+                                    <th>합격&불합격 결과</th>
+                                </tr>
+                            </thead>
+                            <tbody id="my-records-list">
+                                <!-- Records will be rendered here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </main>
+            </div>
+        </section>
+
         <!-- 2.1.1 Job Detail Page -->
         <section id="job-detail-page" class="page hidden">
             <div class="container">
@@ -385,7 +428,7 @@
                     <div class="input-area">
                         <!-- Removed Code Board for now as request focused on Q&A -->
                         <!-- Text area for fallback or status, mostly handled by audio -->
-                        <textarea id="user-answer" placeholder="답변을 말씀하시면 음성이 녹음됩니다..." rows="3" disabled></textarea> 
+                        <textarea id="user-answer" placeholder="답변을 말씀하시면 음성이 녹음됩니다..." rows="3" disabled></textarea>
                         <button id="btn-submit-answer" class="btn-primary">답변 제출 (녹음 종료)</button>
                     </div>
                 </div>
@@ -443,7 +486,7 @@
 
                     <!-- Job Register -->
                     <div id="admin-job-register-page" class="hidden">
-                         <h2>공고 등록</h2>
+                        <h2>공고 등록</h2>
                         <div class="profile-card">
                             <form id="admin-job-form">
                                 <div class="form-group">
@@ -468,7 +511,7 @@
                         </div>
                     </div>
 
-                     <!-- Job Edit -->
+                    <!-- Job Edit -->
                     <div id="admin-job-edit-page" class="hidden">
                         <h2>공고 수정</h2>
                         <div class="profile-card">
@@ -515,6 +558,55 @@
             </div>
         </section>
 
+    </div>
+
+    <!-- Applicant Detail Modal -->
+    <div id="applicant-detail-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="detail-modal-title">지원자 상세 정보</h2>
+                <button class="btn-close" id="btn-close-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="detail-grid">
+                    <!-- Final Result Summary -->
+                    <div class="result-summary">
+                        <div class="detail-section-title">최종 평가 결과</div>
+                        <div id="detail-pass-status" class="pass-status"></div>
+                        <div class="score-grid">
+                            <div class="score-card">
+                                <div id="score-tech" class="score-value">0</div>
+                                <div class="score-label">기술/직무</div>
+                            </div>
+                            <div class="score-card">
+                                <div id="score-problem" class="score-value">0</div>
+                                <div class="score-label">문제해결</div>
+                            </div>
+                            <div class="score-card">
+                                <div id="score-comm" class="score-value">0</div>
+                                <div class="score-label">의사소통</div>
+                            </div>
+                            <div class="score-card">
+                                <div id="score-attitude" class="score-value">0</div>
+                                <div class="score-label">태도/인성</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Resume Section -->
+                    <div class="detail-column">
+                        <div class="detail-section-title">이력서 내용</div>
+                        <div id="detail-resume" class="resume-box"></div>
+                    </div>
+
+                    <!-- Interview Log Section -->
+                    <div class="detail-column">
+                        <div class="detail-section-title">면접 대화 기록</div>
+                        <div id="detail-log" class="log-box"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Logic -->

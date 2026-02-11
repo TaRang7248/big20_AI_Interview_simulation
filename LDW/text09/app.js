@@ -86,6 +86,7 @@ function initRouter() {
 
             if (pageId === 'applicant-dashboard-page') fetchJobs();
             if (pageId === 'admin-dashboard-page') fetchJobs();
+            if (pageId === 'my-records-page') fetchMyRecords();
 
             // Auto-start device test when entering setup page
             if (pageId === 'interview-setup-page') {
@@ -225,6 +226,17 @@ function initDashboard() {
         $('#check-pw-input').value = '';
         $('#check-pw-input').focus();
     });
+
+    $('#link-my-info-side').addEventListener('click', () => {
+        navigateTo('password-check-page');
+        $('#check-pw-input').value = '';
+        $('#check-pw-input').focus();
+    });
+
+    $('#link-my-records').addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateTo('my-records-page');
+    });
 }
 
 async function fetchJobs() {
@@ -280,6 +292,44 @@ $('#btn-back-to-list').addEventListener('click', () => navigateTo('applicant-das
 $('#btn-apply-job').addEventListener('click', () => {
     if (AppState.currentJobId) startInterviewSetup(AppState.currentJobId);
 });
+
+async function fetchMyRecords() {
+    if (!AppState.currentUser) return;
+
+    try {
+        const response = await fetch(`/api/interview-results/${AppState.currentUser.id_name}`);
+        const result = await response.json();
+        if (result.success) {
+            renderMyRecords(result.results);
+        }
+    } catch (error) {
+        console.error('Fetch My Records Error:', error);
+        showToast('면접 기록을 가져오는데 실패했습니다.', 'error');
+    }
+}
+
+function renderMyRecords(records) {
+    const list = $('#my-records-list');
+    list.innerHTML = '';
+
+    if (records.length === 0) {
+        list.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 20px;">면접 기록이 없습니다.</td></tr>';
+        return;
+    }
+
+    records.forEach(record => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${record.announcement_title}</td>
+            <td>${record.announcement_job}</td>
+            <td>${record.interview_time}</td>
+            <td style="color: ${record.pass_fail === '합격' ? 'green' : (record.pass_fail === '불합격' ? 'red' : 'orange')}; font-weight: bold;">
+                ${record.pass_fail}
+            </td>
+        `;
+        list.appendChild(tr);
+    });
+}
 
 // --- 6.1 My Info Logic ---
 async function loadMyInfo() {
@@ -982,7 +1032,131 @@ function initAdmin() {
             }
         } catch (e) { console.error(e); showToast('오류 발생', 'error'); }
     });
+
+    // --- Applicant Management ---
+    $('#admin-menu-applicants').addEventListener('click', () => {
+        $('#admin-view-jobs').classList.add('hidden');
+        $('#admin-view-applicants').classList.remove('hidden');
+        $('#admin-job-register-page').classList.add('hidden');
+        $('#admin-job-edit-page').classList.add('hidden');
+
+        // Update active class
+        $('#admin-menu-applicants').classList.add('active');
+        $('#admin-menu-jobs').classList.remove('active');
+
+        fetchAdminApplicants();
+    });
+
+    // Close Modal
+    $('#btn-close-modal').addEventListener('click', () => {
+        $('#applicant-detail-modal').classList.add('hidden');
+    });
+
+    window.addEventListener('click', (e) => {
+        if (e.target === $('#applicant-detail-modal')) {
+            $('#applicant-detail-modal').classList.add('hidden');
+        }
+    });
 }
+
+async function fetchAdminApplicants() {
+    try {
+        showLoading(true, '지원자 목록을 가져오는 중...');
+        const response = await fetch('/api/admin/applicants');
+        const result = await response.json();
+        showLoading(false);
+
+        if (result.success) {
+            renderAdminApplicantList(result.applicants);
+        } else {
+            showToast(result.message || '목록 로드 실패', 'error');
+        }
+    } catch (error) {
+        showLoading(false);
+        console.error(error);
+        showToast('서버 통신 오류', 'error');
+    }
+}
+
+function renderAdminApplicantList(applicants) {
+    const tbody = $('#admin-app-table tbody');
+    tbody.innerHTML = '';
+
+    if (applicants.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px;">지원자가 없습니다.</td></tr>';
+        return;
+    }
+
+    applicants.forEach(app => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${app.applicant_name} (${app.applicant_id})</td>
+            <td>${app.announcement_title}</td>
+            <td>${app.announcement_job}</td>
+            <td>${app.interview_time}</td>
+            <td>
+                <button class="btn-small" onclick="showApplicantDetail('${app.interview_number}')">상세보기</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+window.showApplicantDetail = async (interviewNumber) => {
+    try {
+        showLoading(true, '상세 정보를 가져오는 중...');
+        const response = await fetch(`/api/admin/applicant-details/${interviewNumber}`);
+        const result = await response.json();
+        showLoading(false);
+
+        if (result.success) {
+            const data = result.result;
+            const progress = result.progress;
+            const resumeText = result.resume_text;
+
+            // 1. Fill Header
+            $('#detail-modal-title').textContent = `${data.announcement_title} - 지원자 상세 정보`;
+
+            // 2. Fill Summary Scores
+            const passFail = data.pass_fail;
+            const passEl = $('#detail-pass-status');
+            passEl.textContent = passFail;
+            passEl.className = `pass-status ${passFail === '합격' ? 'pass' : 'fail'}`;
+
+            $('#score-tech').textContent = data.tech_score;
+            $('#score-problem').textContent = data.problem_solving_score;
+            $('#score-comm').textContent = data.communication_score;
+            $('#score-attitude').textContent = data.non_verbal_score;
+
+            // 3. Fill Resume
+            $('#detail-resume').textContent = resumeText || '이력서 내용이 없습니다.';
+
+            // 4. Fill Interview Log
+            const logBox = $('#detail-log');
+            logBox.innerHTML = '';
+
+            progress.forEach((p, idx) => {
+                const logItem = document.createElement('div');
+                logItem.className = 'log-item';
+                logItem.innerHTML = `
+                    <div class="log-q">Q${idx + 1}. ${p.Create_Question}</div>
+                    <div class="log-a">A: ${p.Question_answer || '(답변 없음)'} <small style="color: #999;">(${p.answer_time || '0초'})</small></div>
+                    <div class="log-e">평가: ${p.Answer_Evaluation || '평가 중...'}</div>
+                `;
+                logBox.appendChild(logItem);
+            });
+
+            // Show Modal
+            $('#applicant-detail-modal').classList.remove('hidden');
+        } else {
+            showToast(result.message || '상세 정보 로드 실패', 'error');
+        }
+    } catch (error) {
+        showLoading(false);
+        console.error(error);
+        showToast('서버 통신 오류', 'error');
+    }
+};
 
 function renderAdminJobList() {
     const tbody = $('#admin-job-table tbody');

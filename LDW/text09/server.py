@@ -838,7 +838,103 @@ def get_interview_result(interview_number: str):
         if row:
             return {"success": True, "result": dict(row)}
         else:
-             return {"success": False, "message": "결과 분석 중입니다."}
+            return {"success": False, "message": "결과 분석 중입니다."}
+    finally:
+        conn.close()
+
+@app.get("/api/interview-results/{id_name}")
+def get_interview_results(id_name: str):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        query = """
+            SELECT announcement_title, announcement_job, 
+                   to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time, 
+                   pass_fail
+            FROM Interview_Result 
+            WHERE applicant_id = %s 
+            ORDER BY created_at DESC
+        """
+        c.execute(query, (id_name,))
+        rows = c.fetchall()
+        return {"success": True, "results": [dict(row) for row in rows]}
+    finally:
+        conn.close()
+
+@app.get("/api/admin/applicants")
+def get_admin_applicants():
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        # Join Interview_Result with users to get applicant names
+        query = """
+            SELECT r.interview_number, r.applicant_id, u.name as applicant_name, 
+                   r.announcement_title, r.announcement_job, r.pass_fail, 
+                   to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time
+            FROM Interview_Result r
+            JOIN users u ON r.applicant_id = u.id_name
+            ORDER BY r.created_at DESC
+        """
+        c.execute(query)
+        rows = c.fetchall()
+        return {"success": True, "applicants": [dict(row) for row in rows]}
+    finally:
+        conn.close()
+
+@app.get("/api/admin/applicant-details/{interview_number}")
+def get_applicant_details(interview_number: str):
+    conn = get_db_connection()
+    try:
+        c = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # 1. Get Interview Result
+        c.execute("SELECT * FROM Interview_Result WHERE interview_number = %s", (interview_number,))
+        result = c.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="면접 결과를 찾을 수 없습니다.")
+        
+        # 2. Get Interview Q&A Progress
+        c.execute("""
+            SELECT Create_Question, Question_answer, Answer_Evaluation, answer_time
+            FROM Interview_Progress 
+            WHERE Interview_Number = %s 
+            ORDER BY id ASC
+        """, (interview_number,))
+        progress = c.fetchall()
+        
+        # 3. Get Resume Text
+        # First check interview_information for original PDF text
+        c.execute("""
+            SELECT applicant_id, announcement_job FROM Interview_Result WHERE interview_number = %s
+        """, (interview_number,))
+        res_info = c.fetchone()
+        
+        resume_text = ""
+        if res_info:
+            c.execute("""
+                SELECT resume FROM interview_information 
+                WHERE id_name = %s AND job = %s 
+                ORDER BY created_at DESC LIMIT 1
+            """, (res_info['applicant_id'], res_info['announcement_job']))
+            info_row = c.fetchone()
+            if info_row:
+                resume_path = info_row['resume']
+                if os.path.exists(resume_path):
+                    resume_text = extract_text_from_pdf(resume_path)
+            
+        # Fallback to truncated text in Interview_Progress if PDF extraction failed or file missing
+        if not resume_text:
+            c.execute("SELECT Resume FROM Interview_Progress WHERE Interview_Number = %s LIMIT 1", (interview_number,))
+            prog_row = c.fetchone()
+            if prog_row:
+                resume_text = prog_row['Resume'] # Capital R
+
+        return {
+            "success": True,
+            "result": dict(result),
+            "progress": [dict(p) for p in progress],
+            "resume_text": resume_text
+        }
     finally:
         conn.close()
 
