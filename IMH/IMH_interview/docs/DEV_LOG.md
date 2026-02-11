@@ -288,3 +288,11 @@ Plan 수립
 - **로그 및 산출물**:
   - `packages/imh_history/` 및 `packages/imh_report/` 기존 코드 활용.
   - API Layer 추가.
+
+### TASK-015 리포트 소비 규격 정의 (Consumer Contract)
+- **요약**: UI 및 외부 Client가 리포트 데이터를 올바르게 해석하기 위한 소비 규격(`TASK-015_CONTRACT.md`) 작성.
+- **변경 사항**:
+    - `docs/TASK-015_CONTRACT.md`: 리포트 소비 주체, 목적, 데이터 렌더링 가이드, 책임 경계 정의.
+    - 구현 코드 없음 (Plan Only Task).
+- **산출물**:
+    - [TASK-015_CONTRACT.md](TASK-015_CONTRACT.md)
