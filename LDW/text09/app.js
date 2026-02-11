@@ -525,8 +525,37 @@ async function handleSubmitAnswer(forced = false) {
         }
 
         // Check if finished
-        if (result.next_question.includes("면접을 마칩니다")) {
-            finishInterview();
+        if (result.interview_finished) {
+            // Play closing remark properly
+            const closingRemark = result.next_question || "면접이 종료되었습니다. 수고하셨습니다.";
+            addChatLog('AI', closingRemark);
+            $('#ai-message').textContent = closingRemark;
+
+            // [Prevent Double Submission] Disable controls immediately
+            $('#btn-submit-answer').disabled = true;
+            $('#user-answer').disabled = true;
+            $('#feed-label').textContent = "면접 종료 (Redirecting...)";
+
+            // Clear timer just in case
+            if (AppState.interview.timer) clearInterval(AppState.interview.timer);
+            stopRecording(); // Ensure recording is stopped
+
+            // Use a flag to prevent double-calling finishInterview
+            let finished = false;
+            const doFinish = () => {
+                if (finished) return;
+                finished = true;
+                finishInterview();
+            };
+
+            // Call finish after TTS
+            speakText(closingRemark, () => {
+                doFinish();
+            });
+
+            // Fallback: If TTS fails or takes too long (> 10s), force finish
+            setTimeout(doFinish, 10000);
+
         } else {
             AppState.interview.currentQuestion = result.next_question;
             startQuestionSequence(result.next_question);
@@ -536,15 +565,14 @@ async function handleSubmitAnswer(forced = false) {
         showLoading(false);
         console.error(error);
         showToast('답변 제출 실패. 다시 시도해주세요.', 'error');
-        // Restart recording? Or just let them retry? 
-        // For simplicity, let's just let them retry clicking submit? 
-        // But audio is gone. 
-        // Ideally should allow re-record. 
-        // But for this simulation, we just error out.
     }
 }
 
 function finishInterview() {
+    // Already finished check handles the double-call from fallback
+    // But we also need to ensure we don't re-run if already gone.
+    // However, we set inProgress = false here.
+
     AppState.interview.inProgress = false;
     navigateTo('result-page');
 
@@ -554,6 +582,52 @@ function finishInterview() {
         video.srcObject.getTracks().forEach(track => track.stop());
         video.srcObject = null;
     }
+
+    // Fetch Result
+    loadInterviewResult();
+}
+
+async function loadInterviewResult() {
+    const resultContainer = $('#result-desc');
+    resultContainer.innerHTML = '면접 결과를 분석 중입니다...<br>잠시만 기다려주세요.';
+
+    // Poll for result
+    let attempts = 0;
+    const maxAttempts = 10;
+
+    const interval = setInterval(async () => {
+        attempts++;
+        try {
+            const response = await fetch(`/api/interview/result/${AppState.interview.interviewNumber}`);
+            const data = await response.json();
+
+            if (data.success) {
+                clearInterval(interval);
+                renderResult(data.result);
+            } else if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                resultContainer.innerHTML = '결과 분석에 시간이 걸리고 있습니다.<br>나중에 마이페이지에서 확인해주세요.';
+            }
+        } catch (e) {
+            console.error(e);
+        }
+    }, 2000); // Check every 2 seconds
+}
+
+function renderResult(result) {
+    const resultContainer = $('#result-desc');
+    const isPass = result.pass_fail === '합격';
+    const color = isPass ? '#2ecc71' : '#e74c3c';
+
+    resultContainer.innerHTML = `
+        <div style="font-size: 2rem; font-weight: bold; color: ${color}; margin-bottom: 20px;">
+            ${result.pass_fail}
+        </div>
+        <p>
+            ${isPass ? '축하합니다! 면접에 합격하셨습니다.' : '아쉽게도 불합격하셨습니다.'}<br>
+            수고하셨습니다.
+        </p>
+    `;
 }
 
 function addChatLog(sender, text) {
