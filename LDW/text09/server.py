@@ -528,25 +528,32 @@ async def submit_answer(
             shutil.copyfileobj(audio.file, buffer)
             
         # 1. STT (Whisper)
-        with open(audio_path, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_file,
-                language="ko",
-                prompt="이것은 면접 지원자의 답변입니다. 절대로 추측하지 마세요. ai 개인적인 생각을 넣지 마세요. 오직 지원자의 명확한 답변 내용만 텍스트로 변환해 주세요."
-            )
-        applicant_answer = transcript.text.strip()
+        applicant_answer = ""
+        try:
+            # Check file size before sending to Whisper (optional but good)
+            file_size = os.path.getsize(audio_path)
+            if file_size < 100: # Too small to be a valid audio file
+                 applicant_answer = "답변 없음"
+            else:
+                with open(audio_path, "rb") as audio_file:
+                    transcript = client.audio.transcriptions.create(
+                        model="whisper-1", 
+                        file=audio_file,
+                        language="ko",
+                        prompt="이것은 면접 지원자의 답변입니다. 절대로 추측하지 마세요. ai 개인적인 생각을 넣지 마세요. 오직 지원자의 명확한 답변 내용만 텍스트로 변환해 주세요."
+                    )
+                applicant_answer = transcript.text.strip()
+        except Exception as stt_e:
+            logger.error(f"STT Error: {stt_e}")
+            # If the error message mentions 'too short', it's essentially 'No Answer'
+            applicant_answer = "답변 없음"
         
         # Hallucination Filtering Removed as per request
         # hallucination_phrases logic was here
         
         # Check if answer is too short to be a valid answer (e.g. just punctuation)
         if len(applicant_answer) < 2:
-            logger.info(f"Filtered Short Noise: {applicant_answer}")
-            applicant_answer = ""
-        
-        # Handle Empty Answer
-        if not applicant_answer:
+            logger.info(f"Filtered Short Noise or Empty: {applicant_answer}")
             applicant_answer = "답변 없음"
         
         # 2. Find Previous Question (The one with this interview number and NO answer yet)
@@ -607,7 +614,9 @@ async def submit_answer(
              면접자: {applicant_name}
              마무리 질문에 대한 답변: {applicant_answer}
              
-             이 답변을 간단히 평가해주세요. (관리자용)
+             [작업]
+             - 만약 답변이 "답변 없음"이라면, "지원자가 마지막 발언을 하지 않았습니다."라고 평가하고 성실성 부분에서 낮은 평가를 주세요.
+             - 답변이 있다면 그 내용을 바탕으로 간단히 평가해주세요. (관리자용)
              """
              # Simple eval for last answer
              completion = client.chat.completions.create(
@@ -632,7 +641,8 @@ async def submit_answer(
             {applicant_answer}
             
             [작업 1] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
-            - 만약 답변이 "답변 없음"이라면, "답변을 하지 않았습니다."라고 평가하고 점수를 낮게 책정하세요.
+            - 만약 답변이 "답변 없음"이라면, "답변을 하지 않았습니다."라고 평가하고 점수를 매우 낮게(0-10점 사이) 책정하세요.
+            - 답변이 중단되었거나 불완전하더라도 지금까지 말한 음성 답변만으로 최선을 다해 평가하세요.
             
             [작업 2] 다음 질문을 생성해주세요.
             - 단계: {next_phase}
