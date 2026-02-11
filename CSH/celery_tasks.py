@@ -124,8 +124,7 @@ EVALUATION_PROMPT = """당신은 IT 기업의 30년차 수석 개발자 면접�
 
 [합격 추천 기준]
 - "합격": 총점 20점 이상이고 모든 항목 3점 이상
-- "보류": 총점 15~19점이거나 일부 항목 2점
-- "불합격": 총점 14점 이하이거나 2개 이상 항목 2점 이하
+- "불합격": 총점 19점 이하이거나 1개 이상 항목 2점 이하
 
 [출력 형식 - 반드시 JSON으로 응답]
 {{
@@ -137,7 +136,7 @@ EVALUATION_PROMPT = """당신은 IT 기업의 30년차 수석 개발자 면접�
         "communication": 숫자
     }},
     "total_score": 숫자(25점 만점),
-    "recommendation": "합격" 또는 "보류" 또는 "불합격",
+    "recommendation": "합격" 또는 "불합격",
     "recommendation_reason": "추천 사유를 한 줄로 작성",
     "strengths": ["강점1", "강점2"],
     "improvements": ["개선점1", "개선점2"],
@@ -241,7 +240,7 @@ def _default_evaluation(reason: str = "") -> Dict:
             "communication": 3
         },
         "total_score": 15,
-        "recommendation": "보류",
+        "recommendation": "불합격",
         "recommendation_reason": reason or "LLM 서비스 미사용으로 기본 평가 적용",
         "strengths": ["답변을 완료했습니다."],
         "improvements": ["더 구체적인 예시를 들어보세요."],
@@ -549,17 +548,16 @@ def generate_report_task(
             "top_improvements": improvement_counts.most_common(5),
             "emotion_analysis": emotion_stats or {},
             "prosody_analysis": prosody_stats or {},
-            "recommendations": _generate_recommendations(avg_scores, star_analysis),
-            "grade": _calculate_grade(total_avg, star_analysis)
+            "recommendations": _generate_recommendations(avg_scores, star_analysis)
         }
         
-        print(f"[Task {task_id}] 리포트 생성 완료 - 등급: {report['grade']}")
+        print(f"[Task {task_id}] 리포트 생성 완료 - 평균: {total_avg}")
 
         # 📤 이벤트 발행: 리포트 생성 완료
         _publish_event(
             "report.generated",
             session_id=session_id,
-            data={"task_id": task_id, "grade": report.get("grade"), "total_average": total_avg},
+            data={"task_id": task_id, "total_average": total_avg},
         )
         return report
         
@@ -635,23 +633,6 @@ def _generate_recommendations(avg_scores: Dict, star_analysis: Dict) -> List[str
         recommendations.append("전반적으로 좋은 면접이었습니다! 자신감을 가지세요.")
     
     return recommendations
-
-
-def _calculate_grade(total_avg: float, star_analysis: Dict) -> str:
-    """등급 계산"""
-    star_score = _calculate_star_score(star_analysis)
-    combined = (total_avg / 5 * 50) + (star_score / 2)  # 100점 만점으로 환산
-    
-    if combined >= 90:
-        return "S"
-    elif combined >= 80:
-        return "A"
-    elif combined >= 70:
-        return "B"
-    elif combined >= 60:
-        return "C"
-    else:
-        return "D"
 
 
 # ========== TTS 생성 태스크 ==========
