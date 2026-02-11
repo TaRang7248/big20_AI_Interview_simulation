@@ -474,14 +474,14 @@ def start_interview(data: StartInterviewRequest):
         first_question = f"안녕하세요, {applicant_name}님. 면접을 시작하겠습니다. 먼저 간단하게 자기소개를 부탁드립니다."
         
         # Determine Session Name (e.g., 면접-1)
-        c.execute("SELECT COUNT(DISTINCT interview_number) FROM Interview_Progress WHERE applicant_id = %s", (data.id_name,))
+        c.execute("SELECT COUNT(DISTINCT interview_number) FROM Interview_Progress WHERE id_name = %s", (data.id_name,))
         interview_count = c.fetchone()[0]
         session_name = f"면접-{interview_count + 1}"
 
         # Save to DB
         c.execute('''
             INSERT INTO Interview_Progress (
-                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, applicant_id, session_name
+                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name
             ) VALUES (%s, %s, %s, %s, %s, %s, %s)
         ''', (interview_number, applicant_name, data.job_title, resume_text[:1000], first_question, data.id_name, session_name))
         # Note: Saving truncated resume text to avoid huge DB size if text is long.
@@ -562,7 +562,7 @@ async def submit_answer(
         
         # We find the latest row for this interview
         c.execute("""
-            SELECT id, Create_Question, Resume, applicant_id FROM Interview_Progress 
+            SELECT id, Create_Question, Resume, id_name FROM Interview_Progress 
             WHERE Interview_Number = %s 
             ORDER BY id DESC LIMIT 1
         """, (interview_number,))
@@ -577,7 +577,7 @@ async def submit_answer(
         current_row_id = row[0]
         prev_question = row[1]
         resume_context = row[2] if row[2] else ""
-        applicant_id = row[3] # Get applicant_id from progress record
+        id_name = row[3] # Get id_name from progress record
         
         # Get session_name from current row to propagate it
         c.execute("SELECT session_name FROM Interview_Progress WHERE id = %s", (current_row_id,))
@@ -691,15 +691,15 @@ async def submit_answer(
         if next_phase == "END":
              interview_finished = True
              # Trigger Final Analysis (Background Task)
-             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, applicant_id)
+             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, id_name)
         else:
             # 6. Insert New Row (Next Question) ONLY if not finished
             # resume context is copied for simplicity or we can just ignore it for subsequent rows
             c.execute('''
                 INSERT INTO Interview_Progress (
-                    Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume, applicant_id, session_name
+                    Interview_Number, Applicant_Name, Job_Title, Create_Question, Resume, id_name, session_name
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (interview_number, applicant_name, job_title, next_question, resume_context, applicant_id, session_name))
+            ''', (interview_number, applicant_name, job_title, next_question, resume_context, id_name, session_name))
         
         conn.commit()
         conn.close()
@@ -717,7 +717,7 @@ async def submit_answer(
         return {"success": False, "message": f"오류 발생: {str(e)}"}
 
 # --- Logic: Analyze Interview Result ---
-def analyze_interview_result(interview_number, job_title, applicant_name, applicant_id):
+def analyze_interview_result(interview_number, job_title, applicant_name, id_name):
     logger.info(f"Analyzing interview result for {interview_number}...")
     conn = get_db_connection()
     c = conn.cursor()
@@ -812,7 +812,7 @@ def analyze_interview_result(interview_number, job_title, applicant_name, applic
                 non_verbal_score, non_verbal_eval, 
                 pass_fail,
                 announcement_title, announcement_job,
-                applicant_id, session_name
+                id_name, session_name
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             interview_number,
@@ -822,7 +822,7 @@ def analyze_interview_result(interview_number, job_title, applicant_name, applic
             int(result.get("non_verbal_score", 0)), result.get("non_verbal_eval", ""),
             pass_fail,
             announcement_title, announcement_job,
-            applicant_id, session_name
+            id_name, session_name
         ))
         
         conn.commit()
@@ -841,9 +841,9 @@ def analyze_interview_result(interview_number, job_title, applicant_name, applic
                     non_verbal_score, non_verbal_eval, 
                     pass_fail,
                     announcement_title, announcement_job,
-                    applicant_id, session_name
+                    id_name, session_name
                 ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류', %s, '분석 중 오류 발생', %s, %s)
-            """, (interview_number, job_title, applicant_id, session_name))
+            """, (interview_number, job_title, id_name, session_name))
              conn.commit()
         except Exception as db_e:
              logger.error(f"Failed to write error record: {db_e}")
@@ -875,7 +875,7 @@ def get_interview_results(id_name: str):
                    to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time, 
                    pass_fail
             FROM Interview_Result 
-            WHERE applicant_id = %s 
+            WHERE id_name = %s 
             ORDER BY created_at DESC
         """
         c.execute(query, (id_name,))
@@ -891,11 +891,11 @@ def get_admin_applicants():
         c = conn.cursor(cursor_factory=RealDictCursor)
         # Join Interview_Result with users to get applicant names
         query = """
-            SELECT r.interview_number, r.applicant_id, u.name as applicant_name, 
+            SELECT r.interview_number, r.id_name, u.name as applicant_name, 
                    r.announcement_title, r.announcement_job, r.pass_fail, 
                    to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time
             FROM Interview_Result r
-            JOIN users u ON r.applicant_id = u.id_name
+            JOIN users u ON r.id_name = u.id_name
             ORDER BY r.created_at DESC
         """
         c.execute(query)
@@ -928,7 +928,7 @@ def get_applicant_details(interview_number: str):
         # 3. Get Resume Text
         # First check interview_information for original PDF text
         c.execute("""
-            SELECT applicant_id, announcement_job FROM Interview_Result WHERE interview_number = %s
+            SELECT id_name, announcement_job FROM Interview_Result WHERE interview_number = %s
         """, (interview_number,))
         res_info = c.fetchone()
         
@@ -938,7 +938,7 @@ def get_applicant_details(interview_number: str):
                 SELECT resume FROM interview_information 
                 WHERE id_name = %s AND job = %s 
                 ORDER BY created_at DESC LIMIT 1
-            """, (res_info['applicant_id'], res_info['announcement_job']))
+            """, (res_info['id_name'], res_info['announcement_job']))
             info_row = c.fetchone()
             if info_row:
                 resume_path = info_row['resume']
