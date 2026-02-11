@@ -28,6 +28,10 @@ interface LLMEvaluation {
     star: number;
     communication: number;
   };
+  verbal_average?: number;
+  nonverbal_scores?: Record<string, number>;
+  nonverbal_average?: number | null;
+  final_score?: number;
   total_average: number;
   recommendation?: string;
   recommendation_reason?: string;
@@ -653,40 +657,30 @@ function ScoreCard({ label, value, unit, icon }: {
 export default function InterviewReportCharts({ report }: { report: ReportData }) {
   const evalScores = report.llm_evaluation?.average_scores;
   const totalAvg = report.llm_evaluation?.total_average ?? 0;
+  const finalScore = report.llm_evaluation?.final_score ?? totalAvg;
+  const verbalAvg = report.llm_evaluation?.verbal_average ?? totalAvg;
+  const nonverbalScores = report.llm_evaluation?.nonverbal_scores;
+  const nonverbalAvg = report.llm_evaluation?.nonverbal_average;
   const allEvals = report.llm_evaluation?.all_evaluations ?? [];
   const recommendation = report.llm_evaluation?.recommendation;
   const recommendationReason = report.llm_evaluation?.recommendation_reason;
 
-  // 등급 계산
-  const grade =
-    totalAvg >= 4.5 ? "S" :
-    totalAvg >= 3.5 ? "A" :
-    totalAvg >= 2.5 ? "B" :
-    totalAvg >= 1.5 ? "C" : "D";
-
-  const gradeColors: Record<string, string> = {
-    S: "text-yellow-400",
-    A: "text-green-400",
-    B: "text-cyan-400",
-    C: "text-orange-400",
-    D: "text-red-400",
-  };
-
   // 합불 추천 색상
   const recColors: Record<string, string> = {
     "합격": "from-green-500 to-emerald-600",
-    "보류": "from-yellow-500 to-amber-600",
     "불합격": "from-red-500 to-rose-600",
-  };
-  const recTextColors: Record<string, string> = {
-    "합격": "text-green-400",
-    "보류": "text-yellow-400",
-    "불합격": "text-red-400",
   };
   const recIcons: Record<string, string> = {
     "합격": "✅",
-    "보류": "⏸️",
     "불합격": "❌",
+  };
+
+  // 비언어 점수 라벨
+  const nonverbalLabels: Record<string, string> = {
+    speech: "발화 분석",
+    gaze: "시선 추적",
+    emotion: "감정 안정성",
+    prosody: "음성 감정",
   };
 
   return (
@@ -701,8 +695,8 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
 
       {/* ── 종합 스코어 카드 ── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <ScoreCard icon="🏆" label="종합 등급" value={grade} />
-        <ScoreCard icon="📈" label="평균 점수" value={totalAvg.toFixed(1)} unit="/5" />
+        <ScoreCard icon="📈" label="통합 점수" value={finalScore.toFixed(1)} unit="/5" />
+        <ScoreCard icon="🗣️" label="언어 평가" value={verbalAvg.toFixed(1)} unit="/5" />
         <ScoreCard icon="💬" label="총 답변 수" value={report.metrics.total} unit="개" />
         <ScoreCard
           icon="📝"
@@ -716,9 +710,9 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
       {recommendation && (
         <div className="glass-card text-center py-6">
           <div className="flex items-center justify-center gap-4 mb-3">
-            <span className="text-5xl">{recIcons[recommendation] || "⏸️"}</span>
+            <span className="text-5xl">{recIcons[recommendation] || "❌"}</span>
             <div>
-              <span className={`text-4xl font-black bg-gradient-to-r ${recColors[recommendation] || recColors["보류"]} bg-clip-text text-transparent`}>
+              <span className={`text-4xl font-black bg-gradient-to-r ${recColors[recommendation] || recColors["불합격"]} bg-clip-text text-transparent`}>
                 {recommendation}
               </span>
             </div>
@@ -731,15 +725,25 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
         </div>
       )}
 
-      {/* ── 등급 배지 ── */}
-      {totalAvg > 0 && (
-        <div className="glass-card text-center">
-          <div className={`text-7xl font-black ${gradeColors[grade] || "text-white"} drop-shadow-lg`}>
-            {grade}
+      {/* ── 비언어 평가 점수 카드 ── */}
+      {nonverbalScores && Object.keys(nonverbalScores).length > 0 && (
+        <div className="glass-card">
+          <h3 className="text-sm font-bold gradient-text mb-4">🎭 비언어 평가 (통합 점수 40% 반영)</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {Object.entries(nonverbalScores).map(([key, val]) => (
+              <div key={key} className="text-center p-3 rounded-xl border border-[rgba(255,255,255,0.06)]">
+                <div className={`text-2xl font-bold ${val >= 4 ? "text-green-400" : val >= 3 ? "text-cyan-400" : val >= 2 ? "text-yellow-400" : "text-red-400"}`}>
+                  {val.toFixed(1)}
+                </div>
+                <div className="text-xs text-[var(--text-secondary)] mt-1">{nonverbalLabels[key] || key}</div>
+              </div>
+            ))}
           </div>
-          <p className="text-sm text-[var(--text-secondary)] mt-2">
-            종합 평균 {totalAvg.toFixed(1)}점 / 5점 만점
-          </p>
+          {nonverbalAvg != null && (
+            <p className="text-center text-xs text-[var(--text-secondary)] mt-3">
+              비언어 평균: {nonverbalAvg.toFixed(1)}/5.0 | 언어 {verbalAvg.toFixed(1)} × 60% + 비언어 {nonverbalAvg.toFixed(1)} × 40% = 통합 {finalScore.toFixed(1)}
+            </p>
+          )}
         </div>
       )}
 

@@ -1118,8 +1118,7 @@ class AIInterviewer:
 
 [합격 추천 기준]
 - "합격": 총점 20점 이상이고 모든 항목 3점 이상
-- "보류": 총점 15~19점이거나 일부 항목 2점
-- "불합격": 총점 14점 이하이거나 2개 이상 항목 2점 이하
+- "불합격": 총점 19점 이하이거나 1개 이상 항목 2점 이하
 
 [출력 형식 - 반드시 JSON으로 응답]
 {{
@@ -1131,7 +1130,7 @@ class AIInterviewer:
         "communication": 숫자
     }},
     "total_score": 숫자(25점 만점),
-    "recommendation": "합격" 또는 "보류" 또는 "불합격",
+    "recommendation": "합격" 또는 "불합격",
     "recommendation_reason": "추천 사유를 한 줄로 작성",
     "strengths": ["강점1", "강점2"],
     "improvements": ["개선점1", "개선점2"],
@@ -1509,7 +1508,7 @@ class AIInterviewer:
                     "communication": 3
                 },
                 "total_score": 15,
-                "recommendation": "보류",
+                "recommendation": "불합격",
                 "recommendation_reason": "LLM 서비스 미사용으로 기본 평가 적용",
                 "strengths": ["답변을 완료했습니다."],
                 "improvements": ["더 구체적인 예시를 들어보세요."],
@@ -1566,7 +1565,7 @@ class AIInterviewer:
                     "communication": 3
                 },
                 "total_score": 15,
-                "recommendation": "보류",
+                "recommendation": "불합격",
                 "recommendation_reason": "평가 오류로 기본 평가 적용",
                 "strengths": ["답변을 완료했습니다."],
                 "improvements": ["더 구체적인 예시를 들어보세요."],
@@ -3494,11 +3493,82 @@ async def chat_with_intervention(request: ChatRequestWithIntervention, current_u
 
 EVAL_SCORE_KEYS = ["problem_solving", "logic", "technical", "star", "communication"]
 
-def _compute_evaluation_summary(evaluations: List[Dict]) -> Dict:
-    """평가 목록에서 평균 점수, 종합 추천 등을 계산하는 공통 헬퍼"""
+# 비언어 등급 → 점수 변환 (5점 만점)
+_GRADE_TO_SCORE = {"S": 5.0, "A": 4.0, "B": 3.0, "C": 2.0, "D": 1.0}
+
+
+def _compute_nonverbal_scores(report: Dict) -> Dict:
+    """
+    비언어 평가 데이터(발화·시선·감정·Prosody)를 점수화하여 반환.
+    각 항목 5점 만점으로 통일. 데이터가 없으면 해당 키를 포함하지 않는다.
+    """
+    nonverbal: Dict[str, float] = {}
+
+    # ── 1. 발화 분석 (발화속도 등급 + 발음 등급 평균) ──
+    speech = report.get("speech_analysis")
+    if speech:
+        scores = []
+        sr_grade = speech.get("speech_rate_grade", "")
+        if sr_grade in _GRADE_TO_SCORE:
+            scores.append(_GRADE_TO_SCORE[sr_grade])
+        pn_grade = speech.get("pronunciation_grade", "")
+        if pn_grade in _GRADE_TO_SCORE:
+            scores.append(_GRADE_TO_SCORE[pn_grade])
+        if scores:
+            nonverbal["speech"] = round(sum(scores) / len(scores), 1)
+
+    # ── 2. 시선 추적 (아이컨택 등급) ──
+    gaze = report.get("gaze_analysis")
+    if gaze:
+        ec_grade = gaze.get("eye_contact_grade", "")
+        if ec_grade in _GRADE_TO_SCORE:
+            nonverbal["gaze"] = _GRADE_TO_SCORE[ec_grade]
+
+    # ── 3. 감정 분석 (neutral 비율 → 안정성 점수) ──
+    emotion = report.get("emotion_stats")
+    if emotion:
+        probs = emotion.get("probabilities") or emotion.get("emotion") or {}
+        if probs:
+            neutral_ratio = probs.get("neutral", 0)
+            happy_ratio = probs.get("happy", 0)
+            positive = neutral_ratio + happy_ratio
+            # positive 비율이 높을수록 안정적
+            if positive >= 0.7:
+                nonverbal["emotion"] = 5.0
+            elif positive >= 0.5:
+                nonverbal["emotion"] = 4.0
+            elif positive >= 0.35:
+                nonverbal["emotion"] = 3.0
+            elif positive >= 0.2:
+                nonverbal["emotion"] = 2.0
+            else:
+                nonverbal["emotion"] = 1.0
+
+    # ── 4. Prosody 음성 감정 (긍정 지표-부정 지표 종합) ──
+    prosody = report.get("prosody_analysis")
+    if prosody:
+        indicators = prosody.get("session_avg_indicators") or prosody.get("indicator_averages") or {}
+        if indicators:
+            positive_keys = ["confidence", "focus", "positivity", "calmness"]
+            negative_keys = ["anxiety", "confusion", "negativity", "fatigue"]
+            pos_avg = sum(indicators.get(k, 0) for k in positive_keys) / len(positive_keys)
+            neg_avg = sum(indicators.get(k, 0) for k in negative_keys) / len(negative_keys)
+            # 점수 = 긍정 비중 - 부정 비중, 0~1 범위로 정규화 후 5점 변환
+            prosody_ratio = max(0, min(1, (pos_avg - neg_avg + 0.3) / 0.6))
+            nonverbal["prosody"] = round(prosody_ratio * 4 + 1, 1)  # 1~5 범위
+
+    return nonverbal
+
+
+def _compute_evaluation_summary(evaluations: List[Dict], report: Dict = None) -> Dict:
+    """
+    평가 목록에서 평균 점수, 비언어 점수, 통합 점수, 합불 추천을 계산하는 공통 헬퍼.
+    report가 전달되면 비언어 데이터(speech, gaze, emotion, prosody)를 반영한다.
+    """
     if not evaluations:
         return {}
 
+    # ── LLM 답변 평가 점수 (5축) ──
     avg_scores = {k: 0.0 for k in EVAL_SCORE_KEYS}
     for ev in evaluations:
         for key in avg_scores:
@@ -3506,38 +3576,55 @@ def _compute_evaluation_summary(evaluations: List[Dict]) -> Dict:
     for key in avg_scores:
         avg_scores[key] = round(avg_scores[key] / len(evaluations), 1)
 
-    total_average = round(sum(avg_scores.values()) / len(EVAL_SCORE_KEYS), 1)
+    verbal_avg = round(sum(avg_scores.values()) / len(EVAL_SCORE_KEYS), 1)
 
-    # 종합 합격 추천 결정 (개별 평가의 추천을 집계)
-    rec_counts = {"합격": 0, "보류": 0, "불합격": 0}
-    for ev in evaluations:
-        r = ev.get("recommendation", "보류")
-        if r in rec_counts:
-            rec_counts[r] += 1
-        else:
-            rec_counts["보류"] += 1
+    # ── 비언어 평가 점수 ──
+    nonverbal_scores: Dict[str, float] = {}
+    nonverbal_avg = 0.0
+    if report:
+        nonverbal_scores = _compute_nonverbal_scores(report)
+    if nonverbal_scores:
+        nonverbal_avg = round(sum(nonverbal_scores.values()) / len(nonverbal_scores), 1)
 
-    # 과반수 기반 최종 추천
-    n = len(evaluations)
-    if rec_counts["불합격"] > n / 2:
-        final_recommendation = "불합격"
-    elif rec_counts["합격"] > n / 2:
+    # ── 통합 최종 점수 (언어 60% + 비언어 40%) ──
+    if nonverbal_scores:
+        final_score = round(verbal_avg * 0.6 + nonverbal_avg * 0.4, 1)
+    else:
+        # 비언어 데이터 없으면 언어 평가만 사용
+        final_score = verbal_avg
+
+    # ── 합격 추천 결정 (통합 점수 기반) ──
+    low_count = sum(1 for v in avg_scores.values() if v < 2.5)
+    total_25 = sum(avg_scores.values())  # 25점 만점 합계
+
+    if final_score >= 4.0 and total_25 >= 20 and low_count == 0:
         final_recommendation = "합격"
     else:
-        final_recommendation = "보류"
+        final_recommendation = "불합격"
 
-    # 추천 사유: 마지막 평가의 사유 사용 + 점수 요약
+    # 추천 사유 생성
+    parts = [f"통합 {final_score}/5.0 (언어 {verbal_avg}"]
+    if nonverbal_scores:
+        parts[0] += f" + 비언어 {nonverbal_avg}"
+    parts[0] += ")"
     last_reason = evaluations[-1].get("recommendation_reason", "")
-    recommendation_reason = f"평균 {total_average}/5.0 | {last_reason}"
+    if last_reason:
+        parts.append(last_reason)
+    recommendation_reason = " | ".join(parts)
 
-    return {
+    result = {
         "answer_count": len(evaluations),
         "average_scores": avg_scores,
-        "total_average": total_average,
+        "verbal_average": verbal_avg,
+        "nonverbal_scores": nonverbal_scores,
+        "nonverbal_average": nonverbal_avg if nonverbal_scores else None,
+        "final_score": final_score,
+        "total_average": final_score,  # 하위 호환
         "recommendation": final_recommendation,
         "recommendation_reason": recommendation_reason,
         "all_evaluations": evaluations
     }
+    return result
 
 
 # ========== Report API ==========
@@ -3558,12 +3645,7 @@ async def get_report(session_id: str, current_user: Dict = Depends(get_current_u
     
     report = generator.generate_report(session_id, emotion_stats)
     
-    # 세션의 평가 결과 포함
-    evaluations = session.get("evaluations", [])
-    if evaluations:
-        report["llm_evaluation"] = _compute_evaluation_summary(evaluations)
-    
-    # REQ-F-006: 발화 분석 데이터 추가
+    # REQ-F-006: 비언어 평가 데이터 먼저 수집 (통합 점수 계산에 필요)
     if SPEECH_ANALYSIS_AVAILABLE and speech_service:
         try:
             speech_stats = speech_service.get_session_stats(session_id)
@@ -3572,7 +3654,6 @@ async def get_report(session_id: str, current_user: Dict = Depends(get_current_u
         except Exception as e:
             print(f"[Report] 발화 분석 데이터 조회 오류: {e}")
     
-    # REQ-F-006: 시선 추적 데이터 추가
     if GAZE_TRACKING_AVAILABLE and gaze_service:
         try:
             gaze_stats = gaze_service.get_session_stats(session_id)
@@ -3581,7 +3662,6 @@ async def get_report(session_id: str, current_user: Dict = Depends(get_current_u
         except Exception as e:
             print(f"[Report] 시선 추적 데이터 조회 오류: {e}")
     
-    # Hume Prosody 음성 감정 분석 데이터 추가
     if PROSODY_AVAILABLE and prosody_service:
         try:
             prosody_stats = prosody_service.get_session_stats_dict(session_id)
@@ -3589,6 +3669,11 @@ async def get_report(session_id: str, current_user: Dict = Depends(get_current_u
                 report["prosody_analysis"] = prosody_stats
         except Exception as e:
             print(f"[Report] Prosody 분석 데이터 조회 오류: {e}")
+    
+    # LLM 평가 + 비언어 평가 통합 점수 계산
+    evaluations = session.get("evaluations", [])
+    if evaluations:
+        report["llm_evaluation"] = _compute_evaluation_summary(evaluations, report)
     
     return report
 
@@ -3613,12 +3698,7 @@ async def get_report_pdf(session_id: str, current_user: Dict = Depends(get_curre
     
     report = generator.generate_report(session_id, emotion_stats)
     
-    # 평가 결과 포함
-    evaluations = session.get("evaluations", [])
-    if evaluations:
-        report["llm_evaluation"] = _compute_evaluation_summary(evaluations)
-    
-    # 발화 분석 데이터 추가
+    # 비언어 평가 데이터 먼저 수집
     if SPEECH_ANALYSIS_AVAILABLE and speech_service:
         try:
             speech_stats = speech_service.get_session_stats(session_id)
@@ -3627,7 +3707,6 @@ async def get_report_pdf(session_id: str, current_user: Dict = Depends(get_curre
         except Exception:
             pass
     
-    # 시선 추적 데이터 추가
     if GAZE_TRACKING_AVAILABLE and gaze_service:
         try:
             gaze_stats = gaze_service.get_session_stats(session_id)
@@ -3635,6 +3714,11 @@ async def get_report_pdf(session_id: str, current_user: Dict = Depends(get_curre
                 report["gaze_analysis"] = gaze_stats.to_dict()
         except Exception:
             pass
+    
+    # LLM 평가 + 비언어 통합 점수 계산
+    evaluations = session.get("evaluations", [])
+    if evaluations:
+        report["llm_evaluation"] = _compute_evaluation_summary(evaluations, report)
     
     try:
         pdf_bytes = generate_pdf_report(report)
@@ -3663,7 +3747,7 @@ class EvaluateResponse(BaseModel):
     session_id: str
     scores: Dict[str, int]
     total_score: int
-    recommendation: str = "보류"
+    recommendation: str = "불합격"
     recommendation_reason: str = ""
     strengths: List[str]
     improvements: List[str]
@@ -3701,7 +3785,7 @@ async def evaluate_answer(request: EvaluateRequest, current_user: Dict = Depends
         session_id=request.session_id,
         scores=evaluation.get("scores", {}),
         total_score=evaluation.get("total_score", 0),
-        recommendation=evaluation.get("recommendation", "보류"),
+        recommendation=evaluation.get("recommendation", "불합격"),
         recommendation_reason=evaluation.get("recommendation_reason", ""),
         strengths=evaluation.get("strengths", []),
         improvements=evaluation.get("improvements", []),

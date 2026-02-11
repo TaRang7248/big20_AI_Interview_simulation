@@ -247,16 +247,19 @@ def generate_pdf_report(report_data: Dict[str, Any]) -> bytes:
         styles["subtitle"]
     ))
     
-    # 종합 등급이 있으면 크게 표시
-    grade = report_data.get("grade", "")
-    if grade:
-        grade_style_key = f"grade_{grade.lower()}" if f"grade_{grade.lower()}" in styles else "body"
+    # 합격 추천 + 통합 점수 표시
+    llm_eval_cover = report_data.get("llm_evaluation", {})
+    rec = llm_eval_cover.get("recommendation", "")
+    if rec:
+        rec_color_map = {"합격": "#4CAF50", "불합격": "#F44336"}
+        rec_color = rec_color_map.get(rec, "#F44336")
         elements.append(Spacer(1, 1 * cm))
         elements.append(Paragraph(
-            f"<font size='36' color='{_grade_color(grade)}'><b>{grade}</b></font>",
-            ParagraphStyle("CenterGrade", parent=styles["body"], alignment=1, fontSize=36)
+            f"<font size='36' color='{rec_color}'><b>{rec}</b></font>",
+            ParagraphStyle("CenterRec", parent=styles["body"], alignment=1, fontSize=36)
         ))
-        elements.append(Paragraph("종합 등급", styles["subtitle"]))
+        final_sc = llm_eval_cover.get("final_score", llm_eval_cover.get("total_average", 0))
+        elements.append(Paragraph(f"통합 점수: {final_sc:.1f} / 5.0", styles["subtitle"]))
     
     elements.append(Spacer(1, 1 * cm))
     elements.append(HRFlowable(width="100%", color=colors.HexColor("#1565c0"), thickness=2))
@@ -311,8 +314,8 @@ def generate_pdf_report(report_data: Dict[str, Any]) -> bytes:
         recommendation = llm_eval.get("recommendation", "")
         recommendation_reason = llm_eval.get("recommendation_reason", "")
         if recommendation:
-            rec_color_map = {"합격": "#4CAF50", "보류": "#FF9800", "불합격": "#F44336"}
-            rec_color = rec_color_map.get(recommendation, "#FF9800")
+            rec_color_map = {"합격": "#4CAF50", "불합격": "#F44336"}
+            rec_color = rec_color_map.get(recommendation, "#F44336")
             elements.append(Paragraph(
                 f'<font color="{rec_color}" size="14"><b>▶ 합격 추천: {recommendation}</b></font>',
                 styles["body"]
@@ -331,10 +334,31 @@ def generate_pdf_report(report_data: Dict[str, Any]) -> bytes:
             elements.append(_draw_bar(label, val, 5))
         
         elements.append(Spacer(1, 2 * mm))
+        
+        verbal_avg = llm_eval.get("verbal_average", total_avg)
+        final_score = llm_eval.get("final_score", total_avg)
         elements.append(Paragraph(
-            f"<b>평균 점수: {total_avg:.1f} / 5.0점</b>  |  답변 수: {llm_eval.get('answer_count', 0)}개",
+            f"<b>언어 평가: {verbal_avg:.1f} / 5.0점</b>  |  답변 수: {llm_eval.get('answer_count', 0)}개",
             styles["body"]
         ))
+        
+        # 비언어 평가 점수 표시
+        nv_scores = llm_eval.get("nonverbal_scores", {})
+        nv_avg = llm_eval.get("nonverbal_average")
+        if nv_scores:
+            nv_labels = {
+                "speech": "발화 분석", "gaze": "시선 추적",
+                "emotion": "감정 안정성", "prosody": "음성 감정"
+            }
+            elements.append(Spacer(1, 3 * mm))
+            elements.append(Paragraph("<b>비언어 평가 (통합 점수 40% 반영)</b>", styles["body"]))
+            for nk, nv in nv_scores.items():
+                elements.append(_draw_bar(nv_labels.get(nk, nk), nv, 5))
+            if nv_avg is not None:
+                elements.append(Paragraph(
+                    f"<b>비언어 평균: {nv_avg:.1f} / 5.0</b>  |  통합 점수: {final_score:.1f} / 5.0",
+                    styles["body"]
+                ))
     
     # ========== 4. 발화 분석 ==========
     speech = report_data.get("speech_analysis")

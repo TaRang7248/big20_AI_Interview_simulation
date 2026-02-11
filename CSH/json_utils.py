@@ -253,7 +253,7 @@ def parse_evaluation_json(text: str, context: str = "evaluation") -> Dict:
             "communication": 3
         },
         "total_score": 15,
-        "recommendation": "보류",
+        "recommendation": "불합격",
         "recommendation_reason": "JSON 파싱 실패로 기본 평가 적용",
         "strengths": ["답변을 완료했습니다."],
         "improvements": ["더 구체적인 예시를 들어보세요."],
