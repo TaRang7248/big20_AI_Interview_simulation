@@ -67,6 +67,9 @@ from security import (
     get_ssl_context
 )
 
+# 지연 시간 측정 및 SLA 모니터링 (REQ-N-001: 초저지연 1.5초 이내)
+from latency_monitor import latency_monitor
+
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
@@ -208,6 +211,67 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept"],
 )
+
+# ========== 지연 시간 측정 미들웨어 (REQ-N-001) ==========
+@app.middleware("http")
+async def latency_measurement_middleware(request: Request, call_next):
+    """모든 /api/** 요청의 응답 시간을 자동으로 측정하여 SLA(1.5초) 위반을 감지합니다.
+    
+    SRS REQ-N-001: STT + LLM 추론을 포함한 전체 응답 지연이 1.5초를 초과하면 안 됨.
+    - 각 요청에 고유 request_id를 부여하여 단계별(Phase) 측정과 연결
+    - 정적 파일, 프록시 등 비-API 요청은 측정 대상에서 제외
+    """
+    path = request.url.path
+    
+    # API 요청만 측정 대상 (/api/** 경로)
+    if not path.startswith("/api/"):
+        return await call_next(request)
+    
+    # 모니터링 API 자체는 측정에서 제외 (재귀 방지)
+    if path.startswith("/api/monitoring/"):
+        return await call_next(request)
+    
+    # 고유 요청 ID 부여 (Phase 측정과 연결에 사용)
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    start_time = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - start_time) * 1000
+    
+    # 지연 시간 기록 (SLA 위반 시 자동 경고 로깅)
+    latency_monitor.record(
+        endpoint=path,
+        method=request.method,
+        latency_ms=elapsed_ms,
+        status_code=response.status_code,
+        request_id=request_id,
+    )
+    
+    # 응답 헤더에 서버 처리 시간 추가 (클라이언트 디버깅용)
+    response.headers["X-Response-Time-Ms"] = f"{elapsed_ms:.2f}"
+    
+    return response
+
+# ========== 모니터링 API (REQ-N-001 SLA 검증) ==========
+@app.get("/api/monitoring/latency")
+async def get_latency_dashboard():
+    """
+    지연 시간 모니터링 대시보드 API
+    
+    SRS REQ-N-001 준수 여부를 실시간으로 검증합니다.
+    - 전체/엔드포인트별 SLA 준수율
+    - 평균·최소·최대 응답 시간
+    - 최근 SLA 위반 내역 및 단계별 소요 시간
+    """
+    return latency_monitor.get_dashboard()
+
+
+@app.delete("/api/monitoring/latency/reset")
+async def reset_latency_stats():
+    """모니터링 통계를 초기화합니다."""
+    latency_monitor.reset()
+    return {"message": "지연 시간 통계가 초기화되었습니다."}
 
 # 정적 파일 마운트
 static_dir = os.path.join(current_dir, "static")
@@ -3333,11 +3397,14 @@ class ChatRequestWithIntervention(BaseModel):
     intervention_type: Optional[str] = None  # 개입 유형
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_user)):
+async def chat(request: ChatRequest, req: Request, current_user: Dict = Depends(get_current_user)):
     """채팅 메시지 전송 및 AI 응답 받기"""
     session = state.get_session(request.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    # ── 지연 시간 측정용 request_id (미들웨어에서 부여) ──
+    rid = getattr(req.state, "request_id", None)
     
     # 사용자 턴 종료 처리 (개입 시스템)
     turn_stats = intervention_manager.end_user_turn(request.session_id)
@@ -3356,12 +3423,16 @@ async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_us
         except Exception as e:
             print(f"[GazeTracking] 턴 종료 오류: {e}")
     
-    # AI 응답 생성
+    # AI 응답 생성 — LLM 추론 단계 측정 (REQ-N-001)
+    if rid:
+        latency_monitor.start_phase(rid, "llm_inference")
     response = await interviewer.generate_response(
         request.session_id,
         request.message,
         request.use_rag
     )
+    if rid:
+        latency_monitor.end_phase(rid, "llm_inference")
     
     # 다음 질문을 위한 사용자 턴 시작 (개입 시스템)
     if not response.startswith("면접이 종료"):
@@ -3384,14 +3455,20 @@ async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_us
             except Exception as e:
                 print(f"[GazeTracking] 턴 시작 오류: {e}")
     
-    # TTS 생성 (선택적)
+    # TTS 생성 (선택적) — TTS 합성 단계 측정 (REQ-N-001)
     audio_url = None
     if TTS_AVAILABLE and interviewer.tts_service:
         try:
+            if rid:
+                latency_monitor.start_phase(rid, "tts_synthesis")
             audio_file = await interviewer.generate_speech(response)
+            if rid:
+                latency_monitor.end_phase(rid, "tts_synthesis")
             if audio_file:
                 audio_url = f"/audio/{os.path.basename(audio_file)}"
         except Exception as e:
+            if rid:
+                latency_monitor.end_phase(rid, "tts_synthesis")
             print(f"TTS 생성 오류: {e}")
 
     # 📤 이벤트 발행: 질문 생성 + 답변 제출
@@ -3417,11 +3494,14 @@ async def chat(request: ChatRequest, current_user: Dict = Depends(get_current_us
 
 
 @app.post("/api/chat/with-intervention")
-async def chat_with_intervention(request: ChatRequestWithIntervention, current_user: Dict = Depends(get_current_user)):
+async def chat_with_intervention(request: ChatRequestWithIntervention, req: Request, current_user: Dict = Depends(get_current_user)):
     """개입 정보를 포함한 채팅 메시지 전송"""
     session = state.get_session(request.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+    
+    # ── 지연 시간 측정용 request_id ──
+    rid = getattr(req.state, "request_id", None)
     
     # 사용자 턴 종료 처리
     turn_stats = intervention_manager.end_user_turn(request.session_id)
@@ -3442,12 +3522,16 @@ async def chat_with_intervention(request: ChatRequestWithIntervention, current_u
     if request.was_interrupted:
         print(f"⚡ [Chat] 세션 {request.session_id[:8]}... 개입으로 인한 답변 종료 ({request.intervention_type})")
     
-    # AI 응답 생성
+    # AI 응답 생성 — LLM 추론 단계 측정 (REQ-N-001)
+    if rid:
+        latency_monitor.start_phase(rid, "llm_inference")
     response = await interviewer.generate_response(
         request.session_id,
         request.message,
         request.use_rag
     )
+    if rid:
+        latency_monitor.end_phase(rid, "llm_inference")
     
     # 다음 질문을 위한 사용자 턴 시작
     question_keywords = []
@@ -3469,14 +3553,20 @@ async def chat_with_intervention(request: ChatRequestWithIntervention, current_u
             except Exception:
                 pass
     
-    # TTS 생성
+    # TTS 생성 — TTS 합성 단계 측정 (REQ-N-001)
     audio_url = None
     if TTS_AVAILABLE and interviewer.tts_service:
         try:
+            if rid:
+                latency_monitor.start_phase(rid, "tts_synthesis")
             audio_file = await interviewer.generate_speech(response)
+            if rid:
+                latency_monitor.end_phase(rid, "tts_synthesis")
             if audio_file:
                 audio_url = f"/audio/{os.path.basename(audio_file)}"
         except Exception as e:
+            if rid:
+                latency_monitor.end_phase(rid, "tts_synthesis")
             print(f"TTS 생성 오류: {e}")
     
     return {
