@@ -24,6 +24,8 @@ const AppState = {
         audioChunks: [],
         devicesReady: false,
         recognition: null, // Web Speech API
+        currentQuestionIndex: 0, // Added for progress tracking
+        totalQuestions: 12
     }
 };
 
@@ -628,8 +630,10 @@ async function handleStartInterview() {
         AppState.interview.inProgress = true;
         AppState.interview.interviewNumber = startResult.interview_number;
         AppState.interview.currentQuestion = startResult.question;
+        AppState.interview.currentQuestionIndex = 1;
 
         // Start Interaction
+        updateProgressUI();
         startQuestionSequence(startResult.question);
 
     } catch (error) {
@@ -850,6 +854,8 @@ async function handleSubmitAnswer(forced = false) {
 
         } else {
             AppState.interview.currentQuestion = result.next_question;
+            AppState.interview.currentQuestionIndex++;
+            updateProgressUI();
             startQuestionSequence(result.next_question);
         }
 
@@ -920,6 +926,24 @@ function renderResult(result) {
             수고하셨습니다.
         </p>
     `;
+}
+
+function updateProgressUI() {
+    const total = AppState.interview.totalQuestions;
+    const current = AppState.interview.currentQuestionIndex;
+    const gauge = $('#progress-gauge');
+    const text = $('#progress-text');
+
+    if (!gauge || !text) return;
+
+    text.textContent = `${current}/${total}`;
+    gauge.innerHTML = '';
+
+    for (let i = 1; i <= total; i++) {
+        const li = document.createElement('li');
+        if (i <= current) li.classList.add('active');
+        gauge.appendChild(li);
+    }
 }
 
 function addChatLog(sender, text) {
