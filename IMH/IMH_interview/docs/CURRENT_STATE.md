@@ -45,6 +45,16 @@
     `has_face=False`, `presence_score=0.0` 반환 정책 검증 완료
   - MediaPipe Provider 초기화 및 API Router Import 정상 동작 확인
 
+- TASK-011 기준:
+  - 검증 스크립트: `scripts/verify_task_011.py`
+  - 실행 환경: Python 3.10.11 + `interview_env`
+  - 검증 항목:
+    - 루브릭 가이드 기반 4대 영역(직무 / 문제해결 / 의사소통 / 태도) 점수 산출
+    - 직군(DEV / NON_TECH)별 가중치 적용 로직 검증
+    - `tag_code` 식별자 규칙 준수 확인
+    - `evidence_data` JSON 스키마 필드 존재 및 구조 검증
+  - 결과: 정상 동작 확인
+
 ## 1. 프로젝트 목적 (확정)
 
 - 목적: **AI 모의면접 시스템**
@@ -57,14 +67,18 @@
 
 ## 2. 현재 개발 단계
 
-- 상태: **Phase 2 진행 중 (API 최소 골격 / Playground 구현 단계)**
-- 실제 비즈니스 로직 구현: ❌ 아직 없음
-- DB / 벡터 저장 / RAG 연동: ❌ 아직 없음
-- Playground API 구현: ⭕ 주요 항목 완료 (TASK-005, TASK-006, TASK-007)
-
-> ❗ 현재 단계는 “비즈니스 기능 구현”이 아니라  
-> API 계약, Provider 경계, 안정성 제약을 검증하는 Phase이다.  
-> 실제 서비스 로직은 이후 Phase에서 진행한다.
+- 상태: **Phase 3 진입 (Evaluation Layer 구현 완료)**
+- 완료 항목:
+  - Analysis 결과를 입력으로 받아
+    정량 점수 및 평가 근거(Evidence)를 산출하는
+    Rule-based Evaluation Engine 구현 및 검증 완료
+- 미포함 항목:
+  - DB 저장 / 벡터 저장
+  - 실제 LLM / RAG 연동
+  - Reporting / UI 출력
+- 현재 Phase의 목적:
+  - 분석 → 평가(Evaluation) 경계 확립
+  - 평가 계약(`tag_code`, `evidence_data`) 고정
 ---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -160,6 +174,11 @@ IMH/IMH_Interview/
   - TASK-009: Voice Provider (Parselmouth 기반 실제 구현) 추가
   - TASK-010: Visual Provider (MediaPipe 기반 실제 구현) 추가
 
+- `packages/imh_eval/`: ✅ DONE
+  - TASK-011: 정량 평가 엔진 (RubricEvaluator) 구현 완료
+  - 영역별 점수 산출 로직 및 가중치 적용 검증됨
+
+
 
 
 
@@ -227,15 +246,20 @@ IMH/IMH_Interview/
 ## 10. 현재 최우선 목표
 
 ### ACTIVE
-- TASK-011 정량 평가 엔진 (루브릭 기반) 착수
-  - Phase 2 분석 모듈(Emotion / Voice / Visual) 결과를
-    평가 근거(Evidence)로 구조화하는 단계
+- TASK-012 평가 근거 데이터 구조 (Evidence) 착수
+  - (TASK-011에서 정의된 EvidenceData를 기반으로 리포팅용 구조 확정 필요)
 
 ---
 
 ## BACKLOG
 
 ### 최근 완료
+
+- TASK-011 정량 평가 엔진 (루브릭 기반) ✅ DONE
+  - `packages/imh_eval` 구현 완료
+  - 직무/문제해결/의사소통/태도 4대 영역 정량 평가 로직 검증
+  - `verify_task_011.py` 테스트 케이스 3종 Pass
+  - JSON Schema 및 가중치 적용 로직 확정
 
 - TASK-010 Visual 분석 (MediaPipe) ✅ DONE
   - `POST /api/v1/playground/visual` 구현 완료

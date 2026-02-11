@@ -113,14 +113,17 @@
 - **Verification**: `python scripts/verify_task_010.py` Pass
 
 ---
-## ACTIVE
 
 ### TASK-011 정량 평가 엔진 (루브릭 기반)
-- 분석 결과를 평가 입력(Evidence)으로 변환
-- 정량 평가 루브릭(JSON 스키마) 기반 점수 산출
+- **Goal**: Mock Provider / Analysis Result 기반 **정량 평가 로직(Eval Engine)** 검증
+- **Scope**:
+  - `packages/imh_eval` Rule-based 평가 로직
+  - 직무/문제해결/의사소통/태도 영역별 점수 산출
+  - `evidence_data` JSON 스키마 준수 및 직군별 가중치 적용
+- **Verification**: `python scripts/verify_task_011.py` Pass
 
 ---
-## BACKLOG
+## ACTIVE
 
 ### TASK-012 평가 근거 데이터 구조 (Evidence)
 - 평가 점수 산출 근거 데이터 구조 정의
