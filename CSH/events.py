@@ -39,6 +39,10 @@ class EventType(str, Enum):
     EMOTION_ANALYZED = "emotion.analyzed"
     EMOTION_ALERT = "emotion.alert"
 
+    # ── 음성 감정 분석 (Hume Prosody) ──
+    PROSODY_ANALYZED = "prosody.analyzed"
+    PROSODY_ALERT = "prosody.alert"
+
     # ── STT / TTS ──
     STT_TRANSCRIBED = "stt.transcribed"
     STT_PARTIAL = "stt.partial"

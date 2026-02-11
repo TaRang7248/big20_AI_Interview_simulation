@@ -493,6 +493,23 @@ except ImportError as e:
     print(f"⚠️ PDF 리포트 서비스 비활성화: {e}")
 
 
+# ========== Hume AI Prosody 음성 감정 분석 ==========
+try:
+    from hume_prosody_service import (
+        HumeProsodyService, get_prosody_service, is_prosody_available,
+        extract_interview_indicators, determine_emotion_adaptive_mode,
+    )
+    prosody_service = get_prosody_service()
+    PROSODY_AVAILABLE = is_prosody_available()
+    if PROSODY_AVAILABLE:
+        print("✅ Hume Prosody 음성 감정 분석 서비스 활성화됨")
+    else:
+        print("⚠️ Hume Prosody: HUME_API_KEY 미설정 — 비활성화")
+except ImportError as e:
+    prosody_service = None
+    PROSODY_AVAILABLE = False
+    print(f"⚠️ Hume Prosody 서비스 비활성화: {e}")
+
 # ========== Whisper 오프라인 STT 폴백 ==========
 try:
     from whisper_stt_service import (
@@ -670,6 +687,7 @@ class InterviewState:
         self.pcs: Set[RTCPeerConnection] = set()
         self.pc_sessions: Dict[RTCPeerConnection, str] = {}
         self.last_emotion: Optional[Dict] = None
+        self.last_prosody: Optional[Dict] = None  # Hume Prosody 최신 결과
         self.emotion_lock = asyncio.Lock()
         # WebSocket 연결 관리 (session_id -> List[WebSocket])
         self.websocket_connections: Dict[str, List[WebSocket]] = {}
@@ -3517,6 +3535,15 @@ async def get_report(session_id: str, current_user: Dict = Depends(get_current_u
         except Exception as e:
             print(f"[Report] 시선 추적 데이터 조회 오류: {e}")
     
+    # Hume Prosody 음성 감정 분석 데이터 추가
+    if PROSODY_AVAILABLE and prosody_service:
+        try:
+            prosody_stats = prosody_service.get_session_stats_dict(session_id)
+            if prosody_stats and prosody_stats.get("total_samples", 0) > 0:
+                report["prosody_analysis"] = prosody_stats
+        except Exception as e:
+            print(f"[Report] Prosody 분석 데이터 조회 오류: {e}")
+    
     return report
 
 
@@ -3834,6 +3861,60 @@ async def _video_pipeline(track, session_id: str):
         pass
 
 
+# ========== Hume Prosody 오디오 버퍼 & 분석 함수 ==========
+_prosody_audio_buffers: Dict[str, bytearray] = {}
+
+
+async def _analyze_prosody_from_audio(session_id: str, raw_pcm: bytes, transcript: str):
+    """
+    축적된 PCM 오디오를 WAV로 변환 → Hume Prosody Streaming API로 분석.
+    결과를 prosody_service 세션에 저장하고, WebSocket으로 클라이언트에 전송.
+    """
+    import io, struct
+    try:
+        # --- PCM (16kHz, 16bit, mono) → WAV 변환 ---
+        wav_buf = io.BytesIO()
+        num_samples = len(raw_pcm) // 2
+        sample_rate = 16000
+        # WAV header
+        wav_buf.write(b'RIFF')
+        data_size = num_samples * 2
+        wav_buf.write(struct.pack('<I', 36 + data_size))
+        wav_buf.write(b'WAVE')
+        wav_buf.write(b'fmt ')
+        wav_buf.write(struct.pack('<IHHIIHH', 16, 1, 1, sample_rate, sample_rate * 2, 2, 16))
+        wav_buf.write(b'data')
+        wav_buf.write(struct.pack('<I', data_size))
+        wav_buf.write(raw_pcm)
+        wav_bytes = wav_buf.getvalue()
+
+        # --- Prosody 분석 (Streaming REST API) ---
+        result = await asyncio.get_event_loop().run_in_executor(
+            LLM_EXECUTOR,
+            lambda: prosody_service.analyze_audio_stream(session_id, wav_bytes, transcript)
+        )
+
+        if result and result.get("interview_indicators"):
+            # InterviewState에 최신 prosody 저장
+            state.last_prosody = result
+
+            # WebSocket으로 클라이언트에 전송
+            await broadcast_stt_result(session_id, {
+                "type": "prosody_result",
+                "indicators": result["interview_indicators"],
+                "dominant_indicator": result.get("dominant_indicator", ""),
+                "adaptive_mode": result.get("adaptive_mode", "normal"),
+                "timestamp": time.time()
+            })
+
+            print(f"[Prosody] 세션 {session_id[:8]}... "
+                  f"주요감정: {result.get('dominant_indicator', '?')} "
+                  f"모드: {result.get('adaptive_mode', '?')}")
+
+    except Exception as e:
+        print(f"[Prosody] 분석 오류 (세션 {session_id[:8]}): {e}")
+
+
 async def _audio_pipeline(track, session_id: str):
     """
     오디오 트랙 통합 파이프라인:
@@ -3954,6 +4035,17 @@ async def _process_audio_with_stt_and_recording(track, session_id: str, recordin
                             "timestamp": time.time()
                         }))
 
+                        # ── Hume Prosody 음성 감정 분석 (최종 발화 시) ──
+                        if is_final and PROSODY_AVAILABLE and prosody_service:
+                            buffered = bytes(_prosody_audio_buffers.get(session_id, b''))
+                            _prosody_audio_buffers[session_id] = bytearray()
+                            if len(buffered) > 3200:  # 최소 0.1초 (16kHz, 16bit)
+                                asyncio.create_task(
+                                    _analyze_prosody_from_audio(
+                                        session_id, buffered, transcript
+                                    )
+                                )
+
                 except Exception as e:
                     print(f"[STT] 메시지 처리 오류: {e}")
 
@@ -3967,6 +4059,10 @@ async def _process_audio_with_stt_and_recording(track, session_id: str, recordin
 
             state.stt_connections[session_id] = dg_connection
             print(f"[STT] 세션 {session_id} 오디오 처리 시작")
+
+            # Prosody용 오디오 버퍼 초기화
+            if PROSODY_AVAILABLE and prosody_service:
+                _prosody_audio_buffers[session_id] = bytearray()
 
             try:
                 while True:
@@ -3982,6 +4078,10 @@ async def _process_audio_with_stt_and_recording(track, session_id: str, recordin
                         from deepgram.extensions.types.sockets import ListenV1MediaMessage
                         dg_connection.send_media(ListenV1MediaMessage(audio_bytes))
 
+                        # → Prosody 오디오 버퍼 축적
+                        if PROSODY_AVAILABLE and prosody_service and session_id in _prosody_audio_buffers:
+                            _prosody_audio_buffers[session_id].extend(audio_bytes)
+
                         # → 녹화 파이프 전송
                         if recording_active:
                             try:
@@ -3994,6 +4094,7 @@ async def _process_audio_with_stt_and_recording(track, session_id: str, recordin
                 print(f"[STT] 오디오 처리 종료: {e}")
             finally:
                 state.stt_connections.pop(session_id, None)
+                _prosody_audio_buffers.pop(session_id, None)
 
     except Exception as e:
         print(f"[STT] Deepgram 연결 실패: {e}")

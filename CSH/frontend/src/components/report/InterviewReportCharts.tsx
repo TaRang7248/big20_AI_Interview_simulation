@@ -70,6 +70,26 @@ interface GazeAnalysis {
   }>;
 }
 
+interface ProsodyAnalysis {
+  total_samples?: number;
+  total_turns?: number;
+  session_avg_indicators?: Record<string, number>;
+  indicator_grades?: Record<string, string>;
+  dominant_indicator?: string;
+  overall_assessment?: string;
+  turn_details?: Array<{
+    turn_idx: number;
+    avg_indicators?: Record<string, number>;
+    dominant_indicator?: string;
+  }>;
+  timeline?: Array<{
+    timestamp?: string;
+    indicators?: Record<string, number>;
+    dominant_indicator?: string;
+  }>;
+  multimodal_fusion?: Record<string, number>;
+}
+
 export interface ReportData {
   session_id: string;
   generated_at: string;
@@ -88,6 +108,7 @@ export interface ReportData {
   llm_evaluation?: LLMEvaluation;
   speech_analysis?: SpeechAnalysis;
   gaze_analysis?: GazeAnalysis;
+  prosody_analysis?: ProsodyAnalysis;
 }
 
 /* ============================== */
@@ -127,6 +148,32 @@ const SCORE_LABELS: Record<string, string> = {
   technical: "기술이해도",
   star: "STAR",
   communication: "전달력",
+};
+
+const PROSODY_LABELS: Record<string, string> = {
+  confidence: "자신감",
+  anxiety: "긴장/불안",
+  focus: "집중도",
+  confusion: "혼란",
+  positivity: "긍정성",
+  calmness: "차분함",
+  negativity: "부정성",
+  sadness: "슬픔",
+  surprise: "놀람",
+  fatigue: "피로도",
+};
+
+const PROSODY_COLORS: Record<string, string> = {
+  confidence: "#00ff88",
+  anxiety: "#f87171",
+  focus: "#60a5fa",
+  confusion: "#f97316",
+  positivity: "#fbbf24",
+  calmness: "#a78bfa",
+  negativity: "#ef4444",
+  sadness: "#93c5fd",
+  surprise: "#fb923c",
+  fatigue: "#94a3b8",
 };
 
 /* ============================== */
@@ -444,6 +491,141 @@ function GazeBarChart({ gaze }: { gaze: GazeAnalysis }) {
   );
 }
 
+/** 8) 음성 감정 레이더 차트 (Hume Prosody) */
+function ProsodyRadarChart({ prosody }: { prosody: ProsodyAnalysis }) {
+  const indicators = prosody.session_avg_indicators || {};
+  const grades = prosody.indicator_grades || {};
+
+  // 레이더용 데이터 (상위 6개 지표)
+  const topKeys = Object.entries(indicators)
+    .filter(([k]) => !["negativity", "sadness", "fatigue", "confusion"].includes(k))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([k]) => k);
+
+  const radarData = topKeys.map((key) => ({
+    subject: PROSODY_LABELS[key] || key,
+    value: Math.round((indicators[key] || 0) * 100),
+    fullMark: 100,
+  }));
+
+  // 전체 지표 바 차트 데이터
+  const barData = Object.entries(indicators)
+    .map(([key, val]) => ({
+      name: PROSODY_LABELS[key] || key,
+      key,
+      점수: Math.round(val * 100),
+      등급: grades[key] || "-",
+    }))
+    .sort((a, b) => b.점수 - a.점수);
+
+  return (
+    <div className="glass-card lg:col-span-2">
+      <h3 className="text-sm font-bold gradient-text mb-2">
+        🎤 음성 감정 분석 (Hume Prosody)
+      </h3>
+      <div className="flex items-center gap-2 mb-4">
+        <span className="text-xs px-2 py-1 rounded-full bg-[rgba(0,217,255,0.1)] text-[var(--cyan)]">
+          총 {prosody.total_samples || 0}회 샘플
+        </span>
+        {prosody.dominant_indicator && (
+          <span className="text-xs px-2 py-1 rounded-full bg-[rgba(0,255,136,0.1)] text-[var(--green)]">
+            주요 감정: {PROSODY_LABELS[prosody.dominant_indicator] || prosody.dominant_indicator}
+          </span>
+        )}
+        {prosody.overall_assessment && (
+          <span className="text-xs px-2 py-1 rounded-full bg-[rgba(167,139,250,0.1)] text-[var(--purple)]">
+            {prosody.overall_assessment}
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* 레이더 차트 */}
+        <ResponsiveContainer width="100%" height={250}>
+          <RadarChart data={radarData}>
+            <PolarGrid stroke="rgba(255,255,255,0.1)" />
+            <PolarAngleAxis dataKey="subject" tick={{ fill: "#8892b0", fontSize: 11 }} />
+            <PolarRadiusAxis angle={90} domain={[0, 100]} tick={{ fill: "#8892b0", fontSize: 10 }} />
+            <Radar
+              dataKey="value"
+              stroke={COLORS.green}
+              fill={COLORS.green}
+              fillOpacity={0.2}
+              strokeWidth={2}
+            />
+            <Tooltip
+              contentStyle={{
+                background: "#1a1a2e",
+                border: `1px solid ${COLORS.green}`,
+                borderRadius: 8,
+                color: "#fff",
+              }}
+            />
+          </RadarChart>
+        </ResponsiveContainer>
+
+        {/* 지표별 바 차트 */}
+        <ResponsiveContainer width="100%" height={250}>
+          <BarChart data={barData} layout="vertical" barSize={16}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" />
+            <XAxis type="number" domain={[0, 100]} tick={{ fill: "#8892b0", fontSize: 10 }} />
+            <YAxis
+              type="category"
+              dataKey="name"
+              tick={{ fill: "#8892b0", fontSize: 11 }}
+              width={80}
+            />
+            <Tooltip
+              contentStyle={{
+                background: "#1a1a2e",
+                border: `1px solid ${COLORS.green}`,
+                borderRadius: 8,
+                color: "#fff",
+              }}
+              formatter={(value: number, _name: string, props: { payload: { key: string; 등급: string } }) =>
+                [`${value}% (등급: ${props.payload.등급})`, PROSODY_LABELS[props.payload.key] || props.payload.key]
+              }
+            />
+            <Bar dataKey="점수" radius={[0, 4, 4, 0]}>
+              {barData.map((entry, idx) => (
+                <Cell
+                  key={idx}
+                  fill={PROSODY_COLORS[entry.key] || COLORS.cyan}
+                  fillOpacity={0.8}
+                />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* 멀티모달 융합 데이터 */}
+      {prosody.multimodal_fusion && Object.keys(prosody.multimodal_fusion).length > 0 && (
+        <div className="mt-4 pt-4 border-t border-[rgba(255,255,255,0.06)]">
+          <p className="text-xs text-[var(--text-secondary)] mb-2">
+            🔗 멀티모달 융합 (Prosody 60% + DeepFace 40%)
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(prosody.multimodal_fusion)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, 5)
+              .map(([key, val]) => (
+                <span
+                  key={key}
+                  className="text-xs px-2 py-1 rounded-full"
+                  style={{ background: `${PROSODY_COLORS[key] || COLORS.cyan}22`, color: PROSODY_COLORS[key] || COLORS.cyan }}
+                >
+                  {PROSODY_LABELS[key] || key}: {Math.round(val * 100)}%
+                </span>
+              ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============================== */
 /*     종합 스코어 카드              */
 /* ============================== */
@@ -546,6 +728,11 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
 
         {/* 시선 추적 */}
         {report.gaze_analysis && <GazeBarChart gaze={report.gaze_analysis} />}
+
+        {/* 음성 감정 분석 (Prosody) */}
+        {report.prosody_analysis && report.prosody_analysis.total_samples > 0 && (
+          <ProsodyRadarChart prosody={report.prosody_analysis} />
+        )}
       </div>
 
       {/* ── 답변별 상세 피드백 ── */}

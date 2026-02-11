@@ -454,7 +454,8 @@ def generate_report_task(
     session_id: str,
     chat_history: List[Dict],
     evaluations: List[Dict],
-    emotion_stats: Optional[Dict] = None
+    emotion_stats: Optional[Dict] = None,
+    prosody_stats: Optional[Dict] = None
 ) -> Dict:
     """
     면접 종합 리포트 생성 (비동기 태스크)
@@ -463,7 +464,8 @@ def generate_report_task(
         session_id: 세션 ID
         chat_history: 대화 기록
         evaluations: 평가 결과 리스트
-        emotion_stats: 감정 분석 통계
+        emotion_stats: 감정 분석 통계 (DeepFace)
+        prosody_stats: 음성 감정 분석 통계 (Hume Prosody)
     
     Returns:
         종합 리포트
@@ -537,6 +539,7 @@ def generate_report_task(
             "top_strengths": strength_counts.most_common(5),
             "top_improvements": improvement_counts.most_common(5),
             "emotion_analysis": emotion_stats or {},
+            "prosody_analysis": prosody_stats or {},
             "recommendations": _generate_recommendations(avg_scores, star_analysis),
             "grade": _calculate_grade(total_avg, star_analysis)
         }

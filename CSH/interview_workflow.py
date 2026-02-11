@@ -80,9 +80,13 @@ class WorkflowState(TypedDict, total=False):
     pending_eval_task_id: Optional[str]  # Celery 평가 태스크 ID
 
     # ── 감정 ──
-    last_emotion: Optional[Dict]        # 직전 감정 분석 결과
+    last_emotion: Optional[Dict]        # 직전 감정 분석 결과 (DeepFace)
     emotion_history: List[Dict]         # 감정 변화 이력
     emotion_adaptive_mode: str          # "normal" | "encouraging" | "challenging"
+
+    # ── 음성 감정 (Hume Prosody) ──
+    last_prosody: Optional[Dict]        # 직전 Prosody 분석 결과
+    prosody_history: List[Dict]         # Prosody 변화 이력
 
     # ── 대화 기록 ──
     chat_history: List[Dict]
@@ -228,6 +232,7 @@ class InterviewNodes:
         # ── 병렬 태스크 구성 ──
         eval_result: Optional[Dict] = None
         emotion_result: Optional[Dict] = None
+        prosody_result: Optional[Dict] = None
         pending_task_id: Optional[str] = None
 
         async def _run_evaluation():
@@ -273,12 +278,25 @@ class InterviewNodes:
             except Exception:
                 pass
 
-        # 병렬 실행
-        await asyncio.gather(_run_evaluation(), _run_emotion())
+        async def _run_prosody():
+            """Hume Prosody 음성 감정 데이터 수집"""
+            nonlocal prosody_result
+            try:
+                last_prosody = self._state_mgr.last_prosody
+                if last_prosody:
+                    prosody_result = last_prosody
+            except Exception:
+                pass
 
-        # ── 감정 기반 적응 모드 결정 ──
+        # 병렬 실행
+        await asyncio.gather(_run_evaluation(), _run_emotion(), _run_prosody())
+
+        # ── 감정 기반 적응 모드 결정 (★ Prosody 우선) ──
         emotion_adaptive_mode = ws.get("emotion_adaptive_mode", "normal")
-        if emotion_result:
+        if prosody_result and prosody_result.get("adaptive_mode"):
+            # Prosody는 48감정 기반으로 DeepFace(7감정)보다 정밀
+            emotion_adaptive_mode = prosody_result["adaptive_mode"]
+        elif emotion_result:
             dominant = emotion_result.get("dominant_emotion", "neutral")
             if dominant in ("sad", "fear", "disgust"):
                 emotion_adaptive_mode = "encouraging"
@@ -295,6 +313,14 @@ class InterviewNodes:
                 "emotion": emotion_result,
             })
 
+        # Prosody 이력 업데이트
+        prosody_history = ws.get("prosody_history", [])
+        if prosody_result:
+            prosody_history.append({
+                "timestamp": datetime.now().isoformat(),
+                "prosody": prosody_result,
+            })
+
         # 평가 누적
         evaluations = ws.get("evaluations", [])
         if eval_result:
@@ -306,6 +332,7 @@ class InterviewNodes:
             "evaluate",
             f"celery_task={pending_task_id or 'N/A'}, "
             f"emotion={emotion_adaptive_mode}, "
+            f"prosody={prosody_result.get('dominant_indicator') if prosody_result else 'N/A'}, "
             f"eval_score={eval_result.get('total_score') if eval_result else 'pending'}",
             elapsed,
         ))
@@ -317,6 +344,8 @@ class InterviewNodes:
             "last_emotion": emotion_result,
             "emotion_history": emotion_history,
             "emotion_adaptive_mode": emotion_adaptive_mode,
+            "last_prosody": prosody_result,
+            "prosody_history": prosody_history,
             "pending_eval_task_id": pending_task_id,
             "trace": trace,
         }
