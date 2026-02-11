@@ -8,14 +8,19 @@ Text-to-Speech(TTS), Speech-to-Text(STT), LLM 기반 질문생성 및 답변 평
 
 - **화상 면접 중심**
 - **LLM**: Qwen3-4B 모델 기반 AI 면접 두뇌 역할. 질문을 생성하고 답변을 평가 (컨텍스트 윈도우 16384)
+- **LangGraph 워크플로우**: 조건부 분기 + 루프 제어 + 체크포인트 기반 면접 상태머신
 - **이력서 RAG**: PDF 이력서 업로드 → 맞춤형 면접 평가
+- **통합 평가 시스템**: 언어 평가(5축) 60% + 비언어 평가(발화/시선/감정/Prosody) 40% → 합격/불합격 이진 판정
+- **비언어 분석**: 발화 속도/발음 등급, 시선 추적 집중도, 감정 안정성, 음성 감정(Prosody) 분석
+- **PDF 리포트**: ReportLab 기반 PDF 종합 리포트 자동 생성 (커버 + 평가 + 비언어 차트)
 - **Celery 비동기 처리**: 무거운 작업(LLM 평가, 감정 분석, 리포트 생성, 미디어 트랜스코딩)을 백그라운드에서 처리
 - **회원가입/로그인**: 이메일 기반 회원가입 및 소셜 로그인 (카카오, 구글, 네이버) 지원
 - **보안 시스템**: bcrypt 비밀번호 해싱, JWT 인증, CORS 제한, WebSocket JWT 인증, TLS 지원
-- **종합 리포트**: STAR 기법 분석, 키워드 추출, 등급 산정 포함
-- **Recharts 리포트 시각화**: 7종 인터랙티브 차트 (레이더, 바, 파이, 영역)로 면접 결과 시각 대시보드
+- **종합 리포트**: STAR 기법 분석, 키워드 추출, 합격/불합격 추천 포함
+- **Recharts 리포트 시각화**: 7종 인터랙티브 차트 (레이더, 바, 파이, 영역) + 비언어 평가 카드로 면접 결과 시각 대시보드
+- **지연 시간 모니터링 (SLA)**: 모든 API 요청 자동 측정, 1.5초 SLA 위반 감지, 단계별(LLM/TTS) Phase 측정
 - **미디어 녹화/트랜스코딩**: aiortc + GStreamer/FFmpeg 하이브리드 아키텍처 기반 면접 영상 녹화 및 자동 트랜스코딩
-- **코딩 테스트**: Python, JavaScript, Java, C/C++ 지원하는 웹 IDE 통합
+- **코딩 테스트**: Python, JavaScript, Java, C/C++ 지원하는 웹 IDE 통합 + Docker 샌드박스 보안
 - **화이트보드 면접**: Claude 3.5 Sonnet Vision을 활용한 시스템 아키텍처 다이어그램 분석
 - **AI 아바타**: D-ID WebRTC 스트리밍으로 실시간 AI 면접관 영상 생성
 - **Next.js 프론트엔드**: TypeScript + Tailwind CSS + Recharts 기반 현대적 UI (App Router)
@@ -173,11 +178,14 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 ├─────────────────────────────────────────────────────────────┤
 │  6. 면접 종료 → 리포트 생성                                   │
 │     ├─ LLM 평가 종합 결과 (5가지 항목 평균)                   │
+│     ├─ 비언어 평가 (발화/시선/감정/Prosody)                  │
+│     ├─ 통합 점수 (언어 60% + 비언어 40%)                      │
+│     ├─ 합격/불합격 추천 (통합 점수 기반)                      │
 │     ├─ STAR 기법 분석 (상황-과제-행동-결과)                   │
 │     ├─ 키워드 분석 (기술 키워드 + 일반 키워드)                │
-│     ├─ 등급 산정 (S/A/B/C/D)                                 │
 │     ├─ 코딩 테스트 결과 (코드 품질 점수)                      │
 │     ├─ 시스템 설계 결과 (아키텍처 평가)                       │
+│     ├─ PDF 리포트 다운로드                                     │
 │     └─ 개선 피드백 및 권장사항                               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -199,6 +207,13 @@ CSH/
 ├── whiteboard_service.py           # 화이트보드 다이어그램 분석 (Claude Vision)
 ├── did_avatar_service.py           # D-ID AI 아바타 영상 생성 (WebRTC 스트리밍)
 ├── media_recording_service.py      # 미디어 녹화/트랜스코딩 서비스 (aiortc + GStreamer/FFmpeg 하이브리드)
+├── interview_workflow.py           # LangGraph 기반 면접 상태머신 (조건부 분기, 체크포인트)
+├── speech_analysis_service.py      # 발화 속도/발음 분석 서비스 (SPM, 등급 판정)
+├── gaze_tracking_service.py        # 시선 추적 분석 서비스 (눈 접촉 비율, 등급)
+├── hume_prosody_service.py         # 음성 감정 Prosody 분석 서비스 (Hume AI, 10개 지표)
+├── pdf_report_service.py           # PDF 종합 리포트 생성 (ReportLab, 차트 포함)
+├── latency_monitor.py              # 지연 시간 측정 및 SLA 모니터링 (REQ-N-001)
+├── whisper_stt_service.py          # Whisper 기반 로컬 STT 서비스 (오프라인 폴백)
 ├── json_utils.py                   # LLM JSON 안정적 추출/파싱 방어 로직 (6단계)
 ├── security.py                     # 보안 유틸리티 (bcrypt, JWT, TLS, CORS)
 ├── events.py                       # 이벤트 타입 정의 (30+ EventType, Pydantic 모델)
@@ -243,7 +258,7 @@ LLM은 **질문 생성이 아닌 답변 평가**에 사용됩니다. Ollama의 *
 
 | 평가 항목 | 설명 | 점수 |
 |-----------|------|------|
-| 구체성 (Specificity) | 구체적인 사례와 수치 포함 여부 | 1-5점 |
+| 문제해결력 (Problem Solving) | 문제 분석 및 해결 접근 방식의 체계성 | 1-5점 |
 | 논리성 (Logic) | 논리적 흐름의 일관성 | 1-5점 |
 | 기술 이해도 (Technical) | 기술적 개념 이해 정확성 | 1-5점 |
 | STAR 기법 (STAR) | 상황-과제-행동-결과 구조 | 1-5점 |
@@ -360,10 +375,13 @@ LLM 응답에서 JSON을 안정적으로 추출하고 파싱하기 위한 방어
 면접 종료 후 다음 항목이 포함된 상세 리포트를 생성합니다:
 
 - **STAR 분석**: 상황/과제/행동/결과 요소 점수 (각 25점, 총 100점)
-- **평가 점수 집계**: 5가지 평가 항목 평균
+- **언어 평가 점수 집계**: 5가지 평가 항목 평균 (verbal_average)
+- **비언어 평가 통합**: 발화 속도(speech) + 시선 추적(gaze) + 감정 안정성(emotion) + Prosody 분석
+- **통합 점수 산정**: 언어 평가 × 60% + 비언어 평가 × 40% = 최종 통합 점수 (final_score)
+- **합격/불합격 판정**: 통합 점수 ≥ 4.0 AND 총점 ≥ 20 AND 저점수 항목 0개 → 합격, 이외 불합격
 - **키워드 분석**: 기술 키워드 + 일반 키워드 추출
 - **강점/개선점**: 빈도 기반 Top 5 추출
-- **등급 산정**: S/A/B/C/D (종합 점수 기반)
+- **PDF 리포트**: 커버페이지 + 평가표 + 비언어 차트 포함 PDF 자동 생성
 - **권장사항**: 맞춤형 개선 제안
 
 ### 10. 코딩 테스트 시스템 (code_execution_service.py)
@@ -582,7 +600,7 @@ winget install Gyan.FFmpeg
 
 | 차트 | 컴포넌트 | 유형 | 데이터 소스 |
 |------|----------|------|-------------|
-| 평가 항목 레이더 | `EvalRadarChart` | RadarChart | LLM 5가지 평가 점수 (구체성, 논리성, 기술이해도, STAR, 전달력) |
+| 평가 항목 레이더 | `EvalRadarChart` | RadarChart | LLM 5가지 평가 점수 (문제해결력, 논리성, 기술이해도, STAR, 전달력) |
 | 답변별 점수 비교 | `EvalBarChart` | BarChart (Grouped) | 질문별 5항목 점수 비교 |
 | STAR 기법 분석 | `StarBarChart` | BarChart (Horizontal) | 상황/과제/행동/결과 각 점수 |
 | 감정 분포 | `EmotionPieChart` | PieChart (Donut) | 7가지 감정 비율 |
@@ -594,8 +612,10 @@ winget install Gyan.FFmpeg
 
 | 컴포넌트 | 설명 |
 |----------|------|
-| `ScoreCard` | 요약 메트릭 카드 (아이콘 + 점수 + 라벨) |
-| 등급 배지 | S(≥4.5) / A(≥3.5) / B(≥2.5) / C(≥1.5) / D — 등급별 색상 코딩 |
+| `ScoreCard` | 요약 메트릭 카드 (아이콘 + 점수 + 라벨) — "통합 점수", "언어 평가" 2종 |
+| 합격/불합격 배지 | 통합 점수 기반 이진 판정 — 합격(파란색) / 불합격(빨간색) 색상 코딩 |
+| 비언어 평가 카드 | 발화 속도(speech), 시선 추적(gaze), 감정 안정성(emotion), Prosody 개별 점수 + 색상 코딩 |
+| 통합 점수 수식 | "언어 X × 60% + 비언어 Y × 40% = 통합 Z" 공식 표시 |
 | 답변별 상세 피드백 | 각 답변의 강점(strengths)과 개선점(improvements) 표시 |
 
 #### TypeScript 인터페이스
@@ -603,13 +623,12 @@ winget install Gyan.FFmpeg
 ```typescript
 interface ReportData {
   session_id: string;
-  llm_evaluation: LLMEvaluation;
+  llm_evaluation: LLMEvaluation;  // verbal_average, nonverbal_scores, nonverbal_average, final_score, recommendation, recommendation_reason 포함
   emotion_stats: EmotionStats;
   speech_analysis: SpeechAnalysis;
   gaze_analysis: GazeAnalysis;
   star_analysis: StarAnalysis;
   keywords: { tech: Record<string, number>; general: Record<string, number> };
-  grade: string;
   total_score: number;
 }
 ```
@@ -629,7 +648,7 @@ interface ReportData {
 
 면접 페이지의 리포트 phase에서 자동으로 차트 대시보드가 표시됩니다:
 - **로딩 상태**: 스피너 + "리포트 데이터를 불러오는 중..." 텍스트
-- **차트 대시보드**: 7종 차트 + ScoreCard + 등급 배지
+- **차트 대시보드**: 7종 차트 + ScoreCard (통합 점수, 언어 평가) + 합격/불합격 배지 + 비언어 평가 카드
 - **액션 버튼**: JSON 다운로드 / PDF 다운로드 / 대시보드 이동 (Lucide 아이콘)
 
 ---
@@ -669,7 +688,8 @@ interface ReportData {
 - `GET /api/evaluations/{session_id}` - 전체 평가 결과 조회
 
 ### 리포트
-- `GET /api/report/{session_id}` - 종합 면접 리포트 (LLM 평가 포함)
+- `GET /api/report/{session_id}` - 종합 면접 리포트 (LLM 평가 + 비언어 평가 + 통합 점수 포함)
+- `GET /api/report/{session_id}/pdf` - PDF 종합 리포트 다운로드 (ReportLab 생성)
 
 ### 면접 이력
 - `GET /api/interview/history` - 면접 이력 목록 조회
@@ -720,6 +740,10 @@ interface ReportData {
 
 ### 시스템
 - `GET /api/status` - 전체 서비스 상태 확인
+
+### 지연 시간 모니터링 (SLA)
+- `GET /api/monitoring/latency` - 지연 시간 대시보드 (SLA 위반 횟수, 엔드포인트별 통계, 최근 위반 내역)
+- `DELETE /api/monitoring/latency/reset` - 모니터링 통계 초기화
 
 ### 이벤트 모니터링
 - `GET /api/events/stats` - EventBus 통계 (총 이벤트 수, 타입별 카운트, 핸들러 수, WebSocket 연결 수)
@@ -844,6 +868,10 @@ CSH/frontend/
 | 화이트보드 | ANTHROPIC_API_KEY 설정 (Claude) | 다이어그램 분석 |
 | AI 아바타 | DID_API_KEY 설정 | 실시간 아바타 영상 |
 | 미디어 녹화 | GStreamer 또는 FFmpeg 설치 (선택) | 면접 영상 녹화/트랜스코딩 |
+| 발화 분석 | speech_analysis_service.py | 발화 속도(SPM)/발음 등급 판정 |
+| 시선 추적 | gaze_tracking_service.py + OpenCV | 눈 접촉 비율/집중도 등급 |
+| Prosody 분석 | HUME_API_KEY + hume_prosody_service.py | 음성 감정 10개 지표 분석 |
+| 지연 시간 모니터링 | 자동 활성화 (latency_monitor.py) | API SLA 1.5초 위반 감지 + Phase 측정 |
 
 모든 서비스는 선택사항입니다. 설정되지 않은 서비스는 비활성화되며, 기본 기능으로 대체됩니다.
 
@@ -859,6 +887,10 @@ CSH/frontend/
 ✅ 화이트보드 분석 서비스 활성화됨
 ✅ D-ID 아바타 서비스 활성화됨
 ✅ 미디어 녹화 서비스 활성화됨 (GStreamer)
+✅ 발화 분석 서비스 활성화됨
+✅ 시선 추적 서비스 활성화됨
+✅ Prosody 분석 서비스 활성화됨
+✅ 지연 시간 모니터링 활성화됨 (SLA: 1.5s)
 ```
 
 ---
@@ -972,9 +1004,9 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 
 | 파일 | 설명 |
 |------|------|
-| `integrated_interview_server.py` | **통합 FastAPI 서버** (5230+ lines) - 질문 은행, LLM 평가, 회원 인증, 소셜 로그인, WebRTC, WebSocket, 감정 분석, 면접 개입(인터벤션), ThreadPoolExecutor 비동기 처리, Celery 워크플로우, 미디어 녹화 통합 (video/audio pipeline) |
+| `integrated_interview_server.py` | **통합 FastAPI 서버** (5530+ lines) - 질문 은행, LLM 평가 (5축 + 비언어 통합 + 합격/불합격), 회원 인증, 소셜 로그인, WebRTC, WebSocket, 감정 분석, 면접 개입(인터벤션), 지연 시간 미들웨어, Celery 워크플로우, 미디어 녹화 통합 |
 | `celery_app.py` | **Celery 애플리케이션 설정(설계도)** (120+ lines) - Celery 앱 생성, Redis 브로커 연결, 큐 정의 & 라우팅 (media_processing 큐 포함), Beat 스케줄 정의 |
-| `celery_tasks.py` | **Celery 비동기 태스크** (1280+ lines) - 16개 태스크 정의: LLM 평가, 감정 분석, 리포트 생성, TTS, RAG, 세션 정리, 통계, 워크플로우, Redis 세션 저장, 미디어 트랜스코딩, 녹화 정리 |
+| `celery_tasks.py` | **Celery 비동기 태스크** (1280+ lines) - 16개 태스크 정의: LLM 평가 (5축 + 합격/불합격), 감정 분석, 리포트 생성, TTS, RAG, 세션 정리, 통계, 워크플로우, 미디어 트랜스코딩 |
 | `text_interview.py` | **텍스트 면접 모듈** (510+ lines) - STAR 기법 분석, 키워드 추출, 리포트 생성 클래스 |
 | `hume_tts_service.py` | **Hume AI TTS 클라이언트** (440+ lines) - OAuth2 토큰 인증, EVI 음성 생성, 스트리밍 지원 |
 | `stt_engine.py` | **Deepgram STT 클라이언트** (320+ lines) - Nova-3 모델, 실시간 마이크 입력, VAD 지원, 한국어 띄어쓰기 보정 (pykospacing) |
@@ -983,6 +1015,13 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 | `whiteboard_service.py` | **화이트보드 분석 서비스** (850+ lines) - Claude 3.5 Sonnet Vision (메인) + Qwen3-VL (폴백), 아키텍처 평가, 동적 문제 생성 |
 | `did_avatar_service.py` | **D-ID 아바타 서비스** (520+ lines) - Talks API + Streams API (WebRTC), 실시간 아바타 영상 생성 |
 | `media_recording_service.py` | **미디어 녹화/트랜스코딩 서비스** (430+ lines) - aiortc + GStreamer/FFmpeg 하이브리드, stdin pipe 실시간 인코딩, 썸네일 생성, 메타데이터 관리, Graceful Degradation |
+| `interview_workflow.py` | **LangGraph 면접 상태머신** (1000+ lines) - 조건부 분기 + 루프 제어 + 체크포인트 기반 면접 흐름 제어, StateGraph |
+| `speech_analysis_service.py` | **발화 속도/발음 분석 서비스** - SPM(분당 음절 수) 계산, 등급 판정 (S/A/B/C/D), 5점 척도 변환 |
+| `gaze_tracking_service.py` | **시선 추적 분석 서비스** - 눈 접촉 비율 측정, 집중도 등급 판정, OpenCV 기반 |
+| `hume_prosody_service.py` | **음성 감정 Prosody 분석 서비스** - Hume AI API, 10개 감정 지표 (confidence, joy, sadness 등), 평균 점수 산출 |
+| `pdf_report_service.py` | **PDF 종합 리포트 생성** (490+ lines) - ReportLab 기반, 커버페이지(합격/불합격 + 통합 점수) + 평가표 + 비언어 바 차트 + 키워드 + STAR 각 섹션 |
+| `latency_monitor.py` | **지연 시간 모니터링** (240+ lines) - Thread-safe LatencyMonitor 클래스, SLA 1.5초 임계값, Phase 측정 (LLM/TTS), 위반 내역 deque, 대시보드 API 데이터 |
+| `whisper_stt_service.py` | **Whisper 기반 로컬 STT** - 오프라인 폴백용and 음성 인식 서비스, Deepgram 불가 시 자동 전환 |
 | `video_interview_server.py` | WebRTC + 감정 분석 서버 (350 lines, 레거시 — integrated에 통합됨) |
 | `data_entry.ipynb` | 데이터 입력용 Jupyter Notebook |
 | `start_interview.bat` | **원클릭 시작 스크립트** (Windows Batch) - 전체 시스템 실행 |
@@ -1002,7 +1041,7 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 | `static/video.html` | 기존 화상 면접 UI (레거시) |
 | `uploads/` | 이력서 PDF 업로드 디렉토리 |
 | `documents/` | **설계 문서 디렉토리** - SAD, SRS, 보안 리뷰 보고서, RAG DB 구조, TODO |
-| `frontend/` | **Next.js 프론트엔드** - TypeScript + Tailwind CSS + Recharts, 7개 페이지, 인증 시스템, Chart.js, Recharts 리포트 시각화, 실시간 이벤트 알림 |
+| `frontend/` | **Next.js 프론트엔드** - TypeScript + Tailwind CSS + Recharts, 7개 페이지, 인증 시스템, Chart.js, Recharts 리포트 시각화 (7종 차트 + 비언어 평가 카드 + 통합 점수 + 합격/불합격 배지), 실시간 이벤트 알림 |
 
 ---
 
@@ -1094,13 +1133,56 @@ async def get_my_result(task_id: str):
 
 ## 📝 변경 이력 (Changelog)
 
-### 2026-02-11
+### 2026-02-11 (후반)
+
+#### 🎯 통합 평가 시스템 구현 (5축 언어 + 비언어 + 합격/불합격)
+- **평가 축 통일**: 기존 불일치 키(`specificity`/`problem_solving_and_logic`) → 정규 5축(`problem_solving`, `logic`, `technical`, `star`, `communication`)으로 통합
+- **S/A/B/C/D 등급 시스템 완전 제거**: 서버, Celery, 프론트엔드, PDF, json_utils 전체에서 grade 관련 코드 삭제
+- **비언어 평가 통합**:
+  - `_compute_nonverbal_scores(report)` 함수 신규 — 발화 속도(speech), 시선 추적(gaze), 감정 안정성(emotion), Prosody(prosody) 각 5점 척도 변환
+  - `_compute_evaluation_summary()` 리디자인 — 언어 평가 60% + 비언어 평가 40% 가중 평균 → `final_score` 산출
+- **합격/불합격 이진 판정**:
+  - 기존 3단계(합격/보류/불합격) → 2단계(합격/불합격)로 단순화
+  - 합격 조건: `final_score ≥ 4.0 AND total_25 ≥ 20 AND low_count == 0`
+  - 6개 파일 동시 수정: `integrated_interview_server.py`, `celery_tasks.py`, `json_utils.py`, `InterviewReportCharts.tsx`, `pdf_report_service.py`, Pydantic 모델
+- **프론트엔드 업데이트** (`InterviewReportCharts.tsx`, 855 lines):
+  - `ScoreCard` 2종: "통합 점수"(final_score) + "언어 평가"(verbal_avg)
+  - 비언어 평가 카드: 개별 점수(speech/gaze/emotion/prosody) 색상 코딩
+  - 통합 수식 표시: "언어 X × 60% + 비언어 Y × 40% = 통합 Z"
+  - `recColors`/`recIcons`: 합격(파란색, ✅) / 불합격(빨간색, ❌) 전용
+- **PDF 리포트 업데이트** (`pdf_report_service.py`, 496 lines):
+  - 커버: 합격/불합격 + 통합 점수 (등급 없음)
+  - LLM 평가 섹션: 언어 평균 + 비언어 바 차트 + 비언어 평균 + 최종 통합 점수
+  - 색상 매핑: `{"합격": "#4CAF50", "불합격": "#F44336"}` (보류 제거)
+
+#### ⏱️ N-001 지연 시간 모니터링 구현 (SLA 검증)
+- **신규 모듈** (`latency_monitor.py`, 242 lines):
+  - `LatencyMonitor` 클래스 (Thread-safe, 싱글턴)
+  - `_history` deque (최근 1000개 요청), `_violations` deque (최근 100개 SLA 위반)
+  - `_stats` defaultdict (엔드포인트별 count/total/max/min/violations)
+  - Phase 측정: `start_phase(request_id, phase)` / `end_phase(request_id, phase)` — LLM 추론, TTS 합성 등 단계별 지연
+  - SLA 임계값: 1.5초 (환경변수로 조정 가능)
+  - 자동 로깅: `⚠️ [SLA 위반]` 경고 출력
+- **HTTP 미들웨어** (`integrated_interview_server.py`):
+  - `latency_measurement_middleware` — 모든 `/api/**` 요청 자동 측정
+  - `X-Response-Time-Ms` 응답 헤더 추가
+  - `request.state.request_id` UUID 할당
+- **모니터링 API**:
+  - `GET /api/monitoring/latency` — 대시보드 (총 요청, SLA 위반, 엔드포인트별 통계, 최근 위반 내역)
+  - `DELETE /api/monitoring/latency/reset` — 통계 초기화
+- **Phase 측정 적용**: `/api/chat`, `/api/chat/with-intervention` 엔드포인트에서 `llm_inference`, `tts_synthesis` 단계별 시간 측정
+
+#### 📄 문서 업데이트
+- **TODO.md**: N-001 항목 `✅ 구현` 상태 업데이트
+- **README_INTEGRATED.md**: 전체 문서 포괄적 업데이트 (평가 시스템, 신규 파일, API, 서비스 활성화 조건 등)
+
+### 2026-02-11 (전반)
 
 #### 📊 Recharts 리포트 시각화 구현
 - **신규 컴포넌트** (`frontend/src/components/report/InterviewReportCharts.tsx`, 470+ lines):
   - 7종 인터랙티브 차트 — `EvalRadarChart` (5가지 평가 레이더), `EvalBarChart` (답변별 그룹 바), `StarBarChart` (STAR 기법 수평 바), `EmotionPieChart` (감정 도넛), `KeywordBarChart` (Top 10 키워드 바), `SpeechAreaChart` (발화 속도 영역), `GazeBarChart` (시선 집중도 조건부 색상 바)
-  - `ScoreCard` 요약 메트릭 컴포넌트, 등급 배지 (S/A/B/C/D)
-  - TypeScript 인터페이스: `ReportData`, `LLMEvaluation`, `EmotionStats`, `SpeechAnalysis`, `GazeAnalysis`, `StarAnalysis`
+  - `ScoreCard` 요약 메트릭 컴포넌트, 통합 점수 + 언어 평가 2종
+  - TypeScript 인터페이스: `ReportData`, `LLMEvaluation` (verbal_average, nonverbal_scores, final_score, recommendation 포함), `EmotionStats`, `SpeechAnalysis`, `GazeAnalysis`, `StarAnalysis`
   - 답변별 상세 피드백 (강점/개선점) 섹션
 - **면접 페이지 통합** (`frontend/src/app/interview/page.tsx`):
   - 리포트 phase에서 `InterviewReportCharts` 자동 렌더링

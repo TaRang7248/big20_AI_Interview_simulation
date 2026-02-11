@@ -38,8 +38,9 @@ faster-whisper>=1.0.0          # CTranslate2 기반 고속 로컬 STT
 
 # ========== RAG (PostgreSQL + PGVector) ==========
 langchain-postgres>=0.0.1
-psycopg2-binary>=2.9.9
-pgvector>=0.2.0
+psycopg[binary]>=3.1.0         # psycopg3 드라이버 (langchain-postgres 필수, psycopg2와 다름)
+# psycopg2-binary>=2.9.9      # 레거시 — 현재 코드는 psycopg3 사용 (postgresql+psycopg://)
+pgvector>=0.2.0                # langchain-postgres 내부 의존성 (직접 import 없음)
 pypdf>=3.17.0
 sqlalchemy>=2.0.0
 
@@ -65,10 +66,10 @@ reportlab>=4.0.0               # PDF 면접 리포트 생성 (한국어 폰트 �
 
 # ========== 유틸리티 ==========
 python-dotenv>=1.0.0
-requests>=2.31.0
-websockets>=12.0
-ffmpeg-python
 
 # ========== 선택사항 (Optional) ==========
-# tqdm>=4.66.0                 # 진행률 표시
 # openai-whisper               # faster-whisper 대안 (로컬 STT)
+# tqdm>=4.66.0                 # 진행률 표시
+# requests>=2.31.0             # 현재 코드에서 미사용 (httpx로 대체됨)
+# websockets>=12.0             # 현재 코드에서 미사용 (FastAPI WebSocket 사용)
+# ffmpeg-python                # 현재 코드에서 미사용 (subprocess로 ffmpeg CLI 직접 호출)
