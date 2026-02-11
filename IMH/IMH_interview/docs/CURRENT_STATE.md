@@ -55,6 +55,14 @@
     - `evidence_data` JSON 스키마 필드 존재 및 구조 검증
   - 결과: 정상 동작 확인
 
+- TASK-013 기준:
+  - `scripts/verify_task_013.py`를
+    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+  - InterviewReport JSON 파일 저장(Save) 검증 완료
+  - interview_id 기반 단건 조회(Find By ID) 검증 완료
+  - 파일명 Timestamp 기준 목록 조회(Find All) 및 정렬 정책 검증 완료
+  - 별도 인덱스 파일 없이 파일명 + JSON 파싱 기반 메타데이터 구성 정책 확인
+
 ## 1. 프로젝트 목적 (확정)
 
 - 목적: **AI 모의면접 시스템**
@@ -82,7 +90,8 @@
 - 현재 Phase의 목적:
   - 리포트 데이터 구조(JSON) 확정 ✅
   - 해석(Interpretation) 로직 1차 구현 완료 ✅
-  - **다음 단계(TASK-013)에서 리포트의 활용/확장 계층으로 진입**
+  - 리포트의 저장 및 이력 관리 계층(TASK-013) 구현 완료
+  - 다음 단계(TASK-014)에서 리포트 조회 API 및 활용 계층으로 확장 예정
 ---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -182,6 +191,9 @@ IMH/IMH_Interview/
   - TASK-011: 정량 평가 엔진 (RubricEvaluator) 구현 완료
   - 영역별 점수 산출 로직 및 가중치 적용 검증됨
 
+- `packages/imh_history/`: ✅ DONE
+  - TASK-013: 리포트 저장소(FileHistoryRepository) 구현 완료
+  - JSON 파일 기반 영구 저장 및 이력 조회 검증됨
 
 
 
@@ -250,6 +262,20 @@ IMH/IMH_Interview/
 
 ## ACTIVE
 
+### TASK-014 리포트 API 노출 (BFF Endpoint)
+- **Goal**:
+  - InterviewReport를 외부(UI/관리자/서비스)에서 소비할 수 있도록 API 계약을 확정
+- **Scope (예정)**:
+  - 단건 조회 / 목록 조회 API 계약
+  - 응답 스키마 고정 (Report DTO 재사용)
+- **Out of Scope**:
+  - UI 구현
+  - 인증/권한 고도화
+
+---
+
+## DONE
+
 ### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
 - **Goal**: 생성된 `InterviewReport`를 서비스 데이터로 보존하고, 면접 회차별 조회/리스트/상세 조회 기반을 마련
 - **Scope**:
@@ -263,18 +289,6 @@ IMH/IMH_Interview/
 ---
 
 ## BACKLOG
-
-### TASK-014 리포트 API 노출 (BFF Endpoint)
-- **Goal**:
-  - InterviewReport를 외부(UI/관리자/서비스)에서 소비할 수 있도록 API 계약을 확정
-- **Scope (예정)**:
-  - 단건 조회 / 목록 조회 API 계약
-  - 응답 스키마 고정 (Report DTO 재사용)
-- **Out of Scope**:
-  - UI 구현
-  - 인증/권한 고도화
-
----
 
 ### TASK-015 UI 계약 및 소비 규격 정의
 - **Goal**:

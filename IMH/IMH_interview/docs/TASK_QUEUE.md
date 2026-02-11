@@ -133,22 +133,64 @@
   - Mock 기반 Report 생성 및 구조 검증
 - **Verification**: `python scripts/verify_task_012.py` Pass
 
+### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
+- **Goal**: 생성된 `InterviewReport`를 서비스 데이터로 보존하고, 면접 회차별 조회/리스트/상세 조회를 위한 Persistence 계층 구축
+- **Scope**:
+  - 파일 시스템 기반 `InterviewReport` 저장 구조 구현 (식별자/타임스탬프 기반)
+  - Repository 인터페이스(`HistoryRepository`) 및 파일 기반 구현체(`FileHistoryRepository`) 구현
+  - 메타데이터 파싱 기반 이력 조회(Find By ID / Find All) 기능 구현
+  - 저장/조회 검증 스크립트(`scripts/verify_task_013.py`) 작성 및 검증 완료
+- **Verification**: `python scripts/verify_task_013.py` Pass
+
 ---
 ## ACTIVE
+### TASK-014 리포트 조회 API 노출 (Report API Contract)
 
-### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
-- **Goal**: 생성된 `InterviewReport`를 서비스 데이터로 보존하고, 면접 회차별 조회/리스트/상세 조회 기반을 마련
-- **Scope (초안)**:
-  - InterviewReport 저장 구조(식별자/면접ID/세션ID 등) 및 이력 정책(버전/타임스탬프) 정의
-  - 저장 및 조회를 위한 최소 인터페이스/검증 스크립트
+- **Goal**:
+  - 저장된 `InterviewReport`를 외부(UI/관리자/후속 서비스)에서 소비할 수 있도록
+    **조회 전용 API 계약을 정의하고 노출**한다.
+
+- **Scope**:
+  - 단건 리포트 조회 API 계약 정의 (interview_id 기준)
+  - 리포트 목록 조회 API 계약 정의 (타임스탬프 기준 정렬)
+  - 응답 스키마 고정:
+    - TASK-012에서 정의된 `InterviewReport` JSON 구조 재사용
+  - API 응답 포맷 및 필드 의미 명세
+
 - **Out of Scope**:
   - UI 화면 구현
-  - 실제 LLM/RAG 연동
+  - 인증/권한 고도화
+  - DB / 외부 저장소 연동
+  - 실시간 세션 API
 
+- **Dependencies**:
+  - TASK-013 (리포트 저장 / 이력 관리) 완료
 ---
 
 ## HOLD
 
+### TASK-015 리포트 소비 규격 정의 (UI / Client Contract)
+
+- **Goal**:
+  - 프론트엔드 및 클라이언트 관점에서
+    `InterviewReport` JSON을 **어떻게 해석·표현·소비할지에 대한 규격을 확정**한다.
+
+- **Scope**:
+  - 리포트 주요 필드의 UI 표현 규칙 정의
+    - 점수(Score), 등급(Grade), 요약(Summary), 피드백(Insight)
+  - 시각화 요소 사용 규칙 정의
+    - Radar Chart / Bar Chart 등에서 사용하는 필드 범위
+  - 텍스트 길이 제한, 요약 우선순위 등 UI 친화 규칙 명시
+
+- **Out of Scope**:
+  - 실제 UI 컴포넌트 구현
+  - 디자인 시안 작업
+  - 사용자 인터랙션 로직
+
+- **Dependencies**:
+  - TASK-012 (Reporting Layer) 완료
+  - TASK-014 (리포트 조회 API 계약) 완료
+  
 ### TASK-016 TTS Provider (Text → Speech)
 - **Goal**:
   - 면접 결과 또는 실시간 피드백을 음성으로 출력하기 위한 TTS Provider 계층 준비

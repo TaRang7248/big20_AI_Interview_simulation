@@ -252,3 +252,19 @@ Plan 수립
     - JSON Output 구조(`header`, `details`, `footer`) 정합성 확인.
 - **로그 및 산출물**:
   - `packages/imh_report/__init__.py` 포함 패키지 구조화.
+
+### TASK-013 리포트 저장 / 이력 관리 (Persistence & History)
+- **요약**: `packages/imh_history` 구현. `InterviewReport`(JSON)를 파일 시스템에 저장하고, 메타데이터 기반으로 이력을 조회하는 Repository 계층 구축.
+- **변경 사항**:
+  - `packages/imh_history/dto.py`: 리스트 조회용 메타데이터 `HistoryMetadata` DTO 정의.
+  - `packages/imh_history/repository.py`: `HistoryRepository` 인터페이스 및 `FileHistoryRepository` 구현 (파일 시스템 기반 JSON 저장소).
+  - `IMH/IMH_Interview/data/reports/`: 리포트 저장소 디렉토리 생성 및 `.gitignore` 설정.
+  - `scripts/verify_task_013.py`: 저장(Save), 단건 조회(Find By ID), 목록 조회(Find All) 기능 검증 스크립트 작성.
+- **검증 증거**:
+  - **스크립트 실행 결과**: `python scripts/verify_task_013.py`
+    - Save -> `data/reports/{timestamp}_{uuid}.json` 파일 생성 확인.
+    - Find By ID -> 저장된 데이터와 조회된 DTO 일치 확인.
+    - Find All -> 파일 리스트 파싱 및 타임스탬프 기준 정렬 확인.
+    - 메타데이터 정합성(Score, Grade 등) 확인 완료.
+- **로그 및 산출물**:
+  - `packages/imh_history/` 패키지 구조화.
