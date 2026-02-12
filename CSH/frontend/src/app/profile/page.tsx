@@ -3,200 +3,230 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/common/Header";
 import { useAuth } from "@/contexts/AuthContext";
-import { authApi } from "@/lib/api";
-import { User, Mail, Calendar, MapPin, Phone, Lock, Save, Loader2, CheckCircle2 } from "lucide-react";
+import { interviewApi, type InterviewRecord } from "@/lib/api";
+import {
+  User, Mail, Calendar, MapPin, Phone, Shield, Clock,
+  ChevronRight, FileText, Settings, TrendingUp, Award,
+} from "lucide-react";
 
+/**
+ * 내 정보 페이지 — 개인정보 요약 + 지난 면접 기록
+ * 회원정보·비밀번호 수정은 /settings 페이지에서 처리
+ */
 export default function ProfilePage() {
-  const { user, refreshUser } = useAuth();
+  const { user, token } = useAuth();
   const router = useRouter();
 
-  const [form, setForm] = useState({
-    name: "", birth_date: "", gender: "", address: "", phone: "",
-  });
-  const [pwForm, setPwForm] = useState({
-    current_password: "", new_password: "", confirm_password: "",
-  });
-  const [saving, setSaving] = useState(false);
-  const [changingPw, setChangingPw] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-  const [pwMessage, setPwMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  // 면접 기록 상태
+  const [history, setHistory] = useState<InterviewRecord[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
 
-  /* 유저 데이터 로드 */
+  // 인증 확인
   useEffect(() => {
-    if (!user) { router.push("/"); return; }
-    setForm({
-      name: user.name || "",
-      birth_date: user.birth_date || "",
-      gender: user.gender || "",
-      address: user.address || "",
-      phone: user.phone || "",
-    });
-  }, [user, router]);
-
-  /* 프로필 저장 */
-  const handleSave = async () => {
-    setSaving(true); setMessage(null);
-    try {
-      await authApi.updateUser(form);
-      await refreshUser();
-      setMessage({ type: "success", text: "프로필이 저장되었습니다." });
-    } catch (e: unknown) {
-      setMessage({ type: "error", text: e instanceof Error ? e.message : "저장에 실패했습니다." });
-    } finally { setSaving(false); }
-  };
-
-  /* 비밀번호 변경 */
-  const handlePasswordChange = async () => {
-    if (pwForm.new_password !== pwForm.confirm_password) {
-      setPwMessage({ type: "error", text: "새 비밀번호가 일치하지 않습니다." });
-      return;
+    if (!token && typeof window !== "undefined") {
+      router.push("/");
     }
-    if (pwForm.new_password.length < 8) {
-      setPwMessage({ type: "error", text: "비밀번호는 8자 이상이어야 합니다." });
-      return;
+  }, [token, router]);
+
+  // 면접 기록 로드
+  useEffect(() => {
+    if (user?.email) {
+      setHistoryLoading(true);
+      interviewApi
+        .getHistory(user.email)
+        .then(setHistory)
+        .catch(() => {})
+        .finally(() => setHistoryLoading(false));
     }
-    setChangingPw(true); setPwMessage(null);
-    try {
-      await authApi.updateUser({
-        current_password: pwForm.current_password,
-        new_password: pwForm.new_password,
-      });
-      setPwMessage({ type: "success", text: "비밀번호가 변경되었습니다." });
-      setPwForm({ current_password: "", new_password: "", confirm_password: "" });
-    } catch (e: unknown) {
-      setPwMessage({ type: "error", text: e instanceof Error ? e.message : "비밀번호 변경 실패" });
-    } finally { setChangingPw(false); }
-  };
+  }, [user]);
 
   if (!user) return null;
 
+  // 면접 통계 계산
+  const totalInterviews = history.length;
+  const scoredHistory = history.filter((h) => h.score != null);
+  const avgScore =
+    scoredHistory.length > 0
+      ? Math.round(scoredHistory.reduce((sum, h) => sum + (h.score ?? 0), 0) / scoredHistory.length)
+      : 0;
+  const bestScore =
+    scoredHistory.length > 0
+      ? Math.max(...scoredHistory.map((h) => h.score ?? 0))
+      : 0;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#1a1a2e] via-[#16213e] to-[#0f3460]">
+    <div className="min-h-screen">
       <Header />
-      <main className="max-w-2xl mx-auto px-6 py-10">
-        <h1 className="text-2xl font-bold text-white mb-8">👤 프로필 설정</h1>
 
-        {/* 기본 정보 */}
-        <section className="glass-card rounded-2xl p-6 mb-6">
-          <h2 className="text-lg font-semibold text-white mb-5 flex items-center gap-2">
-            <User size={18} className="text-cyan-400" /> 기본 정보
-          </h2>
-
-          <div className="space-y-4">
-            {/* 이메일 (읽기전용) */}
-            <div>
-              <label className="text-sm text-gray-400 mb-1 flex items-center gap-1"><Mail size={14} /> 이메일</label>
-              <input type="email" value={user.email || ""} disabled
-                className="input-field opacity-60 cursor-not-allowed" />
-            </div>
-
-            {/* 이름 */}
-            <div>
-              <label className="text-sm text-gray-400 mb-1 flex items-center gap-1"><User size={14} /> 이름</label>
-              <input type="text" value={form.name}
-                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                className="input-field" placeholder="이름" />
-            </div>
-
-            {/* 생년월일 */}
-            <div>
-              <label className="text-sm text-gray-400 mb-1 flex items-center gap-1"><Calendar size={14} /> 생년월일</label>
-              <input type="date" value={form.birth_date}
-                onChange={e => setForm(p => ({ ...p, birth_date: e.target.value }))}
-                className="input-field" />
-            </div>
-
-            {/* 성별 */}
-            <div>
-              <label className="text-sm text-gray-400 mb-1">성별</label>
-              <div className="flex gap-3 mt-1">
-                {["male", "female", "other"].map(g => (
-                  <button key={g} onClick={() => setForm(p => ({ ...p, gender: g }))}
-                    className={`px-4 py-2 rounded-lg text-sm border transition ${
-                      form.gender === g
-                        ? "border-cyan-500 bg-cyan-500/10 text-cyan-400"
-                        : "border-gray-600 text-gray-400 hover:border-gray-400"
-                    }`}>
-                    {g === "male" ? "남성" : g === "female" ? "여성" : "기타"}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 주소 */}
-            <div>
-              <label className="text-sm text-gray-400 mb-1 flex items-center gap-1"><MapPin size={14} /> 주소</label>
-              <input type="text" value={form.address}
-                onChange={e => setForm(p => ({ ...p, address: e.target.value }))}
-                className="input-field" placeholder="주소" />
-            </div>
-
-            {/* 전화번호 */}
-            <div>
-              <label className="text-sm text-gray-400 mb-1 flex items-center gap-1"><Phone size={14} /> 전화번호</label>
-              <input type="tel" value={form.phone}
-                onChange={e => setForm(p => ({ ...p, phone: e.target.value }))}
-                className="input-field" placeholder="010-1234-5678" />
-            </div>
+      <main className="max-w-[900px] mx-auto px-6 py-10">
+        {/* ========== 프로필 헤더 ========== */}
+        <div className="glass-card mb-8 flex flex-col sm:flex-row items-center gap-6">
+          {/* 아바타 */}
+          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[var(--cyan)] to-[var(--green)] flex items-center justify-center text-3xl font-bold text-white flex-shrink-0">
+            {(user.name || user.email)[0].toUpperCase()}
           </div>
 
-          {message && (
-            <div className={`mt-4 p-3 rounded-lg text-sm ${
-              message.type === "success" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
-            }`}>
-              {message.text}
-            </div>
-          )}
+          <div className="flex-1 text-center sm:text-left">
+            <h1 className="text-2xl font-bold text-white mb-1">
+              {user.name || "사용자"}
+            </h1>
+            <p className="text-sm text-[var(--text-secondary)]">{user.email}</p>
+            {user.role && (
+              <span className="inline-block mt-2 px-3 py-1 rounded-full text-xs bg-[rgba(0,217,255,0.12)] text-[var(--cyan)] border border-[rgba(0,217,255,0.25)]">
+                {user.role === "candidate" ? "지원자" : user.role === "recruiter" ? "채용담당자" : user.role}
+              </span>
+            )}
+          </div>
 
-          <button onClick={handleSave} disabled={saving}
-            className="mt-5 w-full btn-gradient flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold disabled:opacity-50">
-            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-            저장
+          {/* 설정 버튼 */}
+          <button
+            onClick={() => router.push("/settings")}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-[rgba(0,217,255,0.3)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.08)] transition"
+          >
+            <Settings size={16} /> 회원정보 수정
           </button>
+        </div>
+
+        {/* ========== 개인정보 카드 ========== */}
+        <section className="glass-card mb-8">
+          <h2 className="text-lg font-semibold text-white mb-5 flex items-center gap-2">
+            <User size={18} className="text-[var(--cyan)]" /> 개인 정보
+          </h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <InfoItem icon={<Mail size={15} />} label="이메일" value={user.email} />
+            <InfoItem icon={<User size={15} />} label="이름" value={user.name || "-"} />
+            <InfoItem icon={<Calendar size={15} />} label="생년월일" value={user.birth_date || "-"} />
+            <InfoItem
+              icon={<Shield size={15} />}
+              label="성별"
+              value={
+                user.gender === "male" ? "남성" : user.gender === "female" ? "여성" : user.gender === "other" ? "기타" : "-"
+              }
+            />
+            <InfoItem icon={<MapPin size={15} />} label="주소" value={user.address || "-"} />
+            <InfoItem icon={<Phone size={15} />} label="전화번호" value={user.phone || "-"} />
+          </div>
         </section>
 
-        {/* 비밀번호 변경 */}
-        <section className="glass-card rounded-2xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-5 flex items-center gap-2">
-            <Lock size={18} className="text-cyan-400" /> 비밀번호 변경
-          </h2>
+        {/* ========== 면접 통계 ========== */}
+        <section className="grid grid-cols-3 gap-4 mb-8">
+          <StatCard icon={<FileText size={20} />} label="총 면접 횟수" value={`${totalInterviews}회`} color="cyan" />
+          <StatCard icon={<TrendingUp size={20} />} label="평균 점수" value={totalInterviews > 0 ? `${avgScore}점` : "-"} color="green" />
+          <StatCard icon={<Award size={20} />} label="최고 점수" value={totalInterviews > 0 ? `${bestScore}점` : "-"} color="yellow" />
+        </section>
 
-          <div className="space-y-4">
-            <div>
-              <label className="text-sm text-gray-400 mb-1">현재 비밀번호</label>
-              <input type="password" value={pwForm.current_password}
-                onChange={e => setPwForm(p => ({ ...p, current_password: e.target.value }))}
-                className="input-field" placeholder="현재 비밀번호" />
-            </div>
-            <div>
-              <label className="text-sm text-gray-400 mb-1">새 비밀번호</label>
-              <input type="password" value={pwForm.new_password}
-                onChange={e => setPwForm(p => ({ ...p, new_password: e.target.value }))}
-                className="input-field" placeholder="8자 이상" />
-            </div>
-            <div>
-              <label className="text-sm text-gray-400 mb-1">비밀번호 확인</label>
-              <input type="password" value={pwForm.confirm_password}
-                onChange={e => setPwForm(p => ({ ...p, confirm_password: e.target.value }))}
-                className="input-field" placeholder="새 비밀번호 확인" />
-            </div>
+        {/* ========== 면접 기록 ========== */}
+        <section className="glass-card">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+              <Clock size={18} className="text-[var(--cyan)]" /> 면접 기록
+            </h2>
+            {totalInterviews > 0 && (
+              <span className="text-xs text-[var(--text-secondary)]">총 {totalInterviews}건</span>
+            )}
           </div>
 
-          {pwMessage && (
-            <div className={`mt-4 p-3 rounded-lg text-sm ${
-              pwMessage.type === "success" ? "bg-green-500/10 text-green-400" : "bg-red-500/10 text-red-400"
-            }`}>
-              {pwMessage.text}
+          {historyLoading ? (
+            <div className="text-center py-10 text-sm text-[var(--text-secondary)]">불러오는 중...</div>
+          ) : history.length === 0 ? (
+            <div className="text-center py-10">
+              <p className="text-sm text-[var(--text-secondary)] mb-4">아직 면접 기록이 없습니다.</p>
+              <button
+                onClick={() => router.push("/dashboard")}
+                className="btn-gradient px-6 py-2.5 rounded-xl text-sm"
+              >
+                첫 면접 시작하기
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {history.map((h) => (
+                <div
+                  key={h.session_id}
+                  className="flex items-center justify-between p-4 rounded-xl bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)] transition cursor-pointer group"
+                  onClick={() => window.open(`/api/report/${h.session_id}`, "_blank")}
+                >
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-white">{h.date}</p>
+                    {h.summary && (
+                      <p className="text-xs text-[var(--text-secondary)] mt-1 line-clamp-1">{h.summary}</p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    {h.score != null && (
+                      <span
+                        className={`text-sm font-bold ${
+                          h.score >= 80
+                            ? "text-[var(--green)]"
+                            : h.score >= 60
+                              ? "text-[var(--cyan)]"
+                              : h.score >= 40
+                                ? "text-[var(--warning)]"
+                                : "text-[var(--danger)]"
+                        }`}
+                      >
+                        {h.score}점
+                      </span>
+                    )}
+                    <ChevronRight
+                      size={16}
+                      className="text-[var(--text-secondary)] group-hover:text-[var(--cyan)] transition"
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
-
-          <button onClick={handlePasswordChange} disabled={changingPw || !pwForm.current_password || !pwForm.new_password}
-            className="mt-5 w-full py-3 rounded-xl text-sm font-semibold bg-[#2a2a4a] text-white hover:bg-[#3a3a5a] border border-gray-600 transition disabled:opacity-50 flex items-center justify-center gap-2">
-            {changingPw ? <Loader2 size={16} className="animate-spin" /> : <Lock size={16} />}
-            비밀번호 변경
-          </button>
         </section>
       </main>
+    </div>
+  );
+}
+
+/* ========== 하위 컴포넌트 ========== */
+
+/** 개인정보 항목 — 읽기 전용 표시 */
+function InfoItem({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-xl bg-[rgba(255,255,255,0.03)]">
+      <span className="text-[var(--cyan)] mt-0.5">{icon}</span>
+      <div>
+        <p className="text-xs text-[var(--text-secondary)]">{label}</p>
+        <p className="text-sm text-white font-medium">{value}</p>
+      </div>
+    </div>
+  );
+}
+
+/** 통계 카드 */
+function StatCard({
+  icon,
+  label,
+  value,
+  color,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  color: "cyan" | "green" | "yellow";
+}) {
+  const colorMap = {
+    cyan: { bg: "rgba(0,217,255,0.08)", border: "rgba(0,217,255,0.2)", text: "var(--cyan)" },
+    green: { bg: "rgba(0,255,136,0.08)", border: "rgba(0,255,136,0.2)", text: "var(--green)" },
+    yellow: { bg: "rgba(255,193,7,0.08)", border: "rgba(255,193,7,0.2)", text: "var(--warning)" },
+  };
+  const c = colorMap[color];
+
+  return (
+    <div
+      className="glass-card flex flex-col items-center text-center py-5"
+      style={{ background: c.bg, borderColor: c.border }}
+    >
+      <span style={{ color: c.text }}>{icon}</span>
+      <p className="text-2xl font-bold text-white mt-2">{value}</p>
+      <p className="text-xs text-[var(--text-secondary)] mt-1">{label}</p>
     </div>
   );
 }

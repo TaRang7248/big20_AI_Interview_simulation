@@ -2207,8 +2207,14 @@ async def favicon(request: Request):
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request):
-    """프로필 페이지 → Next.js 프록시"""
+    """내 정보 페이지 → Next.js 프록시"""
     return await _proxy_to_nextjs(request, "profile")
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """회원정보 수정 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "settings")
 
 
 @app.get("/whiteboard", response_class=HTMLResponse)
