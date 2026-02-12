@@ -1,9 +1,65 @@
+# NOTE:
+# - Python 3.10 권장
+# - PyTorch(CUDA 12.1)는 requirements.txt로 설치하지 말고 SETUP.md의 명령어로 별도 설치하세요.
+# - 아래는 "백엔드 + 실시간 + AI 오케스트레이션" 개발에 필요한 최소/권장 패키지 목록입니다.
+
+# --- Web/API ---
 fastapi
-uvicorn
-python-multipart
-psycopg2-binary
-python-dotenv
-google-generativeai
+uvicorn[standard]
 pydantic
+python-dotenv
+httpx
+
+# --- Auth / Security (선택: 필요 시 사용) ---
+python-jose[cryptography]
+passlib[bcrypt]
+
+# --- Data / DB ---
+sqlalchemy
+alembic
+psycopg2-binary
+asyncpg
+redis
+
+# --- Async jobs ---
+celery
+
+# --- Realtime (WebRTC / WebSocket) ---
+aiortc
+websockets
+
+# --- Hume AI TTS ---
+hume[microphone]
+aiohttp
+
+# --- LLM Orchestration / RAG ---
 openai
+anthropic
+langchain
+langchain-openai
+langchain-ollama
+langchain-community
+langchain-postgres
+langgraph
+tiktoken
 pypdf
+pymupdf
+easyocr
+
+# --- Audio / STT pipeline helpers ---
+soundfile
+librosa
+deepgram-sdk
+pyaudio
+
+# --- Speaker diarization / audio analysis (pin은 constraints로 관리) ---
+pyannote-audio
+
+# --- CV / Emotion (선택: 필요 시 사용) ---
+opencv-python
+deepface
+
+# --- Dev tools ---
+pytest
+ruff
+black
