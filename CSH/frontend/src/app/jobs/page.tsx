@@ -153,6 +153,8 @@ export default function JobPostingsPage() {
       }
       setShowModal(false);
       await loadPostings();  // 목록 새로고침
+      // CRUD 성공 피드백 (토스트 알림)
+      toast.success(editingId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.");
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "저장 실패");
     } finally {
@@ -168,6 +170,7 @@ export default function JobPostingsPage() {
       await jobPostingApi.delete(deleteTarget);
       setDeleteTarget(null);
       await loadPostings();
+      toast.success("공고가 삭제되었습니다.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "삭제 실패");
     } finally {
@@ -181,6 +184,7 @@ export default function JobPostingsPage() {
       const newStatus = p.status === "open" ? "closed" : "open";
       await jobPostingApi.update(p.id, { status: newStatus });
       await loadPostings();
+      toast.success(newStatus === "open" ? "공고가 재게시되었습니다." : "공고가 마감되었습니다.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "상태 변경 실패");
     }
