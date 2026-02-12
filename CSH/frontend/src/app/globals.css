@@ -68,6 +68,12 @@ body {
 .input-field:focus { border-color: var(--cyan); }
 .input-field::placeholder { color: rgba(255,255,255,0.3); }
 
+/* select 드롭다운 옵션 배경 — 어두운 테마에 맞춤 */
+select.input-field option {
+  background: #1a1a2e;
+  color: white;
+}
+
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(0,217,255,0.3); border-radius: 3px; }
