@@ -243,7 +243,11 @@ function initDashboard() {
 
 async function fetchJobs() {
     try {
-        const response = await fetch('/api/jobs');
+        let url = '/api/jobs';
+        if (AppState.currentUser && AppState.currentUser.id_name) {
+            url += `?user_id=${encodeURIComponent(AppState.currentUser.id_name)}`;
+        }
+        const response = await fetch(url);
         const result = await response.json();
         if (result.success) {
             MOCK_DB.jobs = result.jobs;

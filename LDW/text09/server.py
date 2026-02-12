@@ -332,11 +332,20 @@ def change_password(data: PasswordChange):
         conn.close()
 
 @app.get("/api/jobs")
-def get_jobs():
+def get_jobs(user_id: Optional[str] = None):
     conn = get_db_connection()
     try:
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
+        if user_id:
+            query = """
+                SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at 
+                FROM interview_announcement 
+                ORDER BY (CASE WHEN id_name = %s THEN 0 ELSE 1 END), created_at DESC
+            """
+            c.execute(query, (user_id,))
+        else:
+            c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
+            
         rows = c.fetchall()
         return {"success": True, "jobs": [dict(row) for row in rows]}
     finally:

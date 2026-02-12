@@ -47,21 +47,33 @@
    - '상세보기'를 통해 지원자의 이력서, 면접 질의응답 내용, AI 분석 점수(기술, 문제해결, 소통, 태도)를 확인합니다.
 
 ## 5. 파일 구조 설명
-- `server.py`: FastAPI 기반의 백엔드 서버 로직 (API, DB 연동, AI 호출).
-- `app.js`: 프론트엔드 로직 (SPA 라우팅, API 호출, 녹음 및 타이머 처리).
-- `index.html`: 메인 웹 페이지 구조.
-- `styles.css`: 스타일 시트.
-- `create_table.py`: 데이터베이스 테이블 초기화 스크립트.
-- `migrate_rename_column.py`: DB 스키마 마이그레이션 스크립트 (announcement_title -> title).
-- `requirements.txt`: Python 의존성 라이브러리 목록.
+- `server.py`: FastAPI 기반의 백엔드 서버. API 엔드포인트와 비즈니스 로직을 처리합니다.
+- `app.js`: 프론트엔드 JavaScript. SPA 라우팅, API 통신, 면접 진행 로직(녹음, 타이머, STT/TTS UI 처리)을 담당합니다.
+- `index.html`: 메인 HTML 파일. SPA 구조로 되어 있으며, 섹션별로 숨김/표시 처리됩니다.
+- `styles.css`: 전체 스타일 정의 파일.
+- `create_table.py`: PostgreSQL 데이터베이스 초기 테이블 생성 스크립트.
+- `db/`: 데이터베이스 관련 파일 디렉토리.
+- `uploads/`: 업로드된 이력서 및 오디오 파일 저장소.
+- `.env`: 데이터베이스 접속 정보 및 OpenAI API Key 설정 파일.
 
 ## 6. 사용된 라이브러리 및 모델
-- **Backend Framework**: `FastAPI`, `Uvicorn`
-- **Database Driver**: `psycopg2-binary`
-- **AI Integration**: `openai` (GPT-4o, Whisper)
-- **PDF Processing**: `pypdf`
-- **Environment Management**: `python-dotenv`
+### Backend Libraries
+- **FastAPI**: 고성능 웹 프레임워크
+- **Uvicorn**: ASGI 서버
+- **Psycopg2**: PostgreSQL 데이터베이스 어댑터
+- **OpenAI**: GPT-4o 및 Whisper API 연동
+- **PyPDF**: PDF 이력서 텍스트 추출
+- **Python-Dotenv**: 환경 변수 관리
 
-## 7. 주의사항
-- 카메라와 마이크 권한이 허용되어야 면접을 진행할 수 있습니다.
-- `.env` 파일에 데이터베이스 접속 정보와 OpenAI API Key가 올바르게 설정되어 있어야 합니다.
+### AI Models
+- **GPT-4o**: 
+  - 면접관 질문 생성 (이전 대화 맥락 반영)
+  - 지원자 답변 평가 (기술/인성/태도 점수화)
+- **Whisper-1**: 
+  - 지원자의 음성 답변을 텍스트로 변환 (STT)
+
+## 7. 주의사항 및 문제 해결
+- **카메라/마이크 권한**: 브라우저에서 권한을 허용해야 면접 진행 가능합니다.
+- **데이터베이스 연결**: PostgreSQL 서버가 실행 중이어야 하며, `.env` 설정이 정확해야 합니다.
+- **API Key**: OpenAI API Credit이 충분한지 확인하세요.
+- **포트 충돌**: 8000번 포트가 사용 중일 경우 `server.py`의 실행 포트를 변경하거나 해당 프로세스를 종료하세요.
