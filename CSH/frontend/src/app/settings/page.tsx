@@ -7,7 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { authApi } from "@/lib/api";
 import {
   User, Mail, Calendar, MapPin, Phone, Lock, Save,
-  Loader2, ArrowLeft,
+  Loader2, ArrowLeft, Briefcase,
 } from "lucide-react";
 
 /**
@@ -20,7 +20,7 @@ export default function SettingsPage() {
 
   // ── 회원정보 폼 ──
   const [form, setForm] = useState({
-    name: "", birth_date: "", gender: "", address: "", phone: "",
+    name: "", birth_date: "", gender: "", address: "", phone: "", role: "candidate",
   });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
@@ -41,6 +41,7 @@ export default function SettingsPage() {
       gender: user.gender || "",
       address: user.address || "",
       phone: user.phone || "",
+      role: user.role || "candidate",
     });
   }, [user, router]);
 
@@ -165,6 +166,28 @@ export default function SettingsPage() {
                     }`}
                   >
                     {g === "male" ? "남성" : "여성"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 회원 유형 */}
+            <div>
+              <label className="text-sm text-gray-400 mb-1 flex items-center gap-1">
+                <Briefcase size={14} /> 회원 유형
+              </label>
+              <div className="flex gap-3 mt-1">
+                {(["candidate", "recruiter"] as const).map((r) => (
+                  <button
+                    key={r}
+                    onClick={() => setForm((p) => ({ ...p, role: r }))}
+                    className={`px-4 py-2 rounded-lg text-sm border transition ${
+                      form.role === r
+                        ? "border-[var(--cyan)] bg-[rgba(0,217,255,0.1)] text-[var(--cyan)]"
+                        : "border-gray-600 text-gray-400 hover:border-gray-400"
+                    }`}
+                  >
+                    {r === "candidate" ? "🎯 지원자" : "👔 인사담당자"}
                   </button>
                 ))}
               </div>

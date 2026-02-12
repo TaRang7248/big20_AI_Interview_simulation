@@ -723,6 +723,8 @@ def update_user(email: str, update_data: Dict) -> bool:
                         user.gender = update_data["gender"]
                     if "phone" in update_data:
                         user.phone = update_data["phone"]
+                    if "role" in update_data:
+                        user.role = update_data["role"]
                     if "password_hash" in update_data:
                         user.password_hash = update_data["password_hash"]
                     db.commit()
@@ -2541,6 +2543,7 @@ async def register_user(request: UserRegisterRequest):
         "birth_date": request.birth_date,
         "address": request.address,
         "gender": request.gender,
+        "phone": request.phone,  # 전화번호
         "role": request.role  # 사용자가 선택한 역할
     }
     
@@ -2746,6 +2749,7 @@ class UserUpdateRequest(BaseModel):
     address: Optional[str] = None
     gender: Optional[str] = None
     phone: Optional[str] = None  # 전화번호
+    role: Optional[str] = None  # candidate(지원자), recruiter(인사담당자)
     current_password: Optional[str] = None
     new_password: Optional[str] = None
 
@@ -2786,6 +2790,15 @@ async def update_user_info(request: UserUpdateRequest, current_user: Dict = Depe
     # 전화번호 수정
     if request.phone is not None:
         update_data["phone"] = request.phone
+    
+    # 회원 유형(role) 수정
+    if request.role:
+        if request.role not in ["candidate", "recruiter"]:
+            return UserUpdateResponse(
+                success=False,
+                message="올바른 회원 유형을 선택해주세요. (지원자 또는 인사담당자)"
+            )
+        update_data["role"] = request.role
     
     # 비밀번호 변경
     if request.new_password:
