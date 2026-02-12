@@ -1125,7 +1125,7 @@ function renderAdminApplicantList(applicants) {
     applicants.forEach(app => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${app.applicant_name} (${app.applicant_id})</td>
+            <td>${app.applicant_name} <br><span style="font-size: 0.8em; color: gray;">(${app.email || '이메일 미등록'})</span></td>
             <td>${app.announcement_title}</td>
             <td>${app.announcement_job}</td>
             <td>${app.interview_time}</td>

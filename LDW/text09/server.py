@@ -812,6 +812,10 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
         if pass_fail not in ["합격", "불합격"]:
              pass_fail = "불합격"
              
+        c.execute("SELECT email FROM users WHERE id_name = %s", (id_name,))
+        user_row = c.fetchone()
+        user_email = user_row[0] if user_row else ""
+
         c.execute("""
             INSERT INTO Interview_Result (
                 interview_number, 
@@ -821,8 +825,9 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
                 non_verbal_score, non_verbal_eval, 
                 pass_fail,
                 title, announcement_job,
-                id_name, session_name
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                id_name, session_name,
+                email
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             interview_number,
             int(result.get("tech_score", 0)), result.get("tech_eval", ""),
@@ -831,7 +836,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             int(result.get("non_verbal_score", 0)), result.get("non_verbal_eval", ""),
             pass_fail,
             announcement_title, announcement_job,
-            id_name, session_name
+            id_name, session_name,
+            user_email
         ))
         
         conn.commit()
@@ -909,7 +915,8 @@ def get_admin_applicants(admin_id: Optional[str] = None):
         query = """
             SELECT r.interview_number, r.id_name, u.name as applicant_name, 
                    r.title as announcement_title, r.announcement_job, r.pass_fail, 
-                   to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time
+                   to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time,
+                   r.email
             FROM Interview_Result r
             JOIN users u ON r.id_name = u.id_name
             JOIN interview_announcement ia ON r.title = ia.title
