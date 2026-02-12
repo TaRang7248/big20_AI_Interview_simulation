@@ -23,8 +23,12 @@ export default function LandingPage() {
   const [modal, setModal] = useState<ModalState>("none");
 
   const handleStart = () => {
-    if (user) router.push("/dashboard");
-    else setModal("login");
+    if (user) {
+      // 역할별 대시보드 리다이렉트
+      router.push(user.role === "recruiter" ? "/recruiter" : "/dashboard");
+    } else {
+      setModal("login");
+    }
   };
 
   return (
@@ -38,7 +42,7 @@ export default function LandingPage() {
               <span className="text-sm text-[var(--text-secondary)]">
                 <strong className="text-[var(--cyan)]">{user.name}</strong>님
               </span>
-              <button onClick={() => router.push("/dashboard")} className="btn-gradient text-sm !py-2 !px-5">
+              <button onClick={() => router.push(user.role === "recruiter" ? "/recruiter" : "/dashboard")} className="btn-gradient text-sm !py-2 !px-5">
                 대시보드
               </button>
             </>
