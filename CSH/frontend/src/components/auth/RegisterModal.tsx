@@ -6,7 +6,7 @@ import Modal from "@/components/common/Modal";
 interface Props { open: boolean; onClose: () => void; onSwitch: () => void; }
 
 export default function RegisterModal({ open, onClose, onSwitch }: Props) {
-  const [form, setForm] = useState({ email: "", password: "", passwordConfirm: "", name: "", birth_date: "", gender: "", address: "", phone: "" });
+  const [form, setForm] = useState({ email: "", password: "", passwordConfirm: "", name: "", birth_date: "", gender: "", address: "", phone: "", role: "candidate" });
   const [emailStatus, setEmailStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,7 +30,7 @@ export default function RegisterModal({ open, onClose, onSwitch }: Props) {
     if (emailStatus === "taken") { setError("이미 사용 중인 이메일입니다."); return; }
     setLoading(true);
     try {
-      await authApi.register({ email: form.email, password: form.password, name: form.name, birth_date: form.birth_date, gender: form.gender, address: form.address, phone: form.phone });
+      await authApi.register({ email: form.email, password: form.password, name: form.name, birth_date: form.birth_date, gender: form.gender, address: form.address, phone: form.phone, role: form.role });
       alert("회원가입이 완료되었습니다! 로그인 해주세요.");
       onSwitch();
     } catch (e: unknown) {
@@ -68,6 +68,35 @@ export default function RegisterModal({ open, onClose, onSwitch }: Props) {
         <div>
           <label className="block text-sm text-[var(--text-secondary)] mb-1">이름 *</label>
           <input className="input-field" placeholder="홍길동" value={form.name} onChange={e => set("name", e.target.value)} />
+        </div>
+
+        {/* 회원 유형 - 지원자(candidate) 또는 인사담당자(recruiter) */}
+        <div>
+          <label className="block text-sm text-[var(--text-secondary)] mb-1">회원 유형 *</label>
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => set("role", "candidate")}
+              className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                form.role === "candidate"
+                  ? "border-[var(--cyan)] bg-[rgba(0,212,255,0.1)] text-[var(--cyan)]"
+                  : "border-[var(--glass-border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]"
+              }`}
+            >
+              🎯 지원자
+            </button>
+            <button
+              type="button"
+              onClick={() => set("role", "recruiter")}
+              className={`p-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                form.role === "recruiter"
+                  ? "border-[var(--cyan)] bg-[rgba(0,212,255,0.1)] text-[var(--cyan)]"
+                  : "border-[var(--glass-border)] text-[var(--text-secondary)] hover:border-[var(--text-secondary)]"
+              }`}
+            >
+              👔 인사담당자
+            </button>
+          </div>
         </div>
 
         {/* 추가 정보 */}

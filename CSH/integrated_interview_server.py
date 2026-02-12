@@ -723,6 +723,8 @@ def update_user(email: str, update_data: Dict) -> bool:
                         user.gender = update_data["gender"]
                     if "phone" in update_data:
                         user.phone = update_data["phone"]
+                    if "role" in update_data:
+                        user.role = update_data["role"]
                     if "password_hash" in update_data:
                         user.password_hash = update_data["password_hash"]
                     db.commit()
@@ -2207,8 +2209,14 @@ async def favicon(request: Request):
 
 @app.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request):
-    """프로필 페이지 → Next.js 프록시"""
+    """내 정보 페이지 → Next.js 프록시"""
     return await _proxy_to_nextjs(request, "profile")
+
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """회원정보 수정 페이지 → Next.js 프록시"""
+    return await _proxy_to_nextjs(request, "settings")
 
 
 @app.get("/whiteboard", response_class=HTMLResponse)
@@ -2535,6 +2543,7 @@ async def register_user(request: UserRegisterRequest):
         "birth_date": request.birth_date,
         "address": request.address,
         "gender": request.gender,
+        "phone": request.phone,  # 전화번호
         "role": request.role  # 사용자가 선택한 역할
     }
     
@@ -2580,12 +2589,16 @@ async def login_user(request: UserLoginRequest):
         update_user(request.email, {"password_hash": new_hash})
         print(f"🔄 비밀번호 해시 마이그레이션 완료: {request.email} (SHA-256 → bcrypt)")
     
-    # 민감 정보 제외하고 반환
+    # 민감 정보 제외하고 반환 (password_hash 등 제외)
     user_info = {
         "user_id": user["user_id"],
         "email": user["email"],
         "name": user["name"],
-        "gender": user["gender"]
+        "birth_date": user.get("birth_date"),
+        "gender": user.get("gender"),
+        "address": user.get("address"),
+        "phone": user.get("phone"),
+        "role": user.get("role", "candidate"),
     }
     
     # JWT 액세스 토큰 발급
@@ -2698,6 +2711,7 @@ async def get_user_info_api(email: str, current_user: Dict = Depends(get_current
         "birth_date": user["birth_date"],
         "address": user["address"],
         "gender": user["gender"],
+        "phone": user.get("phone"),
         "created_at": user["created_at"]
     }
 
@@ -2714,6 +2728,7 @@ async def get_current_user_info(current_user: Dict = Depends(get_current_user)):
         "user_id": user["user_id"], "email": user["email"],
         "name": user["name"], "birth_date": user.get("birth_date"),
         "address": user.get("address"), "gender": user.get("gender"),
+        "phone": user.get("phone"),
         "role": user.get("role"), "created_at": user.get("created_at")
     }
 
@@ -2734,6 +2749,7 @@ class UserUpdateRequest(BaseModel):
     address: Optional[str] = None
     gender: Optional[str] = None
     phone: Optional[str] = None  # 전화번호
+    role: Optional[str] = None  # candidate(지원자), recruiter(인사담당자)
     current_password: Optional[str] = None
     new_password: Optional[str] = None
 
@@ -2774,6 +2790,15 @@ async def update_user_info(request: UserUpdateRequest, current_user: Dict = Depe
     # 전화번호 수정
     if request.phone is not None:
         update_data["phone"] = request.phone
+    
+    # 회원 유형(role) 수정
+    if request.role:
+        if request.role not in ["candidate", "recruiter"]:
+            return UserUpdateResponse(
+                success=False,
+                message="올바른 회원 유형을 선택해주세요. (지원자 또는 인사담당자)"
+            )
+        update_data["role"] = request.role
     
     # 비밀번호 변경
     if request.new_password:
@@ -3194,10 +3219,20 @@ async def create_session(request: SessionCreateRequest = None, current_user: Dic
             source="session_manager",
         )
 
+    # 이력서 업로드 여부 확인 — 프론트엔드에 경고 메시지 전달 (UX 개선)
+    session = state.get_session(session_id)
+    resume_uploaded = session.get("resume_uploaded", False) if session else False
+
     return {
         "session_id": session_id,
         "greeting": greeting,
-        "status": "active"
+        "status": "active",
+        "resume_uploaded": resume_uploaded,
+        # 이력서가 없으면 경고 메시지 포함
+        "resume_warning": None if resume_uploaded else (
+            "이력서가 업로드되지 않았습니다. "
+            "이력서를 업로드하면 맞춤형 면접 질문을 받을 수 있습니다."
+        )
     }
 
 

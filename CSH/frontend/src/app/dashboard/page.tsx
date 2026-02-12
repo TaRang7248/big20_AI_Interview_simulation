@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import { resumeApi, interviewApi, type InterviewRecord } from "@/lib/api";
-import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock } from "lucide-react";
+import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle } from "lucide-react";
 
 export default function DashboardPage() {
   const { user, token } = useAuth();
@@ -181,12 +181,33 @@ export default function DashboardPage() {
 
         {/* 면접 시작 CTA */}
         <button
-          onClick={() => router.push("/interview")}
+          onClick={() => {
+            // 이력서 미업로드 시 경고를 표시하고, 사용자가 선택할 수 있도록 함
+            if (!resumeFile) {
+              const proceed = window.confirm(
+                "⚠️ 이력서가 업로드되지 않았습니다.\n\n" +
+                "이력서를 업로드하면 맞춤형 면접 질문을 받을 수 있습니다.\n\n" +
+                "이력서 없이 면접을 시작하시겠습니까?"
+              );
+              if (!proceed) return;
+            }
+            router.push("/interview");
+          }}
           className="w-full btn-gradient text-xl py-6 rounded-2xl mb-8 flex items-center justify-center gap-3 group"
         >
           🎥 AI 모의면접 시작하기
           <span className="text-sm opacity-70 group-hover:opacity-100">화상 면접 → 코딩 테스트 → 아키텍처 설계</span>
         </button>
+
+        {/* 이력서 미업로드 안내 배너 */}
+        {!resumeFile && (
+          <div className="flex items-center gap-3 p-4 mb-8 rounded-xl bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)]">
+            <AlertTriangle size={20} className="text-[var(--warning)] flex-shrink-0" />
+            <p className="text-sm text-[var(--warning)]">
+              이력서를 업로드하면 지원 직무·경력에 맞는 <strong>맞춤형 면접 질문</strong>을 받을 수 있습니다. 위 이력서 관리에서 PDF를 업로드해보세요.
+            </p>
+          </div>
+        )}
 
         {/* 면접 기록 */}
         <div className="glass-card">
