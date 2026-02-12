@@ -173,6 +173,20 @@ try:
         address = Column(String(500), nullable=True)
         phone = Column(String(20), nullable=True)  # 전화번호 (예: 010-1234-5678)
     
+    # ── 사용자 이력서 영구 저장 테이블 ──
+    # 이력서 메타데이터를 DB에 영구 저장하여, 서버 재시작/재로그인 시에도
+    # 이전에 업로드한 이력서를 자동 복원할 수 있도록 합니다.
+    class UserResume(Base):
+        __tablename__ = "user_resumes"
+        
+        id = Column(Integer, primary_key=True, index=True)
+        user_email = Column(String(255), nullable=False, index=True)  # 사용자 이메일 (users.email 참조)
+        filename = Column(String(500), nullable=False)                # 원본 파일명 (예: 홍길동_이력서.pdf)
+        file_path = Column(String(1000), nullable=False)              # 서버 저장 경로 (uploads/xxx.pdf)
+        file_size = Column(Integer, nullable=True)                    # 파일 크기 (bytes)
+        uploaded_at = Column(DateTime, default=datetime.utcnow)       # 업로드 일시
+        is_active = Column(Integer, nullable=False, default=1)        # 활성 여부 (1=사용 중, 0=삭제됨)
+    
     # 채용 공고 테이블 모델 (ERD: job_postings)
     class JobPosting(Base):
         __tablename__ = "job_postings"
@@ -3368,6 +3382,35 @@ async def upload_resume(
             source="resume_api",
         )
 
+    # ── DB에 이력서 메타데이터 영구 저장 ──
+    # 서버 재시작/재로그인 시에도 이력서를 자동 복원하기 위해 PostgreSQL에 저장합니다.
+    resolved_email = user_email or current_user.get("email")
+    if DB_AVAILABLE and resolved_email:
+        try:
+            db = SessionLocal()
+            try:
+                # 기존 활성 이력서를 비활성화 (한 사용자당 최신 1개만 active)
+                db.query(UserResume).filter(
+                    UserResume.user_email == resolved_email,
+                    UserResume.is_active == 1
+                ).update({"is_active": 0})
+                
+                # 새 이력서 레코드 저장
+                new_resume = UserResume(
+                    user_email=resolved_email,
+                    filename=file.filename,
+                    file_path=file_path,
+                    file_size=len(contents),
+                    is_active=1
+                )
+                db.add(new_resume)
+                db.commit()
+                print(f"✅ 이력서 DB 저장 완료: {resolved_email} → {file.filename}")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"⚠️ 이력서 DB 저장 실패 (세션에는 저장됨): {e}")
+
     return ResumeUploadResponse(
         success=True,
         message="이력서가 성공적으로 업로드되었습니다." + (
@@ -3416,7 +3459,65 @@ async def delete_resume(session_id: str, current_user: Dict = Depends(get_curren
         "retriever": None
     })
     
+    # DB에서도 이력서 비활성화 (영구 삭제 아닌 soft delete)
+    user_email = session.get("user_email") or current_user.get("email")
+    if DB_AVAILABLE and user_email:
+        try:
+            db = SessionLocal()
+            try:
+                db.query(UserResume).filter(
+                    UserResume.user_email == user_email,
+                    UserResume.is_active == 1
+                ).update({"is_active": 0})
+                db.commit()
+                print(f"✅ 이력서 DB 비활성화 완료: {user_email}")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"⚠️ 이력서 DB 비활성화 실패: {e}")
+    
     return {"success": True, "message": "이력서가 삭제되었습니다."}
+
+
+@app.get("/api/resume/user/{user_email}")
+async def get_user_resume(user_email: str, current_user: Dict = Depends(get_current_user)):
+    """
+    사용자의 영구 저장된 이력서 조회 (DB 기반).
+    로그인 시 대시보드에서 호출하여 이전에 업로드한 이력서를 자동 표시합니다.
+    서버 재시작 후에도 이력서 정보가 유지됩니다.
+    """
+    if not DB_AVAILABLE:
+        return {"resume_exists": False, "message": "DB 비활성화 상태"}
+    
+    try:
+        db = SessionLocal()
+        try:
+            # 해당 사용자의 최신 활성 이력서 조회
+            resume = db.query(UserResume).filter(
+                UserResume.user_email == user_email,
+                UserResume.is_active == 1
+            ).order_by(UserResume.uploaded_at.desc()).first()
+            
+            if resume and os.path.exists(resume.file_path):
+                return {
+                    "resume_exists": True,
+                    "filename": resume.filename,
+                    "file_path": resume.file_path,
+                    "file_size": resume.file_size,
+                    "uploaded_at": resume.uploaded_at.isoformat() if resume.uploaded_at else None
+                }
+            elif resume:
+                # DB 레코드는 있지만 실제 파일이 없는 경우 → 비활성화
+                resume.is_active = 0
+                db.commit()
+                return {"resume_exists": False, "message": "이력서 파일이 삭제되었습니다."}
+            else:
+                return {"resume_exists": False}
+        finally:
+            db.close()
+    except Exception as e:
+        print(f"❌ 이력서 조회 오류: {e}")
+        return {"resume_exists": False, "error": str(e)}
 
 
 # ========== 면접 Q&A 참조 데이터 인덱싱 API ==========
@@ -3644,6 +3745,8 @@ async def create_session(request: SessionCreateRequest = None, current_user: Dic
     state.update_session(session_id, session_data)
     
     # 같은 사용자가 이전에 업로드한 이력서(RAG retriever)가 있으면 새 세션으로 복사
+    # 1차: 인메모리 세션에서 검색 (서버가 살아있는 동안 가장 빠름)
+    resume_restored = False
     for sid, s in state.sessions.items():
         if sid != session_id and s.get("user_email") == request.user_email and s.get("resume_uploaded"):
             retriever = s.get("retriever")
@@ -3655,7 +3758,51 @@ async def create_session(request: SessionCreateRequest = None, current_user: Dic
                     "retriever": retriever
                 })
                 print(f"📚 이전 세션({sid[:8]})의 이력서 RAG를 새 세션에 연결함")
+                resume_restored = True
                 break
+    
+    # 2차: DB에서 이력서 복원 (서버 재시작 후에도 이력서 유지)
+    # 인메모리에 없는 경우, DB에 저장된 이력서 파일 경로를 확인하고
+    # RAG retriever를 다시 생성하여 세션에 연결합니다.
+    if not resume_restored and DB_AVAILABLE:
+        try:
+            db = SessionLocal()
+            try:
+                saved_resume = db.query(UserResume).filter(
+                    UserResume.user_email == request.user_email,
+                    UserResume.is_active == 1
+                ).order_by(UserResume.uploaded_at.desc()).first()
+                
+                if saved_resume and os.path.exists(saved_resume.file_path):
+                    print(f"📚 DB에서 이력서 복원 시도: {saved_resume.filename}")
+                    
+                    # RAG retriever 재생성
+                    retriever = None
+                    if RAG_AVAILABLE:
+                        try:
+                            connection_string = os.getenv("POSTGRES_CONNECTION_STRING")
+                            if connection_string:
+                                session_rag = ResumeRAG(
+                                    table_name=RESUME_TABLE,
+                                    connection_string=connection_string
+                                )
+                                retriever = session_rag.get_retriever()
+                                print(f"✅ DB 이력서 RAG retriever 복원 완료")
+                        except Exception as rag_err:
+                            print(f"⚠️ RAG retriever 복원 실패 (이력서 파일은 유지): {rag_err}")
+                    
+                    state.update_session(session_id, {
+                        "resume_uploaded": True,
+                        "resume_path": saved_resume.file_path,
+                        "resume_filename": saved_resume.filename,
+                        "retriever": retriever
+                    })
+                    resume_restored = True
+                    print(f"✅ DB에서 이력서 복원 완료: {saved_resume.filename}")
+            finally:
+                db.close()
+        except Exception as e:
+            print(f"⚠️ DB 이력서 복원 실패: {e}")
     
     print(f"✅ 면접 세션 생성: {session_id} (사용자: {request.user_email})")
 

@@ -40,10 +40,28 @@ export default function DashboardPage() {
     }
   }, [loading, token, user, router]);
 
-  // 면접 기록 로드
+  // 면접 기록 로드 + 기존 이력서 확인
   useEffect(() => {
     if (user?.email) {
+      // 면접 기록 로드
       interviewApi.getHistory(user.email).then(setHistory).catch(() => {});
+      
+      // DB에 저장된 기존 이력서 자동 확인 (서버 재시작 후에도 유지됨)
+      resumeApi.getUserResume(user.email).then((data) => {
+        if (data.resume_exists && data.filename) {
+          setResumeFile(data.filename);
+          // 업로드 시각을 한국어 날짜로 표시
+          if (data.uploaded_at) {
+            try {
+              const d = new Date(data.uploaded_at);
+              const dateStr = `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일`;
+              setUploadMsg(`📄 이전에 업로드한 이력서입니다. (${dateStr})`);
+            } catch {
+              setUploadMsg("📄 이전에 업로드한 이력서입니다.");
+            }
+          }
+        }
+      }).catch(() => {});
     }
   }, [user]);
 
