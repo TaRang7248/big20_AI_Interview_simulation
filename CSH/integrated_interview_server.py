@@ -3103,7 +3103,8 @@ async def create_job_posting(request: JobPostingCreateRequest, current_user: Dic
             except Exception as e:
                 db.rollback()
                 print(f"❌ 공고 등록 실패: {e}")
-                raise HTTPException(status_code=500, detail="공고 등록 실패")
+                import traceback; traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"공고 등록 실패: {str(e)}")
             finally:
                 db.close()
     
