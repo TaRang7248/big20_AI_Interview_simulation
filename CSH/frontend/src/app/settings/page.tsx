@@ -15,7 +15,7 @@ import {
  * /profile 에서 "회원정보 수정" 버튼을 눌러 진입
  */
 export default function SettingsPage() {
-  const { user, refreshUser } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const router = useRouter();
 
   // ── 회원정보 폼 ──
@@ -32,8 +32,9 @@ export default function SettingsPage() {
   const [changingPw, setChangingPw] = useState(false);
   const [pwMessage, setPwMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // 인증 확인 + 폼 초기화
+  // 인증 확인 + 폼 초기화 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   useEffect(() => {
+    if (loading) return;  // 아직 sessionStorage 복원 중이면 대기
     if (!user) { router.push("/"); return; }
     setForm({
       name: user.name || "",
@@ -43,7 +44,7 @@ export default function SettingsPage() {
       phone: user.phone || "",
       role: user.role || "candidate",
     });
-  }, [user, router]);
+  }, [loading, user, router]);
 
   // ── 프로필 저장 ──
   const handleSave = async () => {
@@ -85,6 +86,16 @@ export default function SettingsPage() {
       setChangingPw(false);
     }
   };
+
+  // 인증 상태 로딩 중이면 로딩 화면 표시
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-8 h-8 border-2 border-[var(--cyan)] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm text-[var(--text-secondary)]">로딩 중...</p>
+      </div>
+    </div>
+  );
 
   if (!user) return null;
 

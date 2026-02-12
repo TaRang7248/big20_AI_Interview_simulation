@@ -35,7 +35,7 @@ type Phase = "setup" | "interview" | "coding" | "whiteboard" | "report";
 type Status = "ready" | "listening" | "speaking" | "processing";
 
 export default function InterviewPage() {
-  const { user, token } = useAuth();
+  const { user, token, loading } = useAuth();
   const router = useRouter();
 
   // 상태
@@ -69,10 +69,10 @@ export default function InterviewPage() {
   const interventionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pushEventRef = useRef<((raw: Record<string, unknown>) => void) | null>(null);
 
-  // 인증 확인
+  // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   useEffect(() => {
-    if (!token) router.push("/");
-  }, [token, router]);
+    if (!loading && !token) router.push("/");
+  }, [loading, token, router]);
 
   // 리포트 데이터 로드
   useEffect(() => {
