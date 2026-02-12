@@ -1,11 +1,12 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import EventToastContainer from "@/components/common/EventToast";
 import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
 import { sessionApi, interviewApi, ttsApi, interventionApi, resumeApi } from "@/lib/api";
+import { useToast } from "@/contexts/ToastContext";
 import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2, FileText, Download, LayoutDashboard, AlertTriangle, Upload } from "lucide-react";
 
 /* Web Speech API 타입 (브라우저 전용) */
@@ -34,9 +35,22 @@ declare global {
 type Phase = "setup" | "interview" | "coding" | "whiteboard" | "report";
 type Status = "ready" | "listening" | "speaking" | "processing";
 
-export default function InterviewPage() {
+// Next.js App Router에서 useSearchParams 사용 시 Suspense boundary 필요
+export default function InterviewPageWrapper() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center"><div className="text-[var(--text-secondary)]">로딩 중...</div></div>}>
+      <InterviewPageInner />
+    </Suspense>
+  );
+}
+
+function InterviewPageInner() {
   const { user, token, loading } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // URL 에서 공고 ID 추출 (ex: /interview?job_posting_id=3)
+  const jobPostingId = searchParams.get("job_posting_id");
 
   // 상태
   const [phase, setPhase] = useState<Phase>("setup");
@@ -61,7 +75,8 @@ export default function InterviewPage() {
   const [resumeUploading, setResumeUploading] = useState(false);
 
   // Refs
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);           // setup 카메라 프리뷰용
+  const interviewVideoRef = useRef<HTMLVideoElement>(null);  // interview 화면 사용자 영상용
   const streamRef = useRef<MediaStream | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -88,6 +103,37 @@ export default function InterviewPage() {
   // 채팅 자동 스크롤
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+  // ── setup 화면 카메라 프리뷰 자동 초기화 ──
+  // phase가 "setup"일 때 카메라를 바로 켜서 프리뷰 영상을 보여줌
+  useEffect(() => {
+    if (phase !== "setup" || !user) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // 이미 스트림이 있으면 재사용
+        if (streamRef.current) {
+          if (videoRef.current) videoRef.current.srcObject = streamRef.current;
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      } catch {
+        // 권한 거부 등 — setup 화면에서는 조용히 무시 (시작 버튼 클릭 시 재시도)
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [phase, user]);
+
+  // ── interview 화면 전환 시 사용자 비디오 스트림 재할당 ──
+  // phase가 "interview"로 바뀌면 새로 마운트된 <video>에 srcObject를 연결
+  useEffect(() => {
+    if (phase === "interview" && interviewVideoRef.current && streamRef.current) {
+      interviewVideoRef.current.srcObject = streamRef.current;
+    }
+  }, [phase]);
+
   // 클린업
   useEffect(() => {
     return () => {
@@ -107,8 +153,15 @@ export default function InterviewPage() {
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
 
-      // 세션 생성
-      const res = await sessionApi.create({ user_email: user.email, interview_type: "technical" });
+      // 세션 생성 (공고 ID가 있으면 함께 전달)
+      const createData: { user_email: string; interview_type: string; job_posting_id?: number } = {
+        user_email: user.email,
+        interview_type: "technical",
+      };
+      if (jobPostingId) {
+        createData.job_posting_id = Number(jobPostingId);
+      }
+      const res = await sessionApi.create(createData);
       setSessionId(res.session_id);
 
       // 이력서 미업로드 시 경고 모달 표시 (UX 개선)
@@ -123,7 +176,7 @@ export default function InterviewPage() {
       await proceedInterview(res.session_id, stream);
     } catch (err) {
       console.error("면접 시작 실패:", err);
-      alert("면접 시작에 실패했습니다. 카메라/마이크 권한을 확인해주세요.");
+      toast.error("면접 시작에 실패했습니다. 카메라/마이크 권한을 확인해주세요.");
     }
   };
 
@@ -165,7 +218,7 @@ export default function InterviewPage() {
       await getNextQuestion(sid, "[START]");
     } catch (err) {
       console.error("면접 진행 실패:", err);
-      alert("면접 시작에 실패했습니다.");
+      toast.error("면접 시작에 실패했습니다.");
     }
   };
 
@@ -174,11 +227,11 @@ export default function InterviewPage() {
    */
   const handleResumeUploadInWarning = async (file: File) => {
     if (!file.name.toLowerCase().endsWith(".pdf")) {
-      alert("PDF 파일만 업로드 가능합니다.");
+      toast.error("PDF 파일만 업로드 가능합니다.");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      alert("파일 크기는 10MB 이하여야 합니다.");
+      toast.error("파일 크기는 10MB 이하여야 합니다.");
       return;
     }
     setResumeUploading(true);
@@ -188,7 +241,7 @@ export default function InterviewPage() {
       // 이력서 업로드 완료 후 면접 진행
       await proceedInterview(pendingSessionId);
     } catch {
-      alert("이력서 업로드 실패. 다시 시도해주세요.");
+      toast.error("이력서 업로드 실패. 다시 시도해주세요.");
     } finally {
       setResumeUploading(false);
     }
@@ -459,26 +512,82 @@ export default function InterviewPage() {
 
           {/* 2열 레이아웃 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
-            {/* AI 면접관 */}
+            {/* AI 면접관 아바타 */}
             <div className="glass-card flex flex-col">
               <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
                 <Volume2 size={16} className="text-[var(--cyan)]" /> AI 면접관
               </h3>
-              <div className="flex-1 rounded-xl bg-gradient-to-br from-[#1e3a5f] to-[#0d2137] flex items-center justify-center min-h-[200px] relative">
-                <div className={`w-48 h-48 rounded-full border-4 ${
-                  status === "speaking" ? "border-[var(--green)] shadow-[0_0_30px_rgba(0,255,136,0.5)]" : "border-[var(--cyan)]"
-                } bg-gradient-to-br from-[#2a4a6b] to-[#1a3050] flex items-center justify-center text-6xl transition-all`}>
-                  🤖
+              <div className="flex-1 rounded-xl bg-gradient-to-br from-[#1e3a5f] to-[#0d2137] flex items-center justify-center min-h-[200px] relative overflow-hidden">
+                {/* 발화 상태 배경 파동 효과 */}
+                {status === "speaking" && (
+                  <>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-64 h-64 rounded-full bg-[rgba(0,255,136,0.06)] animate-ping" style={{ animationDuration: "2s" }} />
+                    </div>
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="w-52 h-52 rounded-full bg-[rgba(0,217,255,0.08)] animate-ping" style={{ animationDuration: "2.5s" }} />
+                    </div>
+                  </>
+                )}
+                {/* 처리 중 배경 효과 */}
+                {status === "processing" && (
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <div className="w-56 h-56 rounded-full border-2 border-dashed border-[rgba(156,39,176,0.3)] animate-spin" style={{ animationDuration: "4s" }} />
+                  </div>
+                )}
+                {/* 아바타 원형 */}
+                <div className={`relative w-48 h-48 rounded-full border-4 transition-all duration-500 ${
+                  status === "speaking"
+                    ? "border-[var(--green)] shadow-[0_0_40px_rgba(0,255,136,0.5)] scale-105"
+                    : status === "processing"
+                    ? "border-purple-400 shadow-[0_0_20px_rgba(156,39,176,0.3)]"
+                    : status === "listening"
+                    ? "border-[var(--warning)] shadow-[0_0_20px_rgba(255,193,7,0.3)]"
+                    : "border-[var(--cyan)]"
+                } bg-gradient-to-br from-[#2a4a6b] to-[#1a3050] flex items-center justify-center`}>
+                  {/* 발화 중 이퀄라이저 바 */}
+                  {status === "speaking" ? (
+                    <div className="flex items-end gap-1.5 h-16">
+                      {[0, 1, 2, 3, 4].map(i => (
+                        <div
+                          key={i}
+                          className="w-2.5 bg-gradient-to-t from-[var(--cyan)] to-[var(--green)] rounded-full"
+                          style={{
+                            animation: `equalizer 0.8s ease-in-out ${i * 0.15}s infinite alternate`,
+                            height: `${20 + Math.random() * 30}px`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : status === "processing" ? (
+                    <Loader2 size={48} className="text-purple-300 animate-spin" />
+                  ) : (
+                    <span className="text-6xl">🤖</span>
+                  )}
                 </div>
-                <span className="absolute bottom-3 left-3 text-xs bg-black/60 px-2 py-1 rounded">AI 면접관</span>
+                {/* 상태 라벨 */}
+                <span className={`absolute bottom-3 left-3 text-xs px-2 py-1 rounded font-medium ${
+                  status === "speaking" ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]"
+                    : status === "processing" ? "bg-[rgba(156,39,176,0.2)] text-purple-300"
+                    : status === "listening" ? "bg-[rgba(255,193,7,0.2)] text-[var(--warning)]"
+                    : "bg-black/60 text-white"
+                }`}>
+                  {status === "speaking" ? "🔊 답변 중..."
+                    : status === "processing" ? "⏳ 생각 중..."
+                    : status === "listening" ? "👂 경청 중..."
+                    : "AI 면접관"}
+                </span>
               </div>
             </div>
 
             {/* 채팅/비디오 */}
             <div className="glass-card flex flex-col">
               {/* 사용자 비디오 (작게) */}
-              <div className="rounded-xl overflow-hidden bg-black h-32 mb-3">
-                <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+              <div className="rounded-xl overflow-hidden bg-black h-32 mb-3 relative">
+                <video ref={interviewVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                <span className="absolute bottom-2 right-2 text-xs bg-black/60 px-2 py-0.5 rounded text-white">
+                  {camEnabled ? "카메라 ON" : "카메라 OFF"}
+                </span>
               </div>
 
               {/* 채팅 로그 */}
@@ -621,7 +730,7 @@ export default function InterviewPage() {
                       a.click();
                       URL.revokeObjectURL(url);
                     })
-                    .catch((err) => alert(err.message));
+                    .catch((err) => toast.error(err.message));
                 }}
                 className="flex items-center gap-2 btn-gradient px-6 py-3"
               >

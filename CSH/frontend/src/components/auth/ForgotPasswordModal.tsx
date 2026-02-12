@@ -2,10 +2,12 @@
 import { useState } from "react";
 import { authApi } from "@/lib/api";
 import Modal from "@/components/common/Modal";
+import { useToast } from "@/contexts/ToastContext";
 
 interface Props { open: boolean; onClose: () => void; onBack: () => void; }
 
 export default function ForgotPasswordModal({ open, onClose, onBack }: Props) {
+  const { toast } = useToast();
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState({ email: "", name: "", birth_date: "", new_password: "", confirm: "" });
   const [error, setError] = useState("");
@@ -32,7 +34,7 @@ export default function ForgotPasswordModal({ open, onClose, onBack }: Props) {
     setLoading(true);
     try {
       await authApi.resetPassword({ email: form.email, new_password: form.new_password });
-      alert("비밀번호가 변경되었습니다. 로그인 해주세요.");
+      toast.success("비밀번호가 변경되었습니다. 로그인 해주세요.");
       onBack();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "비밀번호 재설정 실패");

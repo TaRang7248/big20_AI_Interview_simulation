@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Header from "@/components/common/Header";
 import { emotionApi } from "@/lib/api";
+import { useToast } from "@/contexts/ToastContext";
 import { BarChart3, Activity, Clock, Play, Square, RefreshCw } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -53,6 +54,7 @@ export default function EmotionDashboardWrapper() {
 
 function EmotionDashboardPage() {
   const searchParams = useSearchParams();
+  const { toast } = useToast();
 
   const [sessionId, setSessionId] = useState(searchParams.get("session_id") || "");
   const [refreshRate, setRefreshRate] = useState(1000);
@@ -101,7 +103,7 @@ function EmotionDashboardPage() {
 
   /* 시작 / 중지 */
   const start = () => {
-    if (!sessionId.trim()) { alert("세션 ID를 입력하세요."); return; }
+    if (!sessionId.trim()) { toast.warning("세션 ID를 입력하세요."); return; }
     // 초기화
     setTimeLabels([]); setDataPoints(0);
     setTimeData(initTimeSeries());

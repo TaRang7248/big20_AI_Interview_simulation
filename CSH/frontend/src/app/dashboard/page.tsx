@@ -5,9 +5,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import { resumeApi, interviewApi, type InterviewRecord } from "@/lib/api";
 import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle, Briefcase } from "lucide-react";
+import { useToast } from "@/contexts/ToastContext";
 
 export default function DashboardPage() {
   const { user, token, loading } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -62,8 +64,9 @@ export default function DashboardPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; }
+      // video 요소가 렌더링된 뒤 srcObject를 설정하기 위해 먼저 상태 변경
       setCamOk(true);
+      setTesting(true);
 
       // 마이크 레벨
       const ctx = new AudioContext();
@@ -82,9 +85,15 @@ export default function DashboardPage() {
       };
       draw();
       setMicOk(true);
-      setTesting(true);
-    } catch { alert("카메라/마이크 접근 권한이 필요합니다."); }
+    } catch { toast.error("카메라/마이크 접근 권한이 필요합니다."); }
   };
+
+  // testing이 true가 되어 <video>가 렌더링된 후 스트림을 연결
+  useEffect(() => {
+    if (testing && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [testing]);
 
   const stopTest = () => {
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -204,13 +213,14 @@ export default function DashboardPage() {
 
         {/* 면접 시작 CTA */}
         <button
-          onClick={() => {
+          onClick={async () => {
             // 이력서 미업로드 시 경고를 표시하고, 사용자가 선택할 수 있도록 함
             if (!resumeFile) {
-              const proceed = window.confirm(
+              const proceed = await toast.confirm(
                 "⚠️ 이력서가 업로드되지 않았습니다.\n\n" +
                 "이력서를 업로드하면 맞춤형 면접 질문을 받을 수 있습니다.\n\n" +
-                "이력서 없이 면접을 시작하시겠습니까?"
+                "이력서 없이 면접을 시작하시겠습니까?",
+                "면접 시작", "돌아가기"
               );
               if (!proceed) return;
             }

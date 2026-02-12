@@ -1,8 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useId } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/common/Header";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/contexts/ToastContext";
 import { jobPostingApi, type JobPosting } from "@/lib/api";
 import {
   Briefcase, MapPin, Clock, Building2, Plus, Edit3, Trash2,
@@ -41,6 +42,7 @@ const CATEGORY_OPTIONS = [
 
 export default function JobPostingsPage() {
   const { user, token, loading } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
 
   // ── 공고 목록 상태 ──
@@ -64,6 +66,33 @@ export default function JobPostingsPage() {
   // ── 삭제 확인 모달 ──
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // ── 접근성: 모달 ARIA ID + overlay ref ──
+  const formModalTitleId = useId();
+  const deleteModalTitleId = useId();
+  const overlayMouseDownTarget = useRef<EventTarget | null>(null);
+
+  // ── 접근성: 모달 열림 시 Escape 키 닫기 + body 스크롤 잠금 ──
+  const isAnyModalOpen = showModal || deleteTarget !== null;
+  useEffect(() => {
+    if (!isAnyModalOpen) return;
+    // body 스크롤 잠금 (모달 뒤 배경 스크롤 방지)
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // 삭제 모달이 열려 있으면 삭제 모달 먼저 닫기
+        if (deleteTarget !== null) setDeleteTarget(null);
+        else if (showModal) setShowModal(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isAnyModalOpen, deleteTarget, showModal]);
 
   // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   useEffect(() => {
@@ -151,6 +180,8 @@ export default function JobPostingsPage() {
       }
       setShowModal(false);
       await loadPostings();  // 목록 새로고침
+      // CRUD 성공 피드백 (토스트 알림)
+      toast.success(editingId ? "공고가 수정되었습니다." : "공고가 등록되었습니다.");
     } catch (e) {
       setFormError(e instanceof Error ? e.message : "저장 실패");
     } finally {
@@ -166,8 +197,9 @@ export default function JobPostingsPage() {
       await jobPostingApi.delete(deleteTarget);
       setDeleteTarget(null);
       await loadPostings();
+      toast.success("공고가 삭제되었습니다.");
     } catch (e) {
-      alert(e instanceof Error ? e.message : "삭제 실패");
+      toast.error(e instanceof Error ? e.message : "삭제 실패");
     } finally {
       setDeleting(false);
     }
@@ -179,8 +211,9 @@ export default function JobPostingsPage() {
       const newStatus = p.status === "open" ? "closed" : "open";
       await jobPostingApi.update(p.id, { status: newStatus });
       await loadPostings();
+      toast.success(newStatus === "open" ? "공고가 재게시되었습니다." : "공고가 마감되었습니다.");
     } catch (e) {
-      alert(e instanceof Error ? e.message : "상태 변경 실패");
+      toast.error(e instanceof Error ? e.message : "상태 변경 실패");
     }
   };
 
@@ -392,7 +425,7 @@ export default function JobPostingsPage() {
                     {!isRecruiter && p.status === "open" && (
                       <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)]">
                         <button
-                          onClick={() => router.push("/interview")}
+                          onClick={() => router.push(`/interview?job_posting_id=${p.id}`)}
                           className="btn-gradient !py-2.5 !px-6 rounded-xl text-sm"
                         >
                           🎥 이 공고로 면접 연습하기
@@ -409,11 +442,24 @@ export default function JobPostingsPage() {
 
       {/* ════════════ 공고 등록/수정 모달 ════════════ */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="glass-card w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-[rgba(0,217,255,0.2)]">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onMouseDown={e => { overlayMouseDownTarget.current = e.target; }}
+          onClick={e => {
+            if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) {
+              setShowModal(false);
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={formModalTitleId}
+            className="glass-card w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-[rgba(0,217,255,0.2)]"
+          >
             {/* 모달 헤더 */}
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">
+              <h2 id={formModalTitleId} className="text-xl font-bold">
                 {editingId ? "공고 수정" : "새 공고 등록"}
               </h2>
               <button
@@ -564,9 +610,22 @@ export default function JobPostingsPage() {
 
       {/* ════════════ 삭제 확인 모달 ════════════ */}
       {deleteTarget !== null && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-          <div className="glass-card w-full max-w-md border border-[rgba(255,82,82,0.3)]">
-            <h3 className="text-lg font-bold mb-3">공고 삭제 확인</h3>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onMouseDown={e => { overlayMouseDownTarget.current = e.target; }}
+          onClick={e => {
+            if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) {
+              setDeleteTarget(null);
+            }
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={deleteModalTitleId}
+            className="glass-card w-full max-w-md border border-[rgba(255,82,82,0.3)]"
+          >
+            <h3 id={deleteModalTitleId} className="text-lg font-bold mb-3">공고 삭제 확인</h3>
             <p className="text-sm text-[var(--text-secondary)] mb-6">
               이 공고를 삭제하시겠습니까? 삭제된 공고는 복구할 수 없습니다.
             </p>
