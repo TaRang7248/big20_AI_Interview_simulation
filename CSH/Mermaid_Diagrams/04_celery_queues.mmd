@@ -1,0 +1,41 @@
+flowchart TD
+    subgraph API["FastAPI Server"]
+        SUBMIT["Async Task Submit\n/api/async/*"]
+    end
+
+    subgraph BROKER["Redis Broker"]
+        Q1["llm_evaluation"]
+        Q2["emotion_analysis"]
+        Q3["report_generation"]
+        Q4["tts_generation"]
+        Q5["rag_processing"]
+        Q6["question_generation"]
+        Q7["media_processing"]
+        Q8["default"]
+    end
+
+    subgraph WORKERS["Celery Workers"]
+        W1["Answer Evaluation\nevaluate_answer"]
+        W2["Emotion Analysis\nanalyze_emotion_batch"]
+        W3["STAR Report\ngenerate_star_report"]
+        W4["TTS Generation\ngenerate_tts"]
+        W5["Resume RAG\nprocess_resume_rag"]
+        W6["Question Generation\ngenerate_question"]
+        W7["Media Encoding\ntranscode_recording"]
+        W8["Session Save\nsave_session_to_redis"]
+    end
+
+    subgraph RESULT["Result Storage"]
+        REDIS_RESULT[("Redis\nResult Backend\n1h Expiry")]
+    end
+
+    SUBMIT --> Q1 & Q2 & Q3 & Q4 & Q5 & Q6 & Q7 & Q8
+    Q1 --> W1
+    Q2 --> W2
+    Q3 --> W3
+    Q4 --> W4
+    Q5 --> W5
+    Q6 --> W6
+    Q7 --> W7
+    Q8 --> W8
+    W1 & W2 & W3 & W4 & W5 & W6 & W7 & W8 --> REDIS_RESULT

@@ -1,0 +1,26 @@
+flowchart LR
+    subgraph PUBLISHERS["Event Publishers"]
+        P1["Interview Server\nAPI Handler"]
+        P2["AI Services\nSTT/TTS/Emotion"]
+        P3["Celery Worker\nAsync Tasks"]
+    end
+
+    subgraph EVENT_BUS["EventBus - Singleton"]
+        LOCAL["In-process\nAsyncIO Handler"]
+        REDIS_PS["Redis\nPub/Sub"]
+        WS_PUSH["WebSocket\nBroadcast"]
+    end
+
+    subgraph SUBSCRIBERS["Event Subscribers"]
+        S1["Local Handlers\nevent_handlers.py"]
+        S2["Other Processes\nCelery Worker"]
+        S3["Frontend\nEventBusContext"]
+    end
+
+    P1 --> EVENT_BUS
+    P2 --> EVENT_BUS
+    P3 -->|Redis| EVENT_BUS
+
+    LOCAL --> S1
+    REDIS_PS --> S2
+    WS_PUSH --> S3
