@@ -3194,10 +3194,20 @@ async def create_session(request: SessionCreateRequest = None, current_user: Dic
             source="session_manager",
         )
 
+    # 이력서 업로드 여부 확인 — 프론트엔드에 경고 메시지 전달 (UX 개선)
+    session = state.get_session(session_id)
+    resume_uploaded = session.get("resume_uploaded", False) if session else False
+
     return {
         "session_id": session_id,
         "greeting": greeting,
-        "status": "active"
+        "status": "active",
+        "resume_uploaded": resume_uploaded,
+        # 이력서가 없으면 경고 메시지 포함
+        "resume_warning": None if resume_uploaded else (
+            "이력서가 업로드되지 않았습니다. "
+            "이력서를 업로드하면 맞춤형 면접 질문을 받을 수 있습니다."
+        )
     }
 
 

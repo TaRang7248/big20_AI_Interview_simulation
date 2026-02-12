@@ -5,8 +5,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import EventToastContainer from "@/components/common/EventToast";
 import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
-import { sessionApi, interviewApi, ttsApi, interventionApi } from "@/lib/api";
-import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2, FileText, Download, LayoutDashboard } from "lucide-react";
+import { sessionApi, interviewApi, ttsApi, interventionApi, resumeApi } from "@/lib/api";
+import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2, FileText, Download, LayoutDashboard, AlertTriangle, Upload } from "lucide-react";
 
 /* Web Speech API 타입 (브라우저 전용) */
 type SpeechRecognitionType = typeof window extends { SpeechRecognition: infer T } ? T : unknown;
@@ -52,6 +52,13 @@ export default function InterviewPage() {
   const [interviewStarted, setInterviewStarted] = useState(false);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+
+  // 이력서 미업로드 경고 모달 상태 (UX 개선)
+  const [showResumeWarning, setShowResumeWarning] = useState(false);
+  const [resumeWarningMsg, setResumeWarningMsg] = useState("");
+  const [pendingSessionId, setPendingSessionId] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [resumeUploading, setResumeUploading] = useState(false);
 
   // Refs
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -104,17 +111,45 @@ export default function InterviewPage() {
       const res = await sessionApi.create({ user_email: user.email, interview_type: "technical" });
       setSessionId(res.session_id);
 
+      // 이력서 미업로드 시 경고 모달 표시 (UX 개선)
+      if (!res.resume_uploaded && res.resume_warning) {
+        setPendingSessionId(res.session_id);
+        setResumeWarningMsg(res.resume_warning);
+        setShowResumeWarning(true);
+        return; // 경고 모달에서 선택 후 면접 진행
+      }
+
+      // 이력서가 이미 업로드된 경우 바로 면접 진행
+      await proceedInterview(res.session_id, stream);
+    } catch (err) {
+      console.error("면접 시작 실패:", err);
+      alert("면접 시작에 실패했습니다. 카메라/마이크 권한을 확인해주세요.");
+    }
+  };
+
+  /**
+   * 면접 세션 진행 (WebSocket 연결 → 음성인식 → 첫 질문)
+   * 이력서 경고 모달에서 '이력서 없이 진행' 또는 '이력서 업로드 후 진행' 모두 이 함수를 호출
+   */
+  const proceedInterview = async (sid: string, stream?: MediaStream) => {
+    try {
+      // 카메라가 아직 초기화되지 않은 경우 (경고 모달에서 이력서 업로드 후 재진행)
+      if (!stream && !streamRef.current) {
+        stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        streamRef.current = stream;
+        if (videoRef.current) videoRef.current.srcObject = stream;
+      }
+
       // WebSocket 연결
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsToken = sessionStorage.getItem("access_token");
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/interview/${res.session_id}?token=${encodeURIComponent(wsToken || "")}`);
+      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/interview/${sid}?token=${encodeURIComponent(wsToken || "")}`);
       ws.onmessage = (e) => {
         try {
           const data = JSON.parse(e.data);
           if (data.type === "stt_result" && data.is_final) {
             setSttText(prev => prev + " " + data.transcript);
           }
-          // EventBus 이벤트 → 실시간 토스트 알림
           if (data.type === "event" && pushEventRef.current) {
             pushEventRef.current(data);
           }
@@ -122,18 +157,49 @@ export default function InterviewPage() {
       };
       wsRef.current = ws;
 
-      // 음성인식 초기화 (Web Speech API 폴백)
       initSpeechRecognition();
-
       setPhase("interview");
       setInterviewStarted(true);
+      setSessionId(sid);
 
-      // 첫 질문 요청
-      await getNextQuestion(res.session_id, "[START]");
+      await getNextQuestion(sid, "[START]");
     } catch (err) {
-      console.error("면접 시작 실패:", err);
-      alert("면접 시작에 실패했습니다. 카메라/마이크 권한을 확인해주세요.");
+      console.error("면접 진행 실패:", err);
+      alert("면접 시작에 실패했습니다.");
     }
+  };
+
+  /**
+   * 이력서 경고 모달에서 이력서 업로드 처리
+   */
+  const handleResumeUploadInWarning = async (file: File) => {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      alert("PDF 파일만 업로드 가능합니다.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      alert("파일 크기는 10MB 이하여야 합니다.");
+      return;
+    }
+    setResumeUploading(true);
+    try {
+      await resumeApi.upload(file, pendingSessionId, user!.email);
+      setShowResumeWarning(false);
+      // 이력서 업로드 완료 후 면접 진행
+      await proceedInterview(pendingSessionId);
+    } catch {
+      alert("이력서 업로드 실패. 다시 시도해주세요.");
+    } finally {
+      setResumeUploading(false);
+    }
+  };
+
+  /**
+   * 이력서 없이 면접 진행
+   */
+  const proceedWithoutResume = async () => {
+    setShowResumeWarning(false);
+    await proceedInterview(pendingSessionId);
   };
 
   // ========== 음성 인식 (Web Speech API) ==========
@@ -269,6 +335,75 @@ export default function InterviewPage() {
       <Header />
       {/* 실시간 이벤트 알림 (EventBus → WebSocket) */}
       <EventToastContainer onPushEvent={(handler) => { pushEventRef.current = handler; }} />
+
+      {/* ========== 이력서 미업로드 경고 모달 (UX 개선) ========== */}
+      {showResumeWarning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card max-w-md w-full mx-4 p-6">
+            {/* 경고 아이콘 + 제목 */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-[rgba(255,193,7,0.15)] flex items-center justify-center">
+                <AlertTriangle size={24} className="text-[var(--warning)]" />
+              </div>
+              <h3 className="text-lg font-bold">이력서가 업로드되지 않았습니다</h3>
+            </div>
+
+            {/* 경고 메시지 */}
+            <p className="text-sm text-[var(--text-secondary)] mb-2">
+              {resumeWarningMsg}
+            </p>
+            <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3 mb-6">
+              <p className="text-xs text-[var(--warning)]">
+                💡 이력서를 업로드하면 지원 직무·경력에 맞춘 <strong>맞춤형 질문</strong>을 받을 수 있어 더 효과적인 면접 연습이 됩니다.
+              </p>
+            </div>
+
+            {/* 이력서 업로드 영역 */}
+            <div
+              className="border-2 border-dashed border-[rgba(0,217,255,0.3)] rounded-xl p-6 text-center cursor-pointer hover:border-[var(--cyan)] hover:bg-[rgba(0,217,255,0.03)] transition-all mb-4"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {resumeUploading ? (
+                <div className="flex flex-col items-center">
+                  <Loader2 size={28} className="animate-spin text-[var(--cyan)] mb-2" />
+                  <p className="text-sm text-[var(--text-secondary)]">업로드 중...</p>
+                </div>
+              ) : (
+                <>
+                  <Upload size={28} className="mx-auto mb-2 text-[var(--cyan)]" />
+                  <p className="text-sm text-[var(--text-secondary)]">PDF 이력서를 클릭하여 업로드</p>
+                  <p className="text-xs text-[var(--text-secondary)] mt-1">최대 10MB</p>
+                </>
+              )}
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              hidden
+              onChange={(e) => e.target.files?.[0] && handleResumeUploadInWarning(e.target.files[0])}
+            />
+
+            {/* 액션 버튼 */}
+            <div className="flex gap-3">
+              <button
+                onClick={proceedWithoutResume}
+                disabled={resumeUploading}
+                className="flex-1 px-4 py-3 rounded-xl text-sm font-semibold border border-[rgba(255,255,255,0.15)] text-[var(--text-secondary)] hover:bg-[rgba(255,255,255,0.05)] transition disabled:opacity-40"
+              >
+                이력서 없이 진행
+              </button>
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={resumeUploading}
+                className="flex-1 btn-gradient px-4 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-40"
+              >
+                <Upload size={16} /> 이력서 업로드
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 면접 준비 화면 */}
       {phase === "setup" && (
