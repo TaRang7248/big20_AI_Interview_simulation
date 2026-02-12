@@ -216,6 +216,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# ───── 헬스 체크 엔드포인트 ─────
+@app.get("/health")
+async def health_check():
+    """시스템 헬스 체크 — Next.js 프록시 및 로드밸런서에서 사용"""
+    return {
+        "status": "healthy",
+        "db_available": DB_AVAILABLE,
+        "version": "1.0.0",
+    }
+
 # ───── 임시 진단 엔드포인트 (DB 연결 상태 확인) ─────
 @app.get("/api/debug/db")
 async def debug_db_status():

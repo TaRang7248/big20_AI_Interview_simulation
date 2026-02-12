@@ -75,6 +75,9 @@ class EventBus:
         self._running = False
         # 이벤트 통계
         self._stats: Dict[str, int] = defaultdict(int)
+        # 자기 자신이 발행한 이벤트 ID를 추적하여 Redis self-echo 방지
+        self._published_event_ids: Set[str] = set()
+        self._max_published_ids = 10000  # 메모리 제한
 
     @classmethod
     def get_instance(cls) -> "EventBus":
@@ -210,6 +213,14 @@ class EventBus:
             event.event_type, event.session_id, event.source,
         )
 
+        # self-echo 방지: 자신이 발행한 이벤트 ID를 기억 (Redis에서 되돌아올 때 무시)
+        self._published_event_ids.add(event.event_id)
+        if len(self._published_event_ids) > self._max_published_ids:
+            # 오래된 ID 제거 (메모리 누수 방지)
+            to_remove = list(self._published_event_ids)[:self._max_published_ids // 2]
+            for eid in to_remove:
+                self._published_event_ids.discard(eid)
+
         # 1) 로컬 핸들러 디스패치 (비동기)
         await self._dispatch_local(event)
 
@@ -338,7 +349,13 @@ class EventBus:
                         event_data = json.loads(message["data"])
                         event = Event(**event_data)
 
-                        # 로컬 핸들러 디스패치 (Redis에서 수신한 이벤트)
+                        # self-echo 방지: 자기 프로세스에서 발행한 이벤트는 무시
+                        # (이미 publish() 시점에 로컬 핸들러가 실행됨)
+                        if event.event_id in self._published_event_ids:
+                            self._published_event_ids.discard(event.event_id)
+                            continue
+
+                        # 외부 프로세스(Celery Worker 등)에서 발행한 이벤트만 처리
                         await self._dispatch_local(event)
 
                         # WebSocket 브로드캐스트
