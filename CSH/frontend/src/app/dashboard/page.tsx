@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import { resumeApi, interviewApi, type InterviewRecord } from "@/lib/api";
-import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle } from "lucide-react";
+import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle, Briefcase } from "lucide-react";
 
 export default function DashboardPage() {
   const { user, token, loading } = useAuth();
@@ -150,6 +150,14 @@ export default function DashboardPage() {
                 {uploadMsg}
               </p>
             )}
+
+            {/* 지원 공고 확인 버튼 */}
+            <button
+              onClick={() => router.push("/jobs")}
+              className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border border-[rgba(0,217,255,0.3)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.08)] transition"
+            >
+              <Briefcase size={16} /> 지원 공고 확인
+            </button>
           </div>
 
           {/* 디바이스 테스트 카드 */}
