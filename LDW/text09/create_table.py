@@ -93,7 +93,7 @@ def create_tables():
                 non_verbal_eval TEXT,
                 pass_fail TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                announcement_title TEXT,
+                title TEXT,
                 announcement_job TEXT,
                 id_name TEXT REFERENCES users(id_name) ON DELETE CASCADE,
                 session_name TEXT

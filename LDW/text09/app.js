@@ -1092,7 +1092,8 @@ function initAdmin() {
 async function fetchAdminApplicants() {
     try {
         showLoading(true, '지원자 목록을 가져오는 중...');
-        const response = await fetch('/api/admin/applicants');
+        const adminId = AppState.currentUser ? AppState.currentUser.id_name : '';
+        const response = await fetch(`/api/admin/applicants?admin_id=${adminId}`);
         const result = await response.json();
         showLoading(false);
 
@@ -1145,7 +1146,7 @@ window.showApplicantDetail = async (interviewNumber) => {
             const resumeText = result.resume_text;
 
             // 1. Fill Header
-            $('#detail-modal-title').textContent = `${data.announcement_title} - 지원자 상세 정보`;
+            $('#detail-modal-title').textContent = `${data.title} - 지원자 상세 정보`;
 
             // 2. Fill Summary Scores & Evaluations
             const passFail = data.pass_fail;

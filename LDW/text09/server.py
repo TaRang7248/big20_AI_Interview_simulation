@@ -811,7 +811,7 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
                 communication_score, communication_eval, 
                 non_verbal_score, non_verbal_eval, 
                 pass_fail,
-                announcement_title, announcement_job,
+                title, announcement_job,
                 id_name, session_name
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
@@ -840,7 +840,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
                     communication_score, communication_eval, 
                     non_verbal_score, non_verbal_eval, 
                     pass_fail,
-                    announcement_title, announcement_job,
+                    pass_fail,
+                    title, announcement_job,
                     id_name, session_name
                 ) VALUES (%s, 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', 0, '분석 실패', '보류', %s, '분석 중 오류 발생', %s, %s)
             """, (interview_number, job_title, id_name, session_name))
@@ -871,7 +872,7 @@ def get_interview_results(id_name: str):
     try:
         c = conn.cursor(cursor_factory=RealDictCursor)
         query = """
-            SELECT announcement_title, announcement_job, 
+            SELECT title as announcement_title, announcement_job, 
                    to_char(created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time, 
                    pass_fail
             FROM Interview_Result 
@@ -885,20 +886,34 @@ def get_interview_results(id_name: str):
         conn.close()
 
 @app.get("/api/admin/applicants")
-def get_admin_applicants():
+def get_admin_applicants(admin_id: Optional[str] = None):
     conn = get_db_connection()
     try:
         c = conn.cursor(cursor_factory=RealDictCursor)
         # Join Interview_Result with users to get applicant names
+        # Filter by admin_id using a subquery or join with interview_announcement
+        # We need to filter based on who CREATED the job (announcement) associated with the interview result.
+        # interview_result has 'title' (was announcement_title). 
+        # interview_announcement has 'title' and 'id_name' (creator).
+        # We assume 'title' is unique enough or we join on title.
+        
         query = """
             SELECT r.interview_number, r.id_name, u.name as applicant_name, 
-                   r.announcement_title, r.announcement_job, r.pass_fail, 
+                   r.title as announcement_title, r.announcement_job, r.pass_fail, 
                    to_char(r.created_at, 'YYYY-MM-DD HH24:MI:SS') as interview_time
             FROM Interview_Result r
             JOIN users u ON r.id_name = u.id_name
-            ORDER BY r.created_at DESC
+            JOIN interview_announcement ia ON r.title = ia.title
+            WHERE 1=1
         """
-        c.execute(query)
+        params = []
+        if admin_id:
+            query += " AND ia.id_name = %s"
+            params.append(admin_id)
+            
+        query += " ORDER BY r.created_at DESC"
+        
+        c.execute(query, tuple(params))
         rows = c.fetchall()
         return {"success": True, "applicants": [dict(row) for row in rows]}
     except Exception as e:
