@@ -3,10 +3,10 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/common/Header";
 import { useAuth } from "@/contexts/AuthContext";
-import { interviewApi, type InterviewRecord } from "@/lib/api";
+import { interviewApi, authApi, type InterviewRecord } from "@/lib/api";
 import {
   User, Mail, Calendar, MapPin, Phone, Shield, Clock,
-  ChevronRight, FileText, Settings, TrendingUp, Award,
+  ChevronRight, FileText, Settings, TrendingUp, Award, Briefcase, Trash2,
 } from "lucide-react";
 
 /**
@@ -14,12 +14,18 @@ import {
  * 회원정보·비밀번호 수정은 /settings 페이지에서 처리
  */
 export default function ProfilePage() {
-  const { user, token } = useAuth();
+  const { user, token, logout } = useAuth();
   const router = useRouter();
 
   // 면접 기록 상태
   const [history, setHistory] = useState<InterviewRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+
+  // 회원탈퇴 모달 상태
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteForm, setDeleteForm] = useState({ email: "", password: "" });
+  const [deleteError, setDeleteError] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   // 인증 확인
   useEffect(() => {
@@ -54,6 +60,34 @@ export default function ProfilePage() {
       ? Math.max(...scoredHistory.map((h) => h.score ?? 0))
       : 0;
 
+  // ── 회원탈퇴 처리 ──
+  const handleDeleteAccount = async () => {
+    setDeleteError("");
+    if (!deleteForm.email || !deleteForm.password) {
+      setDeleteError("이메일과 비밀번호를 모두 입력해주세요.");
+      return;
+    }
+    if (deleteForm.email !== user.email) {
+      setDeleteError("현재 로그인된 계정의 이메일을 입력해주세요.");
+      return;
+    }
+    setDeleting(true);
+    try {
+      const res = await authApi.deleteAccount(deleteForm.email, deleteForm.password);
+      if (res.success) {
+        alert("회원 탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다.");
+        logout();
+        router.push("/");
+      } else {
+        setDeleteError(res.message || "회원 탈퇴에 실패했습니다.");
+      }
+    } catch (e: unknown) {
+      setDeleteError(e instanceof Error ? e.message : "회원 탈퇴 처리 중 오류가 발생했습니다.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen">
       <Header />
@@ -79,12 +113,20 @@ export default function ProfilePage() {
           </div>
 
           {/* 설정 버튼 */}
-          <button
-            onClick={() => router.push("/settings")}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-[rgba(0,217,255,0.3)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.08)] transition"
-          >
-            <Settings size={16} /> 회원정보 수정
-          </button>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <button
+              onClick={() => router.push("/settings")}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-[rgba(0,217,255,0.3)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.08)] transition"
+            >
+              <Settings size={16} /> 회원정보 수정
+            </button>
+            <button
+              onClick={() => setShowDeleteModal(true)}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold border border-[rgba(255,82,82,0.3)] text-red-400 hover:bg-[rgba(255,82,82,0.08)] transition"
+            >
+              <Trash2 size={16} /> 회원탈퇴
+            </button>
+          </div>
         </div>
 
         {/* ========== 개인정보 카드 ========== */}
@@ -106,6 +148,13 @@ export default function ProfilePage() {
             />
             <InfoItem icon={<MapPin size={15} />} label="주소" value={user.address || "-"} />
             <InfoItem icon={<Phone size={15} />} label="전화번호" value={user.phone || "-"} />
+            <InfoItem
+              icon={<Briefcase size={15} />}
+              label="회원 유형"
+              value={
+                user.role === "candidate" ? "지원자" : user.role === "recruiter" ? "인사담당자" : "-"
+              }
+            />
           </div>
         </section>
 
@@ -181,6 +230,70 @@ export default function ProfilePage() {
           )}
         </section>
       </main>
+
+      {/* ========== 회원탈퇴 확인 모달 ========== */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="glass-card max-w-md w-full mx-4 p-6 rounded-2xl border border-[rgba(255,82,82,0.3)]">
+            <h3 className="text-xl font-bold text-red-400 mb-2">⚠️ 회원 탈퇴</h3>
+            <p className="text-sm text-[var(--text-secondary)] mb-1">
+              탈퇴 시 모든 개인 정보와 면접 기록이 <strong className="text-red-400">영구적으로 삭제</strong>됩니다.
+            </p>
+            <p className="text-sm text-[var(--text-secondary)] mb-5">
+              본인 확인을 위해 이메일과 비밀번호를 입력해주세요.
+            </p>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">이메일</label>
+                <input
+                  type="email"
+                  className="input-field"
+                  placeholder="가입한 이메일"
+                  value={deleteForm.email}
+                  onChange={(e) => setDeleteForm((p) => ({ ...p, email: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-400 mb-1">비밀번호</label>
+                <input
+                  type="password"
+                  className="input-field"
+                  placeholder="현재 비밀번호"
+                  value={deleteForm.password}
+                  onChange={(e) => setDeleteForm((p) => ({ ...p, password: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            {deleteError && (
+              <p className="mt-3 text-sm text-red-400 bg-[rgba(255,82,82,0.1)] p-3 rounded-lg">
+                {deleteError}
+              </p>
+            )}
+
+            <div className="flex gap-3 mt-5">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setDeleteForm({ email: "", password: "" });
+                  setDeleteError("");
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-[rgba(255,255,255,0.05)] text-white hover:bg-[rgba(255,255,255,0.1)] border border-gray-600 transition"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleDeleteAccount}
+                disabled={deleting}
+                className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/40 transition disabled:opacity-50"
+              >
+                {deleting ? "처리 중..." : "탈퇴하기"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

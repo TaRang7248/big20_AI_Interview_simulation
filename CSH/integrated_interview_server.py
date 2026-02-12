@@ -2844,6 +2844,85 @@ async def update_user_info(request: UserUpdateRequest, current_user: Dict = Depe
     )
 
 
+# ========== 회원 탈퇴 ==========
+class UserDeleteRequest(BaseModel):
+    """회원 탈퇴 요청 — 이메일과 비밀번호로 본인 확인 후 삭제"""
+    email: str
+    password: str
+
+class UserDeleteResponse(BaseModel):
+    success: bool
+    message: str
+
+
+@app.post("/api/auth/user/delete")
+async def delete_user_account(request: UserDeleteRequest, current_user: Dict = Depends(get_current_user)):
+    """
+    회원 탈퇴 API (인증 필요)
+    - 이메일 + 비밀번호로 본인 확인
+    - 확인되면 DB에서 사용자 레코드를 완전히 삭제
+    """
+    # 1) 현재 로그인한 사용자와 요청 이메일이 일치하는지 확인
+    if current_user.get("email") != request.email:
+        return UserDeleteResponse(
+            success=False,
+            message="본인 계정만 탈퇴할 수 있습니다."
+        )
+
+    # 2) DB에서 사용자 조회
+    user = get_user_by_email(request.email)
+    if not user:
+        return UserDeleteResponse(
+            success=False,
+            message="사용자를 찾을 수 없습니다."
+        )
+
+    # 3) 비밀번호 확인 (bcrypt + SHA-256 하위 호환)
+    if not verify_password(request.password, user.get("password_hash", "")):
+        return UserDeleteResponse(
+            success=False,
+            message="비밀번호가 일치하지 않습니다."
+        )
+
+    # 4) DB에서 사용자 삭제
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                db_user = db.query(User).filter(User.email == request.email).first()
+                if db_user:
+                    db.delete(db_user)
+                    db.commit()
+                    print(f"🗑️ 회원 탈퇴 완료: {request.email}")
+                    return UserDeleteResponse(
+                        success=True,
+                        message="회원 탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다."
+                    )
+            except Exception as e:
+                db.rollback()
+                print(f"❌ 회원 탈퇴 실패: {e}")
+                return UserDeleteResponse(
+                    success=False,
+                    message="회원 탈퇴 처리 중 오류가 발생했습니다."
+                )
+            finally:
+                db.close()
+
+    # 폴백: 메모리 저장소
+    if request.email in users_db:
+        del users_db[request.email]
+        print(f"🗑️ (메모리) 회원 탈퇴 완료: {request.email}")
+        return UserDeleteResponse(
+            success=True,
+            message="회원 탈퇴가 완료되었습니다."
+        )
+
+    return UserDeleteResponse(
+        success=False,
+        message="회원 탈퇴에 실패했습니다."
+    )
+
+
 # ========== Resume Upload API ==========
 
 class ResumeUploadResponse(BaseModel):
