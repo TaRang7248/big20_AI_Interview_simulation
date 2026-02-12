@@ -901,6 +901,9 @@ def get_admin_applicants():
         c.execute(query)
         rows = c.fetchall()
         return {"success": True, "applicants": [dict(row) for row in rows]}
+    except Exception as e:
+        logger.error(f"Admin Applicants Error: {e}")
+        raise HTTPException(status_code=500, detail="지원자 목록 로드 중 오류 발생")
     finally:
         conn.close()
 
@@ -916,29 +919,24 @@ def get_applicant_details(interview_number: str):
         if not result:
             raise HTTPException(status_code=404, detail="면접 결과를 찾을 수 없습니다.")
         
+        session_name = result.get('session_name')
+        
         # 2. Get Interview Q&A Progress
-        c.execute("""
-            SELECT Create_Question, Question_answer, Answer_Evaluation, answer_time
-            FROM Interview_Progress 
-            WHERE Interview_Number = %s 
-            ORDER BY id ASC
-        """, (interview_number,))
+        if session_name:
+            c.execute("SELECT Create_Question, Question_answer, Answer_Evaluation, answer_time FROM Interview_Progress WHERE session_name = %s ORDER BY id ASC", (session_name,))
+        else:
+            c.execute("SELECT Create_Question, Question_answer, Answer_Evaluation, answer_time FROM Interview_Progress WHERE Interview_Number = %s ORDER BY id ASC", (interview_number,))
+            
         progress = c.fetchall()
         
         # 3. Get Resume Text
         # First check interview_information for original PDF text
-        c.execute("""
-            SELECT id_name, announcement_job FROM Interview_Result WHERE interview_number = %s
-        """, (interview_number,))
+        c.execute("SELECT id_name, announcement_job FROM Interview_Result WHERE interview_number = %s", (interview_number,))
         res_info = c.fetchone()
         
         resume_text = ""
         if res_info:
-            c.execute("""
-                SELECT resume FROM interview_information 
-                WHERE id_name = %s AND job = %s 
-                ORDER BY created_at DESC LIMIT 1
-            """, (res_info['id_name'], res_info['announcement_job']))
+            c.execute("SELECT resume FROM interview_information WHERE id_name = %s AND job = %s ORDER BY created_at DESC LIMIT 1", (res_info['id_name'], res_info['announcement_job']))
             info_row = c.fetchone()
             if info_row:
                 resume_path = info_row['resume']

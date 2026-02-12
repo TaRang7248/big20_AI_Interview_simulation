@@ -1147,16 +1147,17 @@ window.showApplicantDetail = async (interviewNumber) => {
             // 1. Fill Header
             $('#detail-modal-title').textContent = `${data.announcement_title} - 지원자 상세 정보`;
 
-            // 2. Fill Summary Scores
+            // 2. Fill Summary Scores & Evaluations
             const passFail = data.pass_fail;
             const passEl = $('#detail-pass-status');
             passEl.textContent = passFail;
             passEl.className = `pass-status ${passFail === '합격' ? 'pass' : 'fail'}`;
 
-            $('#score-tech').textContent = data.tech_score;
-            $('#score-problem').textContent = data.problem_solving_score;
-            $('#score-comm').textContent = data.communication_score;
-            $('#score-attitude').textContent = data.non_verbal_score;
+            // Update to show Text Evaluations as requested
+            $('#score-tech').innerHTML = `<strong>[기술/직무]</strong><br>${data.tech_eval || '평가 없음'}`;
+            $('#score-problem').innerHTML = `<strong>[문제해결]</strong><br>${data.problem_solving_eval || '평가 없음'}`;
+            $('#score-comm').innerHTML = `<strong>[의사소통]</strong><br>${data.communication_eval || '평가 없음'}`;
+            $('#score-attitude').innerHTML = `<strong>[태도/인성]</strong><br>${data.non_verbal_eval || '평가 없음'}`;
 
             // 3. Fill Resume
             $('#detail-resume').textContent = resumeText || '이력서 내용이 없습니다.';
@@ -1165,16 +1166,26 @@ window.showApplicantDetail = async (interviewNumber) => {
             const logBox = $('#detail-log');
             logBox.innerHTML = '';
 
-            progress.forEach((p, idx) => {
-                const logItem = document.createElement('div');
-                logItem.className = 'log-item';
-                logItem.innerHTML = `
-                    <div class="log-q">Q${idx + 1}. ${p.Create_Question}</div>
-                    <div class="log-a">A: ${p.Question_answer || '(답변 없음)'} <small style="color: #999;">(${p.answer_time || '0초'})</small></div>
-                    <div class="log-e">평가: ${p.Answer_Evaluation || '평가 중...'}</div>
-                `;
-                logBox.appendChild(logItem);
-            });
+            if (progress && progress.length > 0) {
+                progress.forEach((p, idx) => {
+                    const logItem = document.createElement('div');
+                    logItem.className = 'log-item';
+
+                    // interview_progress columns: create_question, question_answer
+                    const question = p.create_question || p.Create_Question || '질문 없음';
+                    const answer = p.question_answer || p.Question_answer || '(답변 없음)';
+                    const evaluation = p.answer_evaluation || p.Answer_Evaluation || '평가 없음';
+
+                    logItem.innerHTML = `
+                        <div class="log-q">Q${idx + 1}. ${question}</div>
+                        <div class="log-a">A: ${answer}</div>
+                    `;
+                    // <div class="log-e">평가: ${evaluation}</div> // Individual answer eval optional in summary logic? Keep it if useful.
+                    logBox.appendChild(logItem);
+                });
+            } else {
+                logBox.innerHTML = '<p>대화 기록이 없습니다.</p>';
+            }
 
             // Show Modal
             $('#applicant-detail-modal').classList.remove('hidden');
