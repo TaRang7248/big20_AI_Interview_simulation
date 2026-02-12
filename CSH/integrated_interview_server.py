@@ -1439,8 +1439,19 @@ class AIInterviewer:
                 "follow_up_mode": False
             })
     
-    def get_initial_greeting(self) -> str:
-        """초기 인사말 반환"""
+    def get_initial_greeting(self, job_posting: dict = None) -> str:
+        """
+        초기 인사말 반환
+        - job_posting이 있으면 공고 정보를 반영한 맞춤형 인사말 생성
+        """
+        if job_posting:
+            company = job_posting.get("company", "저희 회사")
+            title = job_posting.get("title", "지원 포지션")
+            return (
+                f"안녕하세요. {company}의 '{title}' 포지션 면접을 진행하게 된 "
+                f"면접관입니다. 공고 내용을 바탕으로 질문드리겠습니다. "
+                f"먼저 간단한 자기소개를 부탁드립니다."
+            )
         return "안녕하세요. 오늘 면접을 진행하게 된 면접관입니다. 먼저 간단한 자기소개를 부탁드립니다."
     
     async def generate_llm_question(self, session_id: str, user_answer: str) -> str:
@@ -1520,6 +1531,27 @@ class AIInterviewer:
             # ========== 4. 대화 기록을 LangChain 메시지로 변환 ==========
             chat_history = session.get("chat_history", [])
             messages = [SystemMessage(content=self.INTERVIEWER_PROMPT)]
+            
+            # ========== 4-1. 채용 공고 컨텍스트 주입 (공고 기반 면접 시) ==========
+            job_posting = session.get("job_posting")
+            if job_posting:
+                jp_context = (
+                    f"\n--- [채용 공고 정보] 이 면접의 대상 공고 ---\n"
+                    f"회사명: {job_posting.get('company', 'N/A')}\n"
+                    f"공고 제목: {job_posting.get('title', 'N/A')}\n"
+                    f"근무지: {job_posting.get('location', 'N/A')}\n"
+                    f"직무 분야: {job_posting.get('job_category', 'N/A')}\n"
+                    f"경력 수준: {job_posting.get('experience_level', 'N/A')}\n"
+                    f"급여: {job_posting.get('salary_info', 'N/A')}\n"
+                    f"\n[공고 상세 내용]\n{job_posting.get('description', '')}\n"
+                    f"------------------------------------------\n"
+                    f"☝️ 위 채용 공고의 요구사항, 자격요건, 우대사항, 직무 설명을 활용하여 "
+                    f"맞춤형 면접 질문을 생성하세요.\n"
+                    f"예시: 공고에서 요구하는 기술 스택 경험, 해당 직무의 실무 시나리오, "
+                    f"자격 요건 충족 여부 등을 질문하세요."
+                )
+                messages.append(SystemMessage(content=jp_context))
+                print(f"📋 LLM에 공고 컨텍스트 주입: [{job_posting.get('company')}] {job_posting.get('title')}")
             
             # Memory에서 대화 기록 가져오기 (있으면)
             memory_messages = self.get_memory_messages(session_id)
@@ -3528,6 +3560,7 @@ async def get_interview_history(email: str, current_user: Dict = Depends(get_cur
 class SessionCreateRequest(BaseModel):
     user_email: Optional[str] = None
     user_id: Optional[str] = None
+    job_posting_id: Optional[int] = None  # 선택한 채용 공고 ID (공고 기반 면접 시)
 
 
 # ========== Session API ==========
@@ -3552,16 +3585,53 @@ async def create_session(request: SessionCreateRequest = None, current_user: Dic
         )
     
     session_id = state.create_session()
-    greeting = interviewer.get_initial_greeting()
     
-    # 초기 인사 저장 (사용자 정보 포함)
-    state.update_session(session_id, {
+    # ── 채용 공고 기반 면접: 공고 정보를 세션에 저장 ──
+    job_posting_context = None
+    if request.job_posting_id:
+        try:
+            if DB_AVAILABLE:
+                db = get_db()
+                if db:
+                    try:
+                        jp = db.query(JobPosting).filter(JobPosting.id == request.job_posting_id).first()
+                        if jp:
+                            job_posting_context = {
+                                "id": jp.id,
+                                "title": jp.title,
+                                "company": jp.company,
+                                "location": jp.location,
+                                "job_category": jp.job_category,
+                                "experience_level": jp.experience_level,
+                                "description": jp.description,
+                                "salary_info": jp.salary_info,
+                            }
+                            print(f"📋 공고 기반 면접: [{jp.company}] {jp.title}")
+                    finally:
+                        db.close()
+            # 메모리 폴백
+            if not job_posting_context:
+                for p in job_postings_memory:
+                    if p["id"] == request.job_posting_id:
+                        job_posting_context = {k: p.get(k) for k in ["id", "title", "company", "location", "job_category", "experience_level", "description", "salary_info"]}
+                        break
+        except Exception as e:
+            print(f"⚠️ 공고 조회 실패 (세션 생성 계속): {e}")
+    
+    greeting = interviewer.get_initial_greeting(job_posting_context)
+    
+    # 초기 인사 저장 (사용자 정보 + 공고 컨텍스트 포함)
+    session_data = {
         "status": "active",
         "user_email": request.user_email,
         "user_id": request.user_id,
         "user_name": user.get("name", ""),
-        "chat_history": [{"role": "assistant", "content": greeting}]
-    })
+        "chat_history": [{"role": "assistant", "content": greeting}],
+    }
+    # 공고 정보가 있으면 세션에 저장 (LLM 질문 생성 시 활용)
+    if job_posting_context:
+        session_data["job_posting"] = job_posting_context
+    state.update_session(session_id, session_data)
     
     # 같은 사용자가 이전에 업로드한 이력서(RAG retriever)가 있으면 새 세션으로 복사
     for sid, s in state.sessions.items():

@@ -1,6 +1,6 @@
 "use client";
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import EventToastContainer from "@/components/common/EventToast";
@@ -34,9 +34,21 @@ declare global {
 type Phase = "setup" | "interview" | "coding" | "whiteboard" | "report";
 type Status = "ready" | "listening" | "speaking" | "processing";
 
-export default function InterviewPage() {
+// Next.js App Router에서 useSearchParams 사용 시 Suspense boundary 필요
+export default function InterviewPageWrapper() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center"><div className="text-[var(--text-secondary)]">로딩 중...</div></div>}>
+      <InterviewPageInner />
+    </Suspense>
+  );
+}
+
+function InterviewPageInner() {
   const { user, token, loading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  // URL 에서 공고 ID 추출 (ex: /interview?job_posting_id=3)
+  const jobPostingId = searchParams.get("job_posting_id");
 
   // 상태
   const [phase, setPhase] = useState<Phase>("setup");
@@ -107,8 +119,15 @@ export default function InterviewPage() {
       streamRef.current = stream;
       if (videoRef.current) videoRef.current.srcObject = stream;
 
-      // 세션 생성
-      const res = await sessionApi.create({ user_email: user.email, interview_type: "technical" });
+      // 세션 생성 (공고 ID가 있으면 함께 전달)
+      const createData: { user_email: string; interview_type: string; job_posting_id?: number } = {
+        user_email: user.email,
+        interview_type: "technical",
+      };
+      if (jobPostingId) {
+        createData.job_posting_id = Number(jobPostingId);
+      }
+      const res = await sessionApi.create(createData);
       setSessionId(res.session_id);
 
       // 이력서 미업로드 시 경고 모달 표시 (UX 개선)

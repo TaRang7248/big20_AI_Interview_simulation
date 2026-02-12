@@ -392,7 +392,7 @@ export default function JobPostingsPage() {
                     {!isRecruiter && p.status === "open" && (
                       <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)]">
                         <button
-                          onClick={() => router.push("/interview")}
+                          onClick={() => router.push(`/interview?job_posting_id=${p.id}`)}
                           className="btn-gradient !py-2.5 !px-6 rounded-xl text-sm"
                         >
                           🎥 이 공고로 면접 연습하기
