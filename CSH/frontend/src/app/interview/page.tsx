@@ -860,7 +860,7 @@ function InterviewPageInner() {
               </button>
               <button
                 onClick={() => {
-                  const tk = localStorage.getItem("token");
+                  const tk = sessionStorage.getItem("access_token");
                   fetch(`/api/report/${sessionId}/pdf`, {
                     headers: { Authorization: `Bearer ${tk}` },
                   })

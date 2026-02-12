@@ -5,9 +5,11 @@ import Header from "@/components/common/Header";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/contexts/ToastContext";
 import { interviewApi, authApi, type InterviewRecord } from "@/lib/api";
+import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
 import {
   User, Mail, Calendar, MapPin, Phone, Shield, Clock,
   ChevronRight, FileText, Settings, TrendingUp, Award, Briefcase, Trash2,
+  X, Loader2, Download,
 } from "lucide-react";
 
 /**
@@ -22,6 +24,11 @@ export default function ProfilePage() {
   // 면접 기록 상태
   const [history, setHistory] = useState<InterviewRecord[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
+
+  // 리포트 상세 모달 상태
+  const [selectedReport, setSelectedReport] = useState<ReportData | null>(null);
+  const [reportSessionId, setReportSessionId] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
 
   // 회원탈퇴 모달 상태
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -71,6 +78,22 @@ export default function ProfilePage() {
     scoredHistory.length > 0
       ? Math.max(...scoredHistory.map((h) => h.score ?? 0))
       : 0;
+
+  // ── 면접 기록 클릭 → 리포트 상세 조회 ──
+  const handleViewReport = async (sessionId: string) => {
+    setReportSessionId(sessionId);
+    setReportLoading(true);
+    setSelectedReport(null);
+    try {
+      const data = await interviewApi.getReport(sessionId);
+      setSelectedReport(data as ReportData);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "리포트를 불러올 수 없습니다.");
+      setReportSessionId(null);
+    } finally {
+      setReportLoading(false);
+    }
+  };
 
   // ── 회원탈퇴 처리 ──
   const handleDeleteAccount = async () => {
@@ -206,10 +229,17 @@ export default function ProfilePage() {
                 <div
                   key={h.session_id}
                   className="flex items-center justify-between p-4 rounded-xl bg-[rgba(255,255,255,0.03)] hover:bg-[rgba(255,255,255,0.06)] transition cursor-pointer group"
-                  onClick={() => window.open(`/api/report/${h.session_id}`, "_blank")}
+                  onClick={() => handleViewReport(h.session_id)}
                 >
                   <div className="flex-1">
-                    <p className="text-sm font-medium text-white">{h.date}</p>
+                    <p className="text-sm font-medium text-white">
+                      {(() => {
+                        try {
+                          const d = new Date(h.date);
+                          return `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
+                        } catch { return h.date; }
+                      })()}
+                    </p>
                     {h.summary && (
                       <p className="text-xs text-[var(--text-secondary)] mt-1 line-clamp-1">{h.summary}</p>
                     )}
@@ -231,6 +261,7 @@ export default function ProfilePage() {
                         {h.score}점
                       </span>
                     )}
+                    <span className="text-xs text-[var(--text-secondary)] hidden sm:inline">질문 {h.summary?.match(/질문\s*(\d+)/)?.[1] ?? "-"}개 · 답변 {h.summary?.match(/답변\s*(\d+)/)?.[1] ?? "-"}개</span>
                     <ChevronRight
                       size={16}
                       className="text-[var(--text-secondary)] group-hover:text-[var(--cyan)] transition"
@@ -242,6 +273,82 @@ export default function ProfilePage() {
           )}
         </section>
       </main>
+
+      {/* ========== 리포트 상세 모달 ========== */}
+      {(reportLoading || selectedReport) && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => { setSelectedReport(null); setReportSessionId(null); }}
+        >
+          <div
+            className="relative w-full max-w-5xl max-h-[90vh] mx-4 rounded-2xl overflow-hidden border border-[rgba(0,217,255,0.2)] bg-[var(--bg-secondary)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* 모달 헤더 */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(255,255,255,0.05)] bg-[rgba(0,0,0,0.3)]">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileText size={18} className="text-[var(--cyan)]" />
+                면접 리포트
+                {reportSessionId && (
+                  <span className="text-xs text-[var(--text-secondary)] font-normal">
+                    #{reportSessionId.slice(0, 8)}
+                  </span>
+                )}
+              </h3>
+              <div className="flex items-center gap-2">
+                {/* PDF 다운로드 버튼 */}
+                {selectedReport && reportSessionId && (
+                  <button
+                    onClick={() => {
+                      const tk = sessionStorage.getItem("access_token");
+                      fetch(`/api/report/${reportSessionId}/pdf`, {
+                        headers: { Authorization: `Bearer ${tk}` },
+                      })
+                        .then((res) => {
+                          if (!res.ok) throw new Error("PDF 생성 실패");
+                          return res.blob();
+                        })
+                        .then((blob) => {
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a");
+                          a.href = url;
+                          a.download = `interview_report_${reportSessionId.slice(0, 8)}.pdf`;
+                          a.click();
+                          URL.revokeObjectURL(url);
+                        })
+                        .catch(() => toast.error("PDF 다운로드에 실패했습니다."));
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[rgba(0,217,255,0.1)] border border-[rgba(0,217,255,0.3)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.2)] transition"
+                  >
+                    <Download size={14} /> PDF
+                  </button>
+                )}
+                {/* 닫기 버튼 */}
+                <button
+                  onClick={() => { setSelectedReport(null); setReportSessionId(null); }}
+                  className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.1)] transition"
+                  aria-label="닫기"
+                >
+                  <X size={18} className="text-[var(--text-secondary)]" />
+                </button>
+              </div>
+            </div>
+
+            {/* 모달 본문 */}
+            <div className="overflow-y-auto max-h-[calc(90vh-65px)] p-6">
+              {reportLoading && (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <Loader2 className="w-10 h-10 text-[var(--cyan)] animate-spin mb-4" />
+                  <p className="text-[var(--text-secondary)]">리포트를 불러오는 중...</p>
+                </div>
+              )}
+              {!reportLoading && selectedReport && (
+                <InterviewReportCharts report={selectedReport} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========== 회원탈퇴 확인 모달 ========== */}
       {showDeleteModal && (

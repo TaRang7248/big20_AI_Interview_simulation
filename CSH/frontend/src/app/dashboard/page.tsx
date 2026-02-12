@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import { resumeApi, interviewApi, type InterviewRecord } from "@/lib/api";
-import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle, Briefcase } from "lucide-react";
+import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
+import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle, Briefcase, X, Loader2, Download } from "lucide-react";
 import { useToast } from "@/contexts/ToastContext";
 
 export default function DashboardPage() {
@@ -20,6 +21,9 @@ export default function DashboardPage() {
   const [testing, setTesting] = useState(false);
   const [camOk, setCamOk] = useState(false);
   const [micOk, setMicOk] = useState(false);
+  const [selectedReport, setSelectedReport] = useState<ReportData | null>(null);
+  const [reportSessionId, setReportSessionId] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const micBarRef = useRef<HTMLDivElement>(null);
@@ -262,7 +266,20 @@ export default function DashboardPage() {
                       <span className="text-sm font-bold text-[var(--cyan)]">{h.score}점</span>
                     )}
                     <button
-                      onClick={() => window.open(`/api/report/${h.session_id}`, "_blank")}
+                      onClick={async () => {
+                        setReportSessionId(h.session_id);
+                        setReportLoading(true);
+                        setSelectedReport(null);
+                        try {
+                          const data = await interviewApi.getReport(h.session_id);
+                          setSelectedReport(data as ReportData);
+                        } catch {
+                          toast.error("리포트를 불러올 수 없습니다.");
+                          setReportSessionId(null);
+                        } finally {
+                          setReportLoading(false);
+                        }
+                      }}
                       className="text-xs px-3 py-1.5 rounded-lg border border-[rgba(0,217,255,0.3)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.1)] transition"
                     >
                       리포트
@@ -274,6 +291,65 @@ export default function DashboardPage() {
           )}
         </div>
       </main>
+
+      {/* ========== 리포트 상세 모달 ========== */}
+      {(reportLoading || selectedReport) && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => { setSelectedReport(null); setReportSessionId(null); }}
+        >
+          <div
+            className="relative w-full max-w-5xl max-h-[90vh] mx-4 rounded-2xl overflow-hidden border border-[rgba(0,217,255,0.2)] bg-[var(--bg-secondary)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[rgba(255,255,255,0.05)] bg-[rgba(0,0,0,0.3)]">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <FileText size={18} className="text-[var(--cyan)]" />
+                면접 리포트
+                {reportSessionId && <span className="text-xs text-[var(--text-secondary)] font-normal">#{reportSessionId.slice(0, 8)}</span>}
+              </h3>
+              <div className="flex items-center gap-2">
+                {selectedReport && reportSessionId && (
+                  <button
+                    onClick={() => {
+                      const tk = sessionStorage.getItem("access_token");
+                      fetch(`/api/report/${reportSessionId}/pdf`, {
+                        headers: { Authorization: `Bearer ${tk}` },
+                      })
+                        .then((res) => { if (!res.ok) throw new Error(); return res.blob(); })
+                        .then((blob) => {
+                          const url = URL.createObjectURL(blob);
+                          const a = document.createElement("a"); a.href = url;
+                          a.download = `interview_report_${reportSessionId.slice(0, 8)}.pdf`;
+                          a.click(); URL.revokeObjectURL(url);
+                        })
+                        .catch(() => toast.error("PDF 다운로드 실패"));
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-[rgba(0,217,255,0.1)] border border-[rgba(0,217,255,0.3)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.2)] transition"
+                  >
+                    <Download size={14} /> PDF
+                  </button>
+                )}
+                <button
+                  onClick={() => { setSelectedReport(null); setReportSessionId(null); }}
+                  className="p-1.5 rounded-lg hover:bg-[rgba(255,255,255,0.1)] transition" aria-label="닫기"
+                >
+                  <X size={18} className="text-[var(--text-secondary)]" />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-65px)] p-6">
+              {reportLoading && (
+                <div className="flex flex-col items-center justify-center py-20">
+                  <Loader2 className="w-10 h-10 text-[var(--cyan)] animate-spin mb-4" />
+                  <p className="text-[var(--text-secondary)]">리포트를 불러오는 중...</p>
+                </div>
+              )}
+              {!reportLoading && selectedReport && <InterviewReportCharts report={selectedReport} />}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
