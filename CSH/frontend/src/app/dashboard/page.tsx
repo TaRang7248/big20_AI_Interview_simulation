@@ -64,8 +64,9 @@ export default function DashboardPage() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
       streamRef.current = stream;
-      if (videoRef.current) { videoRef.current.srcObject = stream; }
+      // video 요소가 렌더링된 뒤 srcObject를 설정하기 위해 먼저 상태 변경
       setCamOk(true);
+      setTesting(true);
 
       // 마이크 레벨
       const ctx = new AudioContext();
@@ -84,9 +85,15 @@ export default function DashboardPage() {
       };
       draw();
       setMicOk(true);
-      setTesting(true);
     } catch { toast.error("카메라/마이크 접근 권한이 필요합니다."); }
   };
+
+  // testing이 true가 되어 <video>가 렌더링된 후 스트림을 연결
+  useEffect(() => {
+    if (testing && videoRef.current && streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [testing]);
 
   const stopTest = () => {
     streamRef.current?.getTracks().forEach(t => t.stop());
