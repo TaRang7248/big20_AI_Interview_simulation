@@ -1,132 +1,98 @@
-# 웹 기반 AI 면접 시뮬레이션 가이드북
+# AI 면접 시뮬레이션 가이드북 (AI Interview Simulation Guidebook)
 
-본 가이드북은 웹 기반 AI 면접 시뮬레이션 프로그램의 개요, 환경 설정, 실행 방법, 사용 기술, 주요 기능 사용법, 그리고 파일 구조에 대해 설명합니다.
+본 문서는 **웹 기반 AI 면접 시뮬레이션** 프로그램의 개요, 환경 설정, 실행 방법 및 주요 기능을 설명합니다.
 
 ## 1. 개요 (Overview)
-이 프로그램은 사용자가 가상의 AI 면접관과 함께 모의 면접을 진행할 수 있는 웹 애플리케이션입니다.
-- **주요 목적**: 실제 면접 상황과 유사한 경험 제공 및 피드백
-- **핵심 기능**:
-  - PDF 이력서 업로드 및 자동 분석 (OCR)
-  - 맞춤형 면접 질문 생성 (OpenAI GPT-4o)
-  - 음성 답변 녹음 및 텍스트 변환 (Whisper STT)
-  - 실시간 답변 평가 및 꼬리 질문 생성
-  - 최종 면접 결과 분석 및 리포트 제공
+이 프로젝트는 실제 면접 상황을 시뮬레이션하기 위해 개발된 **AI 기반 웹 애플리케이션**입니다.
+사용자는 이력서(PDF)를 업로드하고, **OpenAI GPT-4o** 기반의 AI 면접관과 음성으로 대화하며 모의 면접을 진행할 수 있습니다.
+면접이 종료되면 AI가 답변 내용을 분석하여 기술 역량, 문제 해결 능력, 의사소통 능력 등을 평가합니다.
 
-## 2. 환경 설정 (Environment Setup)
-이 프로그램은 Python 3.10 이상 기반의 환경에서 실행됩니다.
+## 2. 시스템 요구 사항 (System Requirements)
+- **OS**: Windows / macOS / Linux
+- **Python**: 3.8 이상
+- **Database**: PostgreSQL
+- **Browser**: Chrome, Edge (음성 인식/녹음 기능 지원 브라우저)
+- **Hardware**: 마이크, 웹캠 (선택 사항)
 
-### 필수 요구 사항
-- **OS**: Windows, macOS, Linux
-- **Python**: 3.10+
-- **PostgreSQL**: 로컬 또는 원격 데이터베이스 서버 필요
-- **OpenAI API Key**: `.env` 파일에 설정 필요
+## 3. 환경 설정 (Environment Setup)
 
-### 설치 방법
-1. **리포지토리 클론 또는 다운로드**
-2. **가상 환경 생성 및 활성화 (권장)**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Mac/Linux
-   venv\Scripts\activate     # Windows
-   ```
-3. **필수 라이브러리 설치**
-   ```bash
-   pip install -r requirements.txt
-   # PyTorch (CUDA 지원 버전, 필요시 별도 설치)
-   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-   ```
-4. **환경 변수 설정**
-   - `.env` 파일을 프로젝트 루트에 생성하고 다음 내용을 작성합니다.
-     ```env
-     OPENAI_API_KEY=your_openai_api_key
-     DB_HOST=localhost
-     DB_NAME=interview_db
-     DB_USER=postgres
-     DB_PASS=your_password
-     DB_PORT=5432
-     ```
-5. **데이터베이스 초기화**
-   - `create_table.py` 등을 실행하여 필요한 테이블을 생성합니다.
-   ```bash
-   python create_table.py
+### 3.1. 필수 라이브러리 설치
+프로젝트 폴더에서 다음 명령어를 실행하여 필요한 패키지를 설치하십시오.
+```bash
+pip install -r requirements.txt
+```
+*(만약 `requirements.txt`가 없다면 다음 패키지들이 필요합니다: `fastapi`, `uvicorn`, `psycopg2`, `openai`, `python-multipart`, `python-dotenv`, `pymupdf` (fitz), `easyocr`, `torch` 등)*
+
+### 3.2. 데이터베이스 설정 (Database)
+1. PostgreSQL을 설치하고 실행합니다.
+2. `interview_db` 데이터베이스를 생성합니다 (또는 `.env`에서 설정 가능).
+3. `.env` 파일을 프로젝트 루트에 생성하고 아래 내용을 설정합니다.
+   ```env
+   DB_HOST=localhost
+   DB_NAME=interview_db
+   DB_USER=postgres
+   POSTGRES_PASSWORD=your_password
+   OPENAI_API_KEY=your_openai_api_key_here
    ```
 
-## 3. 프로그램 실행 방법 (How to Run)
-1. **서버 실행**
-   ```bash
-   uvicorn server:app --reload
-   ```
-   - 서버가 `http://127.0.0.1:8000` 에서 실행됩니다.
+### 3.3. 테이블 생성
+최초 실행 시 데이터베이스 테이블을 생성해야 합니다.
+```bash
+python create_table.py
+```
 
-2. **웹 접속**
-   - 브라우저를 열고 `http://127.0.0.1:8000/index.html` (또는 해당 파일 경로)로 접속합니다.
-   - 프론트엔드 파일(`index.html`)을 직접 열거나, 정적 파일 서버를 통해 호스팅할 수도 있습니다.
-   - **주의**: 카메라/마이크 권한을 위해 `localhost` 또는 HTTPS 환경에서 실행해야 합니다.
+## 4. 프로그램 실행 (Execution)
+서버를 실행하면 자동으로 브라우저가 열리며(http://localhost:5000), 접속할 수 있습니다.
 
-## 4. 사용 모델 및 라이브러리 (Tech Stack)
+```bash
+python server.py
+```
+또는 `uvicorn`을 직접 사용할 수도 있습니다:
+```bash
+uvicorn server:app --host 0.0.0.0 --port 5000 --reload
+```
+
+## 5. 주요 기능 사용법 (Features)
+
+### 5.1. 회원가입 및 로그인
+- 초기 실행 시 `회원가입`을 통해 계정을 생성합니다.
+- `관리자` 권한으로 가입하면 면접 공고를 생성할 수 있습니다.
+- `면접자` 권한으로 가입하면 공고에 지원하고 면접을 볼 수 있습니다.
+
+### 5.2. 이력서 등록 (Resume Upload)
+- 면접자는 지원 시 **PDF 형식**의 이력서를 필수로 업로드해야 합니다.
+- **[NEW] AI 이력서 요약 기능**: 업로드된 이력서는 AI가 자동으로 분석하여 **핵심 역량, 주요 프로젝트, 경력 사항**을 요약하므로, 면접 질문의 정확도가 향상됩니다.
+
+### 5.3. AI 면접 진행
+1. 공고 지원 후 `면접 시작` 버튼을 누릅니다.
+2. 카메라와 마이크 권한을 허용합니다.
+3. AI 면접관이 첫 질문(자기소개)을 합니다.
+4. 답변 후 `답변 제출` 버튼을 누르면 음성이 녹음되어 전송됩니다.
+5. AI가 답변을 분석하고 꼬리 질문을 이어갑니다.
+
+### 5.4. 결과 분석
+- 면접 종료 후 `내 면접 기록`에서 결과를 확인할 수 있습니다.
+- 관리자는 지원자들의 면접 점수와 상세 평가 내용을 조회할 수 있습니다.
+
+## 6. 기술 스택 (Tech Stack)
 
 ### Backend
-- **FastAPI**: 고성능 비동기 Python 웹 프레임워크
-- **Uvicorn**: ASGI 서버
-- **PostgreSQL + Psycopg2**: 데이터베이스 관리
-
-### AI / ML
-- **EasyOCR**: PDF 이력서 텍스트 추출 (OCR)
-  - *특징*: 한국어/영어 지원, GPU 가속 지원
-  - *역활*: 업로드된 이미지/PDF 형식의 이력서 내용을 텍스트로 변환
-- **PyMuPDF (fitz)**: PDF 파일을 이미지로 변환하여 OCR 전처리
-- **OpenAI GPT-4o**: 
-  - *역활*: 이력서 기반 질문 생성, 답변 평가, 면접관 페르소나 연기
-- **OpenAI Whisper (API)**:
-  - *역활*: 사용자의 음성 답변을 텍스트로 변환 (STT)
+- **Framework**: FastAPI (Python)
+- **Database**: PostgreSQL (`psycopg2`)
+- **AI Core**:
+  - **LLM**: OpenAI GPT-4o (면접 진행 및 평가, 이력서 요약)
+  - **STT**: OpenAI Whisper (음성 -> 텍스트 변환)
+  - **OCR**: EasyOCR, PyMuPDF (PDF 이력서 텍스트 추출)
 
 ### Frontend
-- **HTML5 / CSS3 / Vanilla JavaScript**: 가볍고 빠른 웹 인터페이스
-- **Web APIs**: MediaDevices API (카메라/마이크), Fetch API
+- **Language**: HTML5, CSS3, JavaScript (Vanilla JS)
+- **Styling**: Custom CSS (`styles.css`)
 
-## 5. 주요 기능 사용법 (User Manual)
-
-### 1) 회원가입 및 로그인
-- 초기 화면에서 회원가입을 진행합니다.
-- '면접자' 또는 '관리자' 유형을 선택할 수 있습니다.
-
-### 2) 이력서 등록
-- 로그인 후 [공고 목록]에서 원하는 직무를 선택하고 [지원하기]를 클릭합니다.
-- **PDF 형식**의 이력서를 업로드합니다.
-- 시스템이 이력서 내용을 자동으로 인식하여 면접 질문 생성에 활용합니다.
-
-### 3) 환경 테스트 및 면접 시작
-- 카메라와 마이크 작동 여부를 확인합니다.
-- [면접 시작] 버튼을 누르면 AI 면접관과 연결됩니다.
-
-### 4) 면접 진행
-- AI가 질문을 하면 마이크를 통해 답변합니다.
-- [답변 제출] 버튼을 누르면 답변이 전송되고 분석됩니다.
-- 총 12개 내외의 질문(자기소개, 직무 기술, 인성, 마무리)이 진행됩니다.
-
-### 5) 결과 확인
-- 면접이 종료되면 AI가 종합적인 평가 리포트를 생성합니다.
-- [내 면접 기록] 메뉴에서 과거 면접 결과와 피드백을 확인할 수 있습니다.
-
-## 6. 파일 구조 (File Structure)
-
-```
-C:\big20\big20_AI_Interview_simulation\LDW\text09\
-├── server.py              # 메인 백엔드 서버 (FastAPI)
-├── index.html             # 메인 프론트엔드 UI
-├── app.js                 # 프론트엔드 로직 (API 호출, UI 제어)
-├── styles.css             # 스타일 시트
-├── requirements.txt       # 의존성 패키지 목록
-│
-├── uploads/               # 파일 업로드 디렉토리
-│   ├── resumes/           # 이력서 저장소
-│   └── audio/             # 음성 답변 저장소
-│
-├── db/                    # DB 관련 파일 (스키마 등)
-├── *.py                   # 각종 유틸리티 및 테스트 스크립트
-│   ├── create_table.py    # DB 테이블 생성
-│   ├── verify_ocr_test.py # OCR 기능 테스트
-│   └── ...
-│
-└── GUIDEBOOK.md           # 본 가이드북
-```
+## 7. 주요 파일 구조 (File Structure)
+- `server.py`: 메인 백엔드 서버 로직 (API 엔드포인트 포함)
+- `create_table.py`: DB 테이블 초기화 스크립트
+- `index.html`: 메인 웹 페이지 (SPA 구조)
+- `app.js`: 프론트엔드 로직 (API 호출, UI 제어)
+- `styles.css`: 스타일 시트
+- `uploads/`: 업로드된 이력서 및 음성 파일 저장소
+- `migration_*.py`: DB 스키마 변경 이력 관리 스크립트들

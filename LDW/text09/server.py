@@ -261,6 +261,43 @@ def get_job_questions(job_title):
         return ["자기소개를 부탁드립니다.", "성격의 장단점은 무엇인가요?"]
 
 
+def summarize_resume(text):
+    """
+    Summarizes the resume text using LLM to extract key skills, experience, and projects.
+    """
+    logger.info("Summarizing resume...")
+    if not text:
+        return "내용 없음"
+        
+    # If text is short enough, just return it
+    if len(text) < 500:
+        return text
+
+    prompt = f"""
+    아래 이력서 내용에서 면접 질문 생성에 필요한 핵심 정보를 요약해주세요.
+    다음 항목 위주로 정리해주세요:
+    1. 핵심 역량 (Tech Stack, Tools)
+    2. 주요 프로젝트 경험 (무엇을 했는지, 어떤 성과가 있는지)
+    3. 경력 사항 요약
+    
+    이력서 내용:
+    {text[:4000]} 
+    (내용이 너무 길면 앞부분 4000자만 참조함)
+    """
+
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        summary = completion.choices[0].message.content
+        logger.info(f"Resume Summary: {summary[:100]}...")
+        return summary
+    except Exception as e:
+        logger.error(f"Resume Summary Error: {e}")
+        return text[:1000] # Fallback to truncation
+
+
 
 class IdCheckRequest(BaseModel):
     id_name: str
@@ -534,13 +571,16 @@ def start_interview(data: StartInterviewRequest):
         interview_count = c.fetchone()[0]
         session_name = f"면접-{interview_count + 1}"
 
+        # Resume Summarization (New Feature)
+        resume_summary = summarize_resume(resume_text)
+
         # Save to DB
         c.execute('''
             INSERT INTO Interview_Progress (
                 Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name
             ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (interview_number, applicant_name, data.job_title, resume_text[:1000], first_question, data.id_name, session_name))
-        # Note: Saving truncated resume text to avoid huge DB size if text is long.
+        ''', (interview_number, applicant_name, data.job_title, resume_summary, first_question, data.id_name, session_name))
+        # Note: Saving summarized resume instead of raw truncation.
         
         conn.commit()
         
