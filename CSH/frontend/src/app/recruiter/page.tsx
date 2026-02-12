@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/contexts/ToastContext";
@@ -73,6 +73,31 @@ export default function RecruiterDashboard() {
   // ── 삭제 확인 ──
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // ── 접근성: 모달 ARIA ID ──
+  const formModalTitleId = useId();
+  const deleteModalTitleId = useId();
+
+  // ── 접근성: 모달 열림 시 Escape 키 닫기 + body 스크롤 잠금 ──
+  const isAnyModalOpen = showModal || deleteTarget !== null;
+  useEffect(() => {
+    if (!isAnyModalOpen) return;
+    // body 스크롤 잠금 (모달 뒤 배경 스크롤 방지)
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (deleteTarget !== null) setDeleteTarget(null);
+        else if (showModal) setShowModal(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isAnyModalOpen, deleteTarget, showModal]);
 
   // ── 모달 overlay 클릭 보호 (드래그 오작동 방지) ──
   // mousedown이 overlay 자체에서 시작했을 때만 모달 닫기 허용
@@ -419,9 +444,14 @@ export default function RecruiterDashboard() {
             }
           }}
         >
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto glass-card !bg-[var(--bg-card)]">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={formModalTitleId}
+            className="w-full max-w-2xl max-h-[90vh] overflow-y-auto glass-card !bg-[var(--bg-card)]"
+          >
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold">{editingId ? "공고 수정" : "새 공고 등록"}</h2>
+              <h2 id={formModalTitleId} className="text-xl font-bold">{editingId ? "공고 수정" : "새 공고 등록"}</h2>
               <button onClick={() => setShowModal(false)} className="p-1 hover:bg-[rgba(255,255,255,0.05)] rounded-lg transition">
                 <X size={20} className="text-[var(--text-secondary)]" />
               </button>
@@ -518,9 +548,14 @@ export default function RecruiterDashboard() {
             }
           }}
         >
-          <div className="w-full max-w-md glass-card !bg-[var(--bg-card)] text-center">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby={deleteModalTitleId}
+            className="w-full max-w-md glass-card !bg-[var(--bg-card)] text-center"
+          >
             <AlertCircle size={48} className="mx-auto mb-4 text-[var(--danger)]" />
-            <h3 className="text-lg font-bold mb-2">공고를 삭제하시겠습니까?</h3>
+            <h3 id={deleteModalTitleId} className="text-lg font-bold mb-2">공고를 삭제하시겠습니까?</h3>
             <p className="text-sm text-[var(--text-secondary)] mb-6">이 작업은 되돌릴 수 없습니다.</p>
             <div className="flex justify-center gap-3">
               <button onClick={() => setDeleteTarget(null)} className="px-5 py-2.5 text-sm rounded-lg border border-[rgba(255,255,255,0.15)] text-[var(--text-secondary)] hover:bg-[rgba(255,255,255,0.05)] transition">
