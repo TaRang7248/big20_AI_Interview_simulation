@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
@@ -71,6 +71,10 @@ export default function RecruiterDashboard() {
   // ── 삭제 확인 ──
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+
+  // ── 모달 overlay 클릭 보호 (드래그 오작동 방지) ──
+  // mousedown이 overlay 자체에서 시작했을 때만 모달 닫기 허용
+  const overlayMouseDownTarget = useRef<EventTarget | null>(null);
 
   // ── 인증 + 역할 확인 ──
   useEffect(() => {
@@ -398,8 +402,18 @@ export default function RecruiterDashboard() {
 
       {/* ═══════ 등록/수정 모달 ═══════ */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setShowModal(false)}>
-          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto glass-card !bg-[var(--bg-card)]" onClick={e => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onMouseDown={e => { overlayMouseDownTarget.current = e.target; }}
+          onClick={e => {
+            // mousedown과 click 모두 overlay 자체에서 발생했을 때만 닫기
+            // (폼 내부 드래그가 overlay로 빠져나가는 오작동 방지)
+            if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) {
+              setShowModal(false);
+            }
+          }}
+        >
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto glass-card !bg-[var(--bg-card)]">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold">{editingId ? "공고 수정" : "새 공고 등록"}</h2>
               <button onClick={() => setShowModal(false)} className="p-1 hover:bg-[rgba(255,255,255,0.05)] rounded-lg transition">
@@ -489,8 +503,16 @@ export default function RecruiterDashboard() {
 
       {/* ═══════ 삭제 확인 모달 ═══════ */}
       {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setDeleteTarget(null)}>
-          <div className="w-full max-w-md glass-card !bg-[var(--bg-card)] text-center" onClick={e => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          onMouseDown={e => { overlayMouseDownTarget.current = e.target; }}
+          onClick={e => {
+            if (e.target === e.currentTarget && overlayMouseDownTarget.current === e.currentTarget) {
+              setDeleteTarget(null);
+            }
+          }}
+        >
+          <div className="w-full max-w-md glass-card !bg-[var(--bg-card)] text-center">
             <AlertCircle size={48} className="mx-auto mb-4 text-[var(--danger)]" />
             <h3 className="text-lg font-bold mb-2">공고를 삭제하시겠습니까?</h3>
             <p className="text-sm text-[var(--text-secondary)] mb-6">이 작업은 되돌릴 수 없습니다.</p>
