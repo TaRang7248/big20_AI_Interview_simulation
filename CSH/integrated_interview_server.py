@@ -2586,12 +2586,16 @@ async def login_user(request: UserLoginRequest):
         update_user(request.email, {"password_hash": new_hash})
         print(f"🔄 비밀번호 해시 마이그레이션 완료: {request.email} (SHA-256 → bcrypt)")
     
-    # 민감 정보 제외하고 반환
+    # 민감 정보 제외하고 반환 (password_hash 등 제외)
     user_info = {
         "user_id": user["user_id"],
         "email": user["email"],
         "name": user["name"],
-        "gender": user["gender"]
+        "birth_date": user.get("birth_date"),
+        "gender": user.get("gender"),
+        "address": user.get("address"),
+        "phone": user.get("phone"),
+        "role": user.get("role", "candidate"),
     }
     
     # JWT 액세스 토큰 발급
@@ -2704,6 +2708,7 @@ async def get_user_info_api(email: str, current_user: Dict = Depends(get_current
         "birth_date": user["birth_date"],
         "address": user["address"],
         "gender": user["gender"],
+        "phone": user.get("phone"),
         "created_at": user["created_at"]
     }
 
@@ -2720,6 +2725,7 @@ async def get_current_user_info(current_user: Dict = Depends(get_current_user)):
         "user_id": user["user_id"], "email": user["email"],
         "name": user["name"], "birth_date": user.get("birth_date"),
         "address": user.get("address"), "gender": user.get("gender"),
+        "phone": user.get("phone"),
         "role": user.get("role"), "created_at": user.get("created_at")
     }
 

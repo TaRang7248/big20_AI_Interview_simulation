@@ -154,7 +154,7 @@ export default function SettingsPage() {
             <div>
               <label className="text-sm text-gray-400 mb-1">성별</label>
               <div className="flex gap-3 mt-1">
-                {(["male", "female", "other"] as const).map((g) => (
+                {(["male", "female"] as const).map((g) => (
                   <button
                     key={g}
                     onClick={() => setForm((p) => ({ ...p, gender: g }))}
@@ -164,7 +164,7 @@ export default function SettingsPage() {
                         : "border-gray-600 text-gray-400 hover:border-gray-400"
                     }`}
                   >
-                    {g === "male" ? "남성" : g === "female" ? "여성" : "기타"}
+                    {g === "male" ? "남성" : "여성"}
                   </button>
                 ))}
               </div>

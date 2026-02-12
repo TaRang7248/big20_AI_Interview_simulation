@@ -101,7 +101,7 @@ export default function ProfilePage() {
               icon={<Shield size={15} />}
               label="성별"
               value={
-                user.gender === "male" ? "남성" : user.gender === "female" ? "여성" : user.gender === "other" ? "기타" : "-"
+                user.gender === "male" ? "남성" : user.gender === "female" ? "여성" : "-"
               }
             />
             <InfoItem icon={<MapPin size={15} />} label="주소" value={user.address || "-"} />
