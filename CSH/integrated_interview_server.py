@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 import functools
 
 # FastAPI 및 웹 프레임워크
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File, Form, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File, Form, Depends, status
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -2585,23 +2585,26 @@ async def register_user(request: UserRegisterRequest):
     )
 
 
-@app.post("/api/auth/login", response_model=UserLoginResponse)
+@app.post("/api/auth/login")
 async def login_user(request: UserLoginRequest):
-    """로그인 API (이메일 + 비밀번호)"""
+    """════ 로그인 API (이메일 + 비밀번호) ════
+    성공 시: HTTP 200 + {success, user, access_token}
+    실패 시: HTTP 401 + {detail: "에러 메시지"}
+    """
     # DB에서 사용자 조회
     user = get_user_by_email(request.email)
     
     if not user:
-        return UserLoginResponse(
-            success=False,
-            message="등록되지 않은 이메일입니다. 회원가입을 먼저 해주세요."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="등록되지 않은 이메일입니다. 회원가입을 먼저 해주세요."
         )
     
     # 비밀번호 검증 (bcrypt + SHA-256 하위 호환)
     if not verify_password(request.password, user.get("password_hash", "")):
-        return UserLoginResponse(
-            success=False,
-            message="비밀번호가 올바르지 않습니다."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="비밀번호가 올바르지 않습니다."
         )
     
     # SHA-256 → bcrypt 자동 마이그레이션
@@ -2632,12 +2635,12 @@ async def login_user(request: UserLoginRequest):
     
     print(f"✅ 로그인: {user['name']} ({user['email']})")
     
-    return UserLoginResponse(
-        success=True,
-        message="로그인 성공",
-        user=user_info,
-        access_token=access_token
-    )
+    return {
+        "success": True,
+        "message": "로그인 성공",
+        "user": user_info,
+        "access_token": access_token,
+    }
 
 
 # ========== 비밀번호 찾기 모델 ==========

@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 
 # ========== 환경변수 기반 설정 ==========
 # JWT 비밀키 (반드시 .env에서 설정할 것)
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_" + os.urandom(16).hex())
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+if not JWT_SECRET_KEY:
+    raise RuntimeError("❌ JWT_SECRET_KEY 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.")
 JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "120"))  # 2시간
 
@@ -36,9 +38,8 @@ TLS_KEYFILE = os.getenv("TLS_KEYFILE", "")
 # 프로덕션 모드 여부
 IS_PRODUCTION = os.getenv("APP_ENV", "development").lower() == "production"
 
-# JWT 비밀키 미설정 경고
-if "CHANGE_ME_IN_PRODUCTION" in JWT_SECRET_KEY:
-    logger.warning("⚠️ JWT_SECRET_KEY가 기본값입니다. .env에 안전한 키를 설정하세요.")
+# JWT 비밀키 설정 확인 로그
+logger.info("✅ JWT_SECRET_KEY 로드 완료 (길이: %d)", len(JWT_SECRET_KEY))
 
 # ========== FastAPI 인증 스킴 ==========
 # Bearer 토큰 방식 (Authorization: Bearer <token>)
