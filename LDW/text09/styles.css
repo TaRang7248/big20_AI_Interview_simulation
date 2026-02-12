@@ -705,3 +705,58 @@ body {
 
 .pass-status.pass { background: #d4edda; color: #155724; }
 .pass-status.fail { background: #f8d7da; color: #721c24; }
+
+/* Resume Image Gallery */
+.resume-gallery {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    align-items: center;
+}
+
+.resume-thumb {
+    width: 100%;
+    max-width: 300px;
+    border: 1px solid #ddd;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.resume-thumb:hover {
+    transform: scale(1.02);
+    border-color: var(--primary-color);
+}
+
+/* Image Zoom Modal */
+#image-zoom-modal {
+    background-color: rgba(0,0,0,0.9); /* Darker background */
+}
+
+.modal-content-img {
+    margin: auto;
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 90%; /* A4 Size Logic: Fit to screen but keep aspect ratio */
+    max-height: 95vh;
+    border: 5px solid white;
+}
+
+.close-zoom {
+    position: absolute;
+    top: 15px;
+    right: 35px;
+    color: #f1f1f1;
+    font-size: 40px;
+    font-weight: bold;
+    transition: 0.3s;
+    cursor: pointer;
+}
+
+.close-zoom:hover,
+.close-zoom:focus {
+    color: #bbb;
+    text-decoration: none;
+    cursor: pointer;
+}

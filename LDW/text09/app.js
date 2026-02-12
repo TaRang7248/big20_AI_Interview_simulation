@@ -1149,6 +1149,7 @@ window.showApplicantDetail = async (interviewNumber) => {
             const data = result.result;
             const progress = result.progress;
             const resumeText = result.resume_text;
+            const resumeImagePaths = result.resume_image_path ? JSON.parse(result.resume_image_path) : null;
 
             // 1. Fill Header
             $('#detail-modal-title').textContent = `${data.title} - 지원자 상세 정보`;
@@ -1177,7 +1178,35 @@ window.showApplicantDetail = async (interviewNumber) => {
             $('#eval-text-attitude').textContent = data.non_verbal_eval || '평가 없음';
 
             // 3. Fill Resume
-            $('#detail-resume').textContent = resumeText || '이력서 내용이 없습니다.';
+            // 3. Fill Resume (Text + Images)
+            const resumeContainer = $('#detail-resume');
+            resumeContainer.innerHTML = ''; // Clear previous content
+
+            // If images exist, show them
+            if (resumeImagePaths && resumeImagePaths.length > 0) {
+                const gallery = document.createElement('div');
+                gallery.className = 'resume-gallery';
+
+                resumeImagePaths.forEach(path => {
+                    const img = document.createElement('img');
+                    img.src = path;
+                    img.className = 'resume-thumb';
+                    img.alt = '이력서 이미지';
+                    img.onclick = function () {
+                        openZoomModal(this.src);
+                    };
+                    gallery.appendChild(img);
+                });
+                resumeContainer.appendChild(gallery);
+
+                // Also show text below if needed, or just images. User asked for images mainly.
+                // Let's hide text if images are present to keep it clean, or toggle?
+                // Request said "view in 'Resume Content'".
+                // We can append text in a details summary if needed, but images are better.
+            } else {
+                // Fallback to text
+                resumeContainer.textContent = resumeText || '이력서 내용이 없습니다.';
+            }
 
             // 4. Fill Interview Log
             const logBox = $('#detail-log');
@@ -1275,3 +1304,26 @@ window.editJob = (id) => {
     $('#admin-view-jobs').classList.add('hidden');
     $('#admin-job-edit-page').classList.remove('hidden');
 };
+
+
+// --- Image Zoom Logic ---
+function openZoomModal(src) {
+    const modal = $('#image-zoom-modal');
+    const modalImg = $('#zoomed-image');
+    modal.style.display = "block"; // Override flex? No, CSS has display:flex for modal. 
+    // But .hidden handles display:none.
+    modal.classList.remove('hidden');
+    modalImg.src = src;
+}
+
+// Close Zoom Modal
+document.querySelector('.close-zoom').addEventListener('click', () => {
+    $('#image-zoom-modal').classList.add('hidden');
+});
+
+// Close when clicking outside image
+$('#image-zoom-modal').addEventListener('click', (e) => {
+    if (e.target === $('#image-zoom-modal')) {
+        $('#image-zoom-modal').classList.add('hidden');
+    }
+});

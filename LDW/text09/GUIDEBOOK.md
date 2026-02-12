@@ -1,98 +1,77 @@
-# AI 면접 시뮬레이션 가이드북 (AI Interview Simulation Guidebook)
-
-본 문서는 **웹 기반 AI 면접 시뮬레이션** 프로그램의 개요, 환경 설정, 실행 방법 및 주요 기능을 설명합니다.
+# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK)
 
 ## 1. 개요 (Overview)
-이 프로젝트는 실제 면접 상황을 시뮬레이션하기 위해 개발된 **AI 기반 웹 애플리케이션**입니다.
-사용자는 이력서(PDF)를 업로드하고, **OpenAI GPT-4o** 기반의 AI 면접관과 음성으로 대화하며 모의 면접을 진행할 수 있습니다.
-면접이 종료되면 AI가 답변 내용을 분석하여 기술 역량, 문제 해결 능력, 의사소통 능력 등을 평가합니다.
+본 프로그램은 웹 기반의 AI 면접 시뮬레이션 플랫폼입니다. 사용자는 지원자로서 직무에 지원하여 AI 면접관과 음성 대화를 통해 면접을 진행할 수 있으며, 관리자는 공고를 등록하고 지원자의 면접 결과(점수, 평가, 이력서, 대화록)를 확인할 수 있습니다.
 
-## 2. 시스템 요구 사항 (System Requirements)
-- **OS**: Windows / macOS / Linux
-- **Python**: 3.8 이상
-- **Database**: PostgreSQL
-- **Browser**: Chrome, Edge (음성 인식/녹음 기능 지원 브라우저)
-- **Hardware**: 마이크, 웹캠 (선택 사항)
+특히 **이력서 이미지 변환 및 확대 기능**이 추가되어, 관리자가 지원자의 이력서를 더욱 직관적으로 검토할 수 있습니다.
 
-## 3. 환경 설정 (Environment Setup)
+---
 
-### 3.1. 필수 라이브러리 설치
-프로젝트 폴더에서 다음 명령어를 실행하여 필요한 패키지를 설치하십시오.
-```bash
-pip install -r requirements.txt
-```
-*(만약 `requirements.txt`가 없다면 다음 패키지들이 필요합니다: `fastapi`, `uvicorn`, `psycopg2`, `openai`, `python-multipart`, `python-dotenv`, `pymupdf` (fitz), `easyocr`, `torch` 등)*
+## 2. 환경 설정 (Environment Setup)
 
-### 3.2. 데이터베이스 설정 (Database)
-1. PostgreSQL을 설치하고 실행합니다.
-2. `interview_db` 데이터베이스를 생성합니다 (또는 `.env`에서 설정 가능).
-3. `.env` 파일을 프로젝트 루트에 생성하고 아래 내용을 설정합니다.
-   ```env
-   DB_HOST=localhost
-   DB_NAME=interview_db
-   DB_USER=postgres
-   POSTGRES_PASSWORD=your_password
-   OPENAI_API_KEY=your_openai_api_key_here
+### 필수 요구 사항
+- **OS**: Windows (테스트 환경)
+- **Python**: 3.10+
+- **Database**: PostgreSQL (기본 포트 5432)
+- **Browser**: Chrome, Edge 등 모던 브라우저
+
+### 설치된 라이브러리 및 모델
+- **Backend Framework**: `FastAPI`, `Uvicorn`
+- **Database**: `psycopg2` (PostgreSQL Connector)
+- **AI/ML**:
+    - `OpenAI API` (GPT-4o, Whisper) - 면접 질문 생성 및 음성 인식
+    - `PyMuPDF (fitz)` - PDF 이력서 이미지 변환
+    - `EasyOCR`, `Torch` - (기존 레거시) OCR 기능 (현재는 PDF 이미지 변환 위주 사용)
+- **Environment**: `python-dotenv`
+
+### 파일 구조 (File Structure)
+- `server.py`: 메인 백엔드 서버 (FastAPI)
+- `index.html`: 프론트엔드 메인 페이지
+- `styles.css`: 스타일시트
+- `app.js`: 프론트엔드 로직 (SPA 라우팅, API 호출, 녹음 등)
+- `uploads/`: 업로드된 이력서 및 오디오 파일 저장소
+    - `resumes/`: 원본 PDF 이력서
+    - `audio/`: 면접 음성 데이터
+    - `resume_images/`: **[NEW]** 이미지로 변환된 이력서 파일
+
+---
+
+## 3. 프로그램 실행 방법 (Execution)
+
+1. **가상환경 활성화** (선택 사항)
+2. **데이터베이스 실행**: PostgreSQL 서비스가 실행 중이어야 합니다.
+3. **서버 실행**:
+   ```bash
+   python server.py
    ```
+   - 서버가 시작되면 브라우저가 자동으로 `http://localhost:5000`으로 열립니다.
 
-### 3.3. 테이블 생성
-최초 실행 시 데이터베이스 테이블을 생성해야 합니다.
-```bash
-python create_table.py
-```
+---
 
-## 4. 프로그램 실행 (Execution)
-서버를 실행하면 자동으로 브라우저가 열리며(http://localhost:5000), 접속할 수 있습니다.
+## 4. 주요 기능 사용법 (Features)
 
-```bash
-python server.py
-```
-또는 `uvicorn`을 직접 사용할 수도 있습니다:
-```bash
-uvicorn server:app --host 0.0.0.0 --port 5000 --reload
-```
+### [지원자]
+1. **회원가입/로그인**: '면접자' 유형으로 가입 및 로그인.
+2. **공고 지원**: 대시보드에서 채용 공고를 확인하고 '지원하기' 클릭.
+3. **이력서 업로드**: PDF 형식의 이력서를 업로드.
+4. **환경 테스트**: 카메라 및 마이크 작동 확인.
+5. **AI 면접 진행**:
+    - AI 면접관의 질문을 듣고(TTS) 음성으로 답변.
+    - 12단계의 질문(자기소개, 직무, 인성, 마무리) 진행.
+6. **결과 확인**: 면접 종료 후 결과 분석 대기 (합격/불합격 여부).
 
-## 5. 주요 기능 사용법 (Features)
+### [관리자]
+1. **회원가입/로그인**: '관리자' 유형으로 가입 및 로그인.
+2. **공고 관리**: 채용 공고 등록, 수정, 삭제.
+3. **지원자 현황 조회**:
+    - 지원자 목록 및 면접 결과(합격/불합격) 확인.
+    - **상세 보기**:
+        - 평가 점수(기술, 문제해결, 의사소통, 태도) 및 코멘트 확인.
+        - **[NEW] 이력서 이미지 보기**: 업로드된 이력서를 이미지 갤러리로 확인. 클릭 시 크게 보기(Zoom) 가능.
+        - 면접 대화록(Q&A) 확인.
 
-### 5.1. 회원가입 및 로그인
-- 초기 실행 시 `회원가입`을 통해 계정을 생성합니다.
-- `관리자` 권한으로 가입하면 면접 공고를 생성할 수 있습니다.
-- `면접자` 권한으로 가입하면 공고에 지원하고 면접을 볼 수 있습니다.
+---
 
-### 5.2. 이력서 등록 (Resume Upload)
-- 면접자는 지원 시 **PDF 형식**의 이력서를 필수로 업로드해야 합니다.
-- **[NEW] AI 이력서 요약 기능**: 업로드된 이력서는 AI가 자동으로 분석하여 **핵심 역량, 주요 프로젝트, 경력 사항**을 요약하므로, 면접 질문의 정확도가 향상됩니다.
-
-### 5.3. AI 면접 진행
-1. 공고 지원 후 `면접 시작` 버튼을 누릅니다.
-2. 카메라와 마이크 권한을 허용합니다.
-3. AI 면접관이 첫 질문(자기소개)을 합니다.
-4. 답변 후 `답변 제출` 버튼을 누르면 음성이 녹음되어 전송됩니다.
-5. AI가 답변을 분석하고 꼬리 질문을 이어갑니다.
-
-### 5.4. 결과 분석
-- 면접 종료 후 `내 면접 기록`에서 결과를 확인할 수 있습니다.
-- 관리자는 지원자들의 면접 점수와 상세 평가 내용을 조회할 수 있습니다.
-
-## 6. 기술 스택 (Tech Stack)
-
-### Backend
-- **Framework**: FastAPI (Python)
-- **Database**: PostgreSQL (`psycopg2`)
-- **AI Core**:
-  - **LLM**: OpenAI GPT-4o (면접 진행 및 평가, 이력서 요약)
-  - **STT**: OpenAI Whisper (음성 -> 텍스트 변환)
-  - **OCR**: EasyOCR, PyMuPDF (PDF 이력서 텍스트 추출)
-
-### Frontend
-- **Language**: HTML5, CSS3, JavaScript (Vanilla JS)
-- **Styling**: Custom CSS (`styles.css`)
-
-## 7. 주요 파일 구조 (File Structure)
-- `server.py`: 메인 백엔드 서버 로직 (API 엔드포인트 포함)
-- `create_table.py`: DB 테이블 초기화 스크립트
-- `index.html`: 메인 웹 페이지 (SPA 구조)
-- `app.js`: 프론트엔드 로직 (API 호출, UI 제어)
-- `styles.css`: 스타일 시트
-- `uploads/`: 업로드된 이력서 및 음성 파일 저장소
-- `migration_*.py`: DB 스키마 변경 이력 관리 스크립트들
+## 5. 보안 및 외부 접근 (Security)
+- **이미지 보안**: 이력서 이미지는 로컬 서버의 `uploads/` 디렉토리에 저장되며, 별도의 클라우드 키(GCS 등) 없이 서버 내부에서 안전하게 서빙됩니다.
+- **외부 접근**: 같은 네트워크 내의 다른 컴퓨터에서 서버 IP(`http://[IP]:5000`)로 접속 시, 해당 서버가 제공하는 정적 파일(이미지 등)에만 접근 가능하도록 설정되어 있습니다. DB 접속 정보 등은 노출되지 않습니다.

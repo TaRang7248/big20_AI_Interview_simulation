@@ -175,6 +175,33 @@ def extract_text_from_pdf(filepath):
         logger.error(f"PDF Extraction Error (OCR): {e}")
         return ""
 
+def convert_pdf_to_images(pdf_path, output_folder):
+    """
+    Converts PDF pages to images and saves them to the output_folder.
+    Returns a list of relative image paths.
+    """
+    image_paths = []
+    try:
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+            
+        doc = fitz.open(pdf_path)
+        for i, page in enumerate(doc):
+            # Higher resolution for display
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            image_filename = f"page_{i+1}.png"
+            image_path = os.path.join(output_folder, image_filename)
+            pix.save(image_path)
+            
+            # Relative path for frontend
+            relative_path = f"/uploads/resume_images/{os.path.basename(output_folder)}/{image_filename}"
+            image_paths.append(relative_path)
+            
+        return image_paths
+    except Exception as e:
+        logger.error(f"PDF to Image Conversion Error: {e}")
+        return []
+
 def get_job_questions(job_title):
     """
     Fetches questions for a job title.
@@ -913,8 +940,9 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
                 pass_fail,
                 title, announcement_job,
                 id_name, session_name,
-                email
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                email,
+                resume_image_path
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             interview_number,
             int(result.get("tech_score", 0)), result.get("tech_eval", ""),
@@ -924,10 +952,27 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             pass_fail,
             announcement_title, announcement_job,
             id_name, session_name,
-            user_email
+            user_email,
+            None # Placeholder, will be updated below
         ))
         
         conn.commit()
+        
+        # --- Generate Resume Images ---
+        # 1. Find resume path
+        c.execute("SELECT resume FROM interview_information WHERE id_name = %s AND job = %s ORDER BY created_at DESC LIMIT 1", (id_name, announcement_job))
+        res_row = c.fetchone()
+        if res_row:
+             resume_path = res_row[0]
+             if os.path.exists(resume_path):
+                 image_folder = os.path.join("uploads", "resume_images", interview_number)
+                 image_paths = convert_pdf_to_images(resume_path, image_folder)
+                 
+                 if image_paths:
+                     # Update DB with image paths (JSON string)
+                     c.execute("UPDATE Interview_Result SET resume_image_path = %s WHERE interview_number = %s", (json.dumps(image_paths), interview_number))
+                     conn.commit()
+
         logger.info(f"Interview result saved for {interview_number}")
         
     except Exception as e:
@@ -1072,13 +1117,16 @@ def get_applicant_details(interview_number: str):
             "success": True,
             "result": dict(result),
             "progress": [dict(p) for p in progress],
-            "resume_text": resume_text
+            "resume_text": resume_text,
+            "resume_image_path": result.get('resume_image_path')
         }
     finally:
         conn.close()
 
 
 # --- Static Files ---
+# --- Static Files ---
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 app.mount("/", StaticFiles(directory=".", html=True), name="static")
 
 def open_browser():
