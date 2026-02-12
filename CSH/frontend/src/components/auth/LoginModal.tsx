@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import Modal from "@/components/common/Modal";
 
@@ -7,6 +8,7 @@ interface Props { open: boolean; onClose: () => void; onSwitch: () => void; onFo
 
 export default function LoginModal({ open, onClose, onSwitch, onForgot }: Props) {
   const { login } = useAuth();
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -18,8 +20,14 @@ export default function LoginModal({ open, onClose, onSwitch, onForgot }: Props)
     if (!email || !password) { setError("이메일과 비밀번호를 입력해주세요."); return; }
     setLoading(true);
     try {
-      await login(email, password);
+      const result = await login(email, password);
       onClose();
+      // 역할별 리다이렉트: 인사담당자 → /recruiter, 지원자 → /dashboard
+      if (result?.role === "recruiter") {
+        router.push("/recruiter");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "로그인 실패");
     } finally { setLoading(false); }

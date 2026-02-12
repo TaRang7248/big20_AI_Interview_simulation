@@ -28,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 import functools
 
 # FastAPI 및 웹 프레임워크
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File, Form, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, UploadFile, File, Form, Depends, status
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,7 +45,7 @@ from aiortc.contrib.media import MediaBlackhole
 from dotenv import load_dotenv
 
 # PostgreSQL 데이터베이스
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, text
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -149,6 +149,9 @@ if not DATABASE_URL:
 
 print(f"🔗 DB 연결 시도: {DATABASE_URL.replace(DATABASE_URL.split(':')[2].split('@')[0], '****')}")
 
+# DB 연결 에러 메시지 저장용
+DB_ERROR_MSG = None
+
 # DB 연결 시도
 try:
     engine = create_engine(DATABASE_URL)
@@ -199,7 +202,11 @@ try:
     print("✅ PostgreSQL 데이터베이스 연결됨")
 except Exception as e:
     DB_AVAILABLE = False
+    DB_ERROR_MSG = str(e)
     print(f"⚠️ PostgreSQL 데이터베이스 연결 실패: {e}")
+    print(f"   → DATABASE_URL 확인: {DATABASE_URL[:30]}...")
+    import traceback
+    traceback.print_exc()
     print("   → 메모리 저장소를 사용합니다.")
 
 # ========== FastAPI 앱 초기화 ==========
@@ -208,6 +215,17 @@ app = FastAPI(
     description="TTS, STT, LLM, 화상 면접, 감정 분석을 통합한 AI 면접 시스템",
     version="1.0.0"
 )
+
+# ───── 임시 진단 엔드포인트 (DB 연결 상태 확인) ─────
+@app.get("/api/debug/db")
+async def debug_db_status():
+    """DB 연결 상태 진단용 (개발 전용)"""
+    return {
+        "db_available": DB_AVAILABLE,
+        "db_error": DB_ERROR_MSG,
+        "database_url_prefix": DATABASE_URL[:40] + "..." if DATABASE_URL else None,
+        "env_postgres_conn": os.getenv("POSTGRES_CONNECTION_STRING", "NOT_SET")[:40],
+    }
 
 # CORS 설정 (운영 환경에서는 ALLOWED_ORIGINS 환경변수로 허용 도메인 지정)
 # 예: ALLOWED_ORIGINS=https://example.com,https://app.example.com
@@ -690,6 +708,8 @@ def get_user_by_email(email: str) -> Optional[Dict]:
                         "role": user.role,
                         "created_at": user.created_at.isoformat() if user.created_at else None
                     }
+            except Exception as e:
+                print(f"❌ [get_user_by_email] DB 쿼리 오류: {e}")
             finally:
                 db.close()
     # 폴백: 메모리 저장소
@@ -2585,23 +2605,26 @@ async def register_user(request: UserRegisterRequest):
     )
 
 
-@app.post("/api/auth/login", response_model=UserLoginResponse)
+@app.post("/api/auth/login")
 async def login_user(request: UserLoginRequest):
-    """로그인 API (이메일 + 비밀번호)"""
+    """════ 로그인 API (이메일 + 비밀번호) ════
+    성공 시: HTTP 200 + {success, user, access_token}
+    실패 시: HTTP 401 + {detail: "에러 메시지"}
+    """
     # DB에서 사용자 조회
     user = get_user_by_email(request.email)
     
     if not user:
-        return UserLoginResponse(
-            success=False,
-            message="등록되지 않은 이메일입니다. 회원가입을 먼저 해주세요."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="등록되지 않은 이메일입니다. 회원가입을 먼저 해주세요."
         )
     
     # 비밀번호 검증 (bcrypt + SHA-256 하위 호환)
     if not verify_password(request.password, user.get("password_hash", "")):
-        return UserLoginResponse(
-            success=False,
-            message="비밀번호가 올바르지 않습니다."
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="비밀번호가 올바르지 않습니다."
         )
     
     # SHA-256 → bcrypt 자동 마이그레이션
@@ -2632,12 +2655,12 @@ async def login_user(request: UserLoginRequest):
     
     print(f"✅ 로그인: {user['name']} ({user['email']})")
     
-    return UserLoginResponse(
-        success=True,
-        message="로그인 성공",
-        user=user_info,
-        access_token=access_token
-    )
+    return {
+        "success": True,
+        "message": "로그인 성공",
+        "user": user_info,
+        "access_token": access_token,
+    }
 
 
 # ========== 비밀번호 찾기 모델 ==========

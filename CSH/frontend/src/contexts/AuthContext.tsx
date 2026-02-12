@@ -6,7 +6,7 @@ interface AuthCtx {
   user: UserInfo | null;
   token: string | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<UserInfo>;
   logout: () => void;
   refresh: () => void;
   refreshUser: () => Promise<void>;
@@ -63,13 +63,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [token]);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string): Promise<UserInfo> => {
     const res = await authApi.login(email, password);
     setUser(res.user);
     setToken(res.access_token);
     sessionStorage.setItem("interview_user", JSON.stringify(res.user));
     sessionStorage.setItem("access_token", res.access_token);
     sessionStorage.setItem("login_time", String(Date.now()));
+    return res.user;  // 역할(role) 등 호출자가 활용할 수 있도록 반환
   }, []);
 
   const logout = useCallback(() => {

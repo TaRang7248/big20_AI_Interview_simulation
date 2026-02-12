@@ -26,8 +26,13 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!loading && !token) {
       router.push("/");
+      return;
     }
-  }, [loading, token, router]);
+    // 인사담당자는 전용 대시보드로 리다이렉트
+    if (!loading && user?.role === "recruiter") {
+      router.push("/recruiter");
+    }
+  }, [loading, token, user, router]);
 
   // 면접 기록 로드
   useEffect(() => {
