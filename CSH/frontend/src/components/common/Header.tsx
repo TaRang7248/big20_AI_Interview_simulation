@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
-import { LogOut, Home, User } from "lucide-react";
+import { LogOut, Home, User, Briefcase } from "lucide-react";
 
 export default function Header() {
   const { user, logout } = useAuth();
@@ -23,6 +23,9 @@ export default function Header() {
             </Link>
             <Link href="/profile" className="flex items-center gap-1 px-4 py-2 text-sm rounded-lg border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.1)] transition">
               <User size={14} /> 내 정보
+            </Link>
+            <Link href="/jobs" className="flex items-center gap-1 px-4 py-2 text-sm rounded-lg border border-[rgba(0,217,255,0.4)] text-[var(--cyan)] hover:bg-[rgba(0,217,255,0.1)] transition">
+              <Briefcase size={14} /> 공고
             </Link>
             <button onClick={logout} className="flex items-center gap-1 px-4 py-2 text-sm rounded-lg border border-[rgba(255,82,82,0.4)] text-[var(--danger)] hover:bg-[rgba(255,82,82,0.1)] transition">
               <LogOut size={14} /> 로그아웃

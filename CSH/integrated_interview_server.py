@@ -170,9 +170,30 @@ try:
         address = Column(String(500), nullable=True)
         phone = Column(String(20), nullable=True)  # 전화번호 (예: 010-1234-5678)
     
+    # 채용 공고 테이블 모델 (ERD: job_postings)
+    class JobPosting(Base):
+        __tablename__ = "job_postings"
+        
+        id = Column(Integer, primary_key=True, index=True)
+        recruiter_email = Column(String(255), nullable=False)   # 작성자(인사담당자) 이메일
+        title = Column(String(200), nullable=False)              # 공고 제목
+        company = Column(String(100), nullable=False)            # 회사명
+        location = Column(String(200), nullable=True)            # 근무지
+        job_category = Column(String(50), nullable=True)         # 직무 분야 (backend, frontend 등)
+        experience_level = Column(String(30), nullable=True)     # 경력 수준 (신입, 1~3년 등)
+        description = Column(Text, nullable=False)               # 상세 내용 (직무 설명, 자격요건 등)
+        salary_info = Column(String(100), nullable=True)         # 급여 정보
+        status = Column(String(20), nullable=False, default="open")  # open, closed
+        created_at = Column(DateTime, default=datetime.utcnow)
+        updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+        deadline = Column(String(10), nullable=True)             # 마감일 (YYYY-MM-DD)
+    
     # 연결 테스트
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
+    
+    # 테이블 자동 생성 (존재하지 않는 테이블만 생성)
+    Base.metadata.create_all(bind=engine)
     
     DB_AVAILABLE = True
     print("✅ PostgreSQL 데이터베이스 연결됨")
@@ -2921,6 +2942,252 @@ async def delete_user_account(request: UserDeleteRequest, current_user: Dict = D
         success=False,
         message="회원 탈퇴에 실패했습니다."
     )
+
+
+# ========== 채용 공고 API (Job Postings) ==========
+
+# ── Pydantic 모델 ──
+class JobPostingCreateRequest(BaseModel):
+    """채용 공고 등록 요청"""
+    title: str
+    company: str
+    location: Optional[str] = None
+    job_category: Optional[str] = None
+    experience_level: Optional[str] = None
+    description: str
+    salary_info: Optional[str] = None
+    deadline: Optional[str] = None  # YYYY-MM-DD
+
+class JobPostingUpdateRequest(BaseModel):
+    """채용 공고 수정 요청 — 변경할 필드만 전송"""
+    title: Optional[str] = None
+    company: Optional[str] = None
+    location: Optional[str] = None
+    job_category: Optional[str] = None
+    experience_level: Optional[str] = None
+    description: Optional[str] = None
+    salary_info: Optional[str] = None
+    status: Optional[str] = None  # open / closed
+    deadline: Optional[str] = None
+
+
+def _job_posting_to_dict(jp) -> Dict:
+    """JobPosting ORM 객체 → dict 변환 헬퍼"""
+    return {
+        "id": jp.id,
+        "recruiter_email": jp.recruiter_email,
+        "title": jp.title,
+        "company": jp.company,
+        "location": jp.location,
+        "job_category": jp.job_category,
+        "experience_level": jp.experience_level,
+        "description": jp.description,
+        "salary_info": jp.salary_info,
+        "status": jp.status,
+        "created_at": jp.created_at.isoformat() if jp.created_at else None,
+        "updated_at": jp.updated_at.isoformat() if jp.updated_at else None,
+        "deadline": jp.deadline,
+    }
+
+
+# ── 메모리 폴백 저장소 (DB 미연결 시) ──
+job_postings_memory: list = []
+job_posting_id_counter = 0
+
+
+@app.get("/api/job-postings")
+async def list_job_postings(status: Optional[str] = "open"):
+    """
+    채용 공고 목록 조회 (누구나 접근 가능)
+    - status 파라미터로 필터링 (기본: open)
+    - status=all 이면 전체 조회
+    """
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                query = db.query(JobPosting)
+                if status and status != "all":
+                    query = query.filter(JobPosting.status == status)
+                postings = query.order_by(JobPosting.created_at.desc()).all()
+                return {"postings": [_job_posting_to_dict(p) for p in postings]}
+            except Exception as e:
+                print(f"❌ 공고 목록 조회 실패: {e}")
+                raise HTTPException(status_code=500, detail="공고 목록 조회 실패")
+            finally:
+                db.close()
+    # 메모리 폴백
+    filtered = job_postings_memory if status == "all" else [p for p in job_postings_memory if p["status"] == status]
+    return {"postings": sorted(filtered, key=lambda x: x.get("created_at", ""), reverse=True)}
+
+
+@app.get("/api/job-postings/{posting_id}")
+async def get_job_posting(posting_id: int):
+    """채용 공고 상세 조회"""
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                jp = db.query(JobPosting).filter(JobPosting.id == posting_id).first()
+                if not jp:
+                    raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
+                return _job_posting_to_dict(jp)
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"❌ 공고 상세 조회 실패: {e}")
+                raise HTTPException(status_code=500, detail="공고 조회 실패")
+            finally:
+                db.close()
+    # 메모리 폴백
+    for p in job_postings_memory:
+        if p["id"] == posting_id:
+            return p
+    raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
+
+
+@app.post("/api/job-postings")
+async def create_job_posting(request: JobPostingCreateRequest, current_user: Dict = Depends(get_current_user)):
+    """
+    채용 공고 등록 (인사담당자만 가능)
+    - role이 'recruiter'인 사용자만 공고를 등록할 수 있음
+    """
+    # 권한 확인: 인사담당자만 공고 등록 가능
+    if current_user.get("role") != "recruiter":
+        raise HTTPException(status_code=403, detail="인사담당자만 공고를 등록할 수 있습니다.")
+    
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                jp = JobPosting(
+                    recruiter_email=current_user["email"],
+                    title=request.title,
+                    company=request.company,
+                    location=request.location,
+                    job_category=request.job_category,
+                    experience_level=request.experience_level,
+                    description=request.description,
+                    salary_info=request.salary_info,
+                    deadline=request.deadline,
+                    status="open",
+                )
+                db.add(jp)
+                db.commit()
+                db.refresh(jp)
+                print(f"📋 공고 등록: {jp.title} (by {current_user['email']})")
+                return {"success": True, "message": "공고가 등록되었습니다.", "posting": _job_posting_to_dict(jp)}
+            except Exception as e:
+                db.rollback()
+                print(f"❌ 공고 등록 실패: {e}")
+                raise HTTPException(status_code=500, detail="공고 등록 실패")
+            finally:
+                db.close()
+    
+    # 메모리 폴백
+    global job_posting_id_counter
+    job_posting_id_counter += 1
+    posting = {
+        "id": job_posting_id_counter,
+        "recruiter_email": current_user["email"],
+        "title": request.title,
+        "company": request.company,
+        "location": request.location,
+        "job_category": request.job_category,
+        "experience_level": request.experience_level,
+        "description": request.description,
+        "salary_info": request.salary_info,
+        "status": "open",
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+        "deadline": request.deadline,
+    }
+    job_postings_memory.append(posting)
+    return {"success": True, "message": "공고가 등록되었습니다.", "posting": posting}
+
+
+@app.put("/api/job-postings/{posting_id}")
+async def update_job_posting(posting_id: int, request: JobPostingUpdateRequest, current_user: Dict = Depends(get_current_user)):
+    """
+    채용 공고 수정 (작성자 본인만 가능)
+    """
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                jp = db.query(JobPosting).filter(JobPosting.id == posting_id).first()
+                if not jp:
+                    raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
+                # 작성자 본인만 수정 가능
+                if jp.recruiter_email != current_user.get("email"):
+                    raise HTTPException(status_code=403, detail="본인이 작성한 공고만 수정할 수 있습니다.")
+                # 변경된 필드만 업데이트
+                update_fields = request.dict(exclude_unset=True)
+                for field, value in update_fields.items():
+                    if value is not None:
+                        setattr(jp, field, value)
+                db.commit()
+                db.refresh(jp)
+                print(f"✏️ 공고 수정: {jp.title} (id={posting_id})")
+                return {"success": True, "message": "공고가 수정되었습니다.", "posting": _job_posting_to_dict(jp)}
+            except HTTPException:
+                raise
+            except Exception as e:
+                db.rollback()
+                print(f"❌ 공고 수정 실패: {e}")
+                raise HTTPException(status_code=500, detail="공고 수정 실패")
+            finally:
+                db.close()
+    
+    # 메모리 폴백
+    for p in job_postings_memory:
+        if p["id"] == posting_id:
+            if p["recruiter_email"] != current_user.get("email"):
+                raise HTTPException(status_code=403, detail="본인이 작성한 공고만 수정할 수 있습니다.")
+            update_fields = request.dict(exclude_unset=True)
+            for field, value in update_fields.items():
+                if value is not None:
+                    p[field] = value
+            p["updated_at"] = datetime.utcnow().isoformat()
+            return {"success": True, "message": "공고가 수정되었습니다.", "posting": p}
+    raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
+
+
+@app.delete("/api/job-postings/{posting_id}")
+async def delete_job_posting(posting_id: int, current_user: Dict = Depends(get_current_user)):
+    """
+    채용 공고 삭제 (작성자 본인만 가능)
+    """
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                jp = db.query(JobPosting).filter(JobPosting.id == posting_id).first()
+                if not jp:
+                    raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
+                if jp.recruiter_email != current_user.get("email"):
+                    raise HTTPException(status_code=403, detail="본인이 작성한 공고만 삭제할 수 있습니다.")
+                db.delete(jp)
+                db.commit()
+                print(f"🗑️ 공고 삭제: id={posting_id}")
+                return {"success": True, "message": "공고가 삭제되었습니다."}
+            except HTTPException:
+                raise
+            except Exception as e:
+                db.rollback()
+                print(f"❌ 공고 삭제 실패: {e}")
+                raise HTTPException(status_code=500, detail="공고 삭제 실패")
+            finally:
+                db.close()
+    
+    # 메모리 폴백
+    for i, p in enumerate(job_postings_memory):
+        if p["id"] == posting_id:
+            if p["recruiter_email"] != current_user.get("email"):
+                raise HTTPException(status_code=403, detail="본인이 작성한 공고만 삭제할 수 있습니다.")
+            job_postings_memory.pop(i)
+            return {"success": True, "message": "공고가 삭제되었습니다."}
+    raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다.")
 
 
 # ========== Resume Upload API ==========
