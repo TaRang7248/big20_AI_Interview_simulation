@@ -7,7 +7,7 @@ import { resumeApi, interviewApi, type InterviewRecord } from "@/lib/api";
 import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle } from "lucide-react";
 
 export default function DashboardPage() {
-  const { user, token } = useAuth();
+  const { user, token, loading } = useAuth();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -22,12 +22,12 @@ export default function DashboardPage() {
   const streamRef = useRef<MediaStream | null>(null);
   const micBarRef = useRef<HTMLDivElement>(null);
 
-  // 인증 확인
+  // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   useEffect(() => {
-    if (!token && typeof window !== "undefined") {
+    if (!loading && !token) {
       router.push("/");
     }
-  }, [token, router]);
+  }, [loading, token, router]);
 
   // 면접 기록 로드
   useEffect(() => {
@@ -93,6 +93,16 @@ export default function DashboardPage() {
     const file = e.dataTransfer.files[0];
     if (file) handleUpload(file);
   }, [user]);
+
+  // 인증 상태 로딩 중이면 로딩 화면 표시
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-8 h-8 border-2 border-[var(--cyan)] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm text-[var(--text-secondary)]">로딩 중...</p>
+      </div>
+    </div>
+  );
 
   if (!user) return null;
 
