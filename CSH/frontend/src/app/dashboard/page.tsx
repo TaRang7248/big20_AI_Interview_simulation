@@ -206,7 +206,7 @@ export default function DashboardPage() {
 
         {/* 면접 시작 CTA */}
         <button
-          onClick={() => {
+          onClick={async () => {
             // 이력서 미업로드 시 경고를 표시하고, 사용자가 선택할 수 있도록 함
             if (!resumeFile) {
               const proceed = await toast.confirm(
