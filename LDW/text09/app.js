@@ -1159,10 +1159,21 @@ window.showApplicantDetail = async (interviewNumber) => {
             passEl.className = `pass-status ${passFail === '합격' ? 'pass' : 'fail'}`;
 
             // Update to show Text Evaluations as requested
-            $('#score-tech').innerHTML = `<strong>[기술/직무]</strong><br>${data.tech_eval || '평가 없음'}`;
-            $('#score-problem').innerHTML = `<strong>[문제해결]</strong><br>${data.problem_solving_eval || '평가 없음'}`;
-            $('#score-comm').innerHTML = `<strong>[의사소통]</strong><br>${data.communication_eval || '평가 없음'}`;
-            $('#score-attitude').innerHTML = `<strong>[태도/인성]</strong><br>${data.non_verbal_eval || '평가 없음'}`;
+            // Tech
+            $('#score-val-tech').textContent = `${data.tech_score || 0}점`;
+            $('#eval-text-tech').textContent = data.tech_eval || '평가 없음';
+
+            // Problem Solving
+            $('#score-val-problem').textContent = `${data.problem_solving_score || 0}점`;
+            $('#eval-text-problem').textContent = data.problem_solving_eval || '평가 없음';
+
+            // Communication
+            $('#score-val-comm').textContent = `${data.communication_score || 0}점`;
+            $('#eval-text-comm').textContent = data.communication_eval || '평가 없음';
+
+            // Attitude
+            $('#score-val-attitude').textContent = `${data.non_verbal_score || 0}점`;
+            $('#eval-text-attitude').textContent = data.non_verbal_eval || '평가 없음';
 
             // 3. Fill Resume
             $('#detail-resume').textContent = resumeText || '이력서 내용이 없습니다.';
