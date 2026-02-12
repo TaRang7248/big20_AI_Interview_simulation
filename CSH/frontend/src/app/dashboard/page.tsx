@@ -5,9 +5,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import { resumeApi, interviewApi, type InterviewRecord } from "@/lib/api";
 import { Upload, Trash2, Video, Mic, CheckCircle2, AlertCircle, FileText, Clock, AlertTriangle, Briefcase } from "lucide-react";
+import { useToast } from "@/contexts/ToastContext";
 
 export default function DashboardPage() {
   const { user, token, loading } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -83,7 +85,7 @@ export default function DashboardPage() {
       draw();
       setMicOk(true);
       setTesting(true);
-    } catch { alert("카메라/마이크 접근 권한이 필요합니다."); }
+    } catch { toast.error("카메라/마이크 접근 권한이 필요합니다."); }
   };
 
   const stopTest = () => {
@@ -207,10 +209,11 @@ export default function DashboardPage() {
           onClick={() => {
             // 이력서 미업로드 시 경고를 표시하고, 사용자가 선택할 수 있도록 함
             if (!resumeFile) {
-              const proceed = window.confirm(
+              const proceed = await toast.confirm(
                 "⚠️ 이력서가 업로드되지 않았습니다.\n\n" +
                 "이력서를 업로드하면 맞춤형 면접 질문을 받을 수 있습니다.\n\n" +
-                "이력서 없이 면접을 시작하시겠습니까?"
+                "이력서 없이 면접을 시작하시겠습니까?",
+                "면접 시작", "돌아가기"
               );
               if (!proceed) return;
             }

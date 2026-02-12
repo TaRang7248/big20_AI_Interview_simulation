@@ -2,10 +2,12 @@
 import { useState, useCallback } from "react";
 import { authApi } from "@/lib/api";
 import Modal from "@/components/common/Modal";
+import { useToast } from "@/contexts/ToastContext";
 
 interface Props { open: boolean; onClose: () => void; onSwitch: () => void; }
 
 export default function RegisterModal({ open, onClose, onSwitch }: Props) {
+  const { toast } = useToast();
   const [form, setForm] = useState({ email: "", password: "", passwordConfirm: "", name: "", birth_date: "", gender: "", address: "", phone: "", role: "candidate" });
   const [emailStatus, setEmailStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
   const [error, setError] = useState("");
@@ -31,7 +33,7 @@ export default function RegisterModal({ open, onClose, onSwitch }: Props) {
     setLoading(true);
     try {
       await authApi.register({ email: form.email, password: form.password, name: form.name, birth_date: form.birth_date, gender: form.gender, address: form.address, phone: form.phone, role: form.role });
-      alert("회원가입이 완료되었습니다! 로그인 해주세요.");
+      toast.success("회원가입이 완료되었습니다! 로그인 해주세요.");
       onSwitch();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "회원가입 실패");

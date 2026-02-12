@@ -44,7 +44,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let idleTimer: ReturnType<typeof setTimeout>;
     let sessionTimer: ReturnType<typeof setTimeout>;
 
-    const doLogout = () => { logout(); alert("세션이 만료되었습니다. 다시 로그인 해주세요."); };
+    // Toast 시스템에 세션 만료 알림을 전달 (커스텀 이벤트 기반 — AuthContext는 ToastProvider 외부이므로)
+    const doLogout = () => { logout(); window.dispatchEvent(new CustomEvent("toast-event", { detail: { type: "warning", message: "세션이 만료되었습니다. 다시 로그인 해주세요." } })); };
 
     const resetIdle = () => {
       clearTimeout(idleTimer);

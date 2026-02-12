@@ -6,6 +6,7 @@ import Header from "@/components/common/Header";
 import EventToastContainer from "@/components/common/EventToast";
 import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
 import { sessionApi, interviewApi, ttsApi, interventionApi, resumeApi } from "@/lib/api";
+import { useToast } from "@/contexts/ToastContext";
 import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2, FileText, Download, LayoutDashboard, AlertTriangle, Upload } from "lucide-react";
 
 /* Web Speech API 타입 (브라우저 전용) */
@@ -45,6 +46,7 @@ export default function InterviewPageWrapper() {
 
 function InterviewPageInner() {
   const { user, token, loading } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
   // URL 에서 공고 ID 추출 (ex: /interview?job_posting_id=3)
@@ -142,7 +144,7 @@ function InterviewPageInner() {
       await proceedInterview(res.session_id, stream);
     } catch (err) {
       console.error("면접 시작 실패:", err);
-      alert("면접 시작에 실패했습니다. 카메라/마이크 권한을 확인해주세요.");
+      toast.error("면접 시작에 실패했습니다. 카메라/마이크 권한을 확인해주세요.");
     }
   };
 
@@ -184,7 +186,7 @@ function InterviewPageInner() {
       await getNextQuestion(sid, "[START]");
     } catch (err) {
       console.error("면접 진행 실패:", err);
-      alert("면접 시작에 실패했습니다.");
+      toast.error("면접 시작에 실패했습니다.");
     }
   };
 
@@ -193,11 +195,11 @@ function InterviewPageInner() {
    */
   const handleResumeUploadInWarning = async (file: File) => {
     if (!file.name.toLowerCase().endsWith(".pdf")) {
-      alert("PDF 파일만 업로드 가능합니다.");
+      toast.error("PDF 파일만 업로드 가능합니다.");
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      alert("파일 크기는 10MB 이하여야 합니다.");
+      toast.error("파일 크기는 10MB 이하여야 합니다.");
       return;
     }
     setResumeUploading(true);
@@ -207,7 +209,7 @@ function InterviewPageInner() {
       // 이력서 업로드 완료 후 면접 진행
       await proceedInterview(pendingSessionId);
     } catch {
-      alert("이력서 업로드 실패. 다시 시도해주세요.");
+      toast.error("이력서 업로드 실패. 다시 시도해주세요.");
     } finally {
       setResumeUploading(false);
     }
@@ -640,7 +642,7 @@ function InterviewPageInner() {
                       a.click();
                       URL.revokeObjectURL(url);
                     })
-                    .catch((err) => alert(err.message));
+                    .catch((err) => toast.error(err.message));
                 }}
                 className="flex items-center gap-2 btn-gradient px-6 py-3"
               >

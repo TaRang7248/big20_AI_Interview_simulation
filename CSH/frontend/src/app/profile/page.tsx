@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/common/Header";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/contexts/ToastContext";
 import { interviewApi, authApi, type InterviewRecord } from "@/lib/api";
 import {
   User, Mail, Calendar, MapPin, Phone, Shield, Clock,
@@ -15,6 +16,7 @@ import {
  */
 export default function ProfilePage() {
   const { user, token, loading, logout } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
 
   // 면접 기록 상태
@@ -85,7 +87,7 @@ export default function ProfilePage() {
     try {
       const res = await authApi.deleteAccount(deleteForm.email, deleteForm.password);
       if (res.success) {
-        alert("회원 탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다.");
+        toast.success("회원 탈퇴가 완료되었습니다. 이용해 주셔서 감사합니다.");
         logout();
         router.push("/");
       } else {

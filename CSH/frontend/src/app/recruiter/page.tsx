@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useToast } from "@/contexts/ToastContext";
 import Header from "@/components/common/Header";
 import { jobPostingApi, type JobPosting } from "@/lib/api";
 import {
@@ -49,6 +50,7 @@ const getCategoryLabel = (value: string) =>
  */
 export default function RecruiterDashboard() {
   const { user, token, loading } = useAuth();
+  const { toast } = useToast();
   const router = useRouter();
 
   // ── 공고 목록 상태 ──
@@ -193,7 +195,7 @@ export default function RecruiterDashboard() {
       setDeleteTarget(null);
       await loadPostings();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "삭제 실패");
+      toast.error(e instanceof Error ? e.message : "삭제 실패");
     } finally {
       setDeleting(false);
     }
@@ -206,7 +208,7 @@ export default function RecruiterDashboard() {
       await jobPostingApi.update(p.id, { status: newStatus });
       await loadPostings();
     } catch (e) {
-      alert(e instanceof Error ? e.message : "상태 변경 실패");
+      toast.error(e instanceof Error ? e.message : "상태 변경 실패");
     }
   };
 
