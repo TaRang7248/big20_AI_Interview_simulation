@@ -991,8 +991,9 @@ function initAdmin() {
     });
 
     $('#admin-link-my-info').addEventListener('click', () => {
-        navigateTo('myinfo-page');
-        loadMyInfo();
+        navigateTo('password-check-page');
+        $('#check-pw-input').value = '';
+        $('#check-pw-input').focus();
     });
 
     $('#btn-add-job').addEventListener('click', () => {
