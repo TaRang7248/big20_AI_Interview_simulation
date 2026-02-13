@@ -13,6 +13,7 @@ class SessionConfig(BaseModel):
     silence_timeout_sec: int = Field(default=15, description="Silence timeout in seconds")
     early_exit_enabled: bool = Field(default=False, description="Whether early exit based on score is enabled")
     mode: InterviewMode = Field(default=InterviewMode.ACTUAL, description="Session Mode: ACTUAL or PRACTICE")
+    job_id: Optional[str] = Field(default=None, description="Linked Job Posting ID (if applicable)")
     
     # Contract: min_question_count must default to 10 as per policy
     
@@ -22,7 +23,9 @@ class SessionContext(BaseModel):
     Represents the Hot State (Redis-like).
     """
     session_id: str
+    job_id: str
     status: str
+    started_at: Optional[float] = None # Timestamp
     current_step: int = 0
     completed_questions_count: int = 0
     early_exit_signaled: bool = False # Signal from Evaluation Layer

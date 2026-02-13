@@ -20,6 +20,14 @@ class SessionStateRepository(ABC):
     def update_status(self, session_id: str, status: SessionStatus) -> None:
         pass
 
+    @abstractmethod
+    def find_by_job_id(self, job_id: str) -> list[SessionContext]:
+        """
+        Find active sessions by Job ID.
+        Essential for Admin Dashboard monitoring.
+        """
+        pass
+
 class SessionHistoryRepository(ABC):
     """
     Interface for Cold Storage (PostgreSQL).

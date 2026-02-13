@@ -137,5 +137,6 @@ class Job(BaseModel):
             question_timeout_sec=self.policy.question_timeout_sec,
             silence_timeout_sec=self.policy.silence_timeout_sec,
             mode=self.policy.mode,
+            job_id=self.job_id,
             early_exit_enabled=False
         )

@@ -168,6 +168,17 @@ class FileHistoryRepository(HistoryRepository):
                 total_score = header.get('total_score', 0.0)
                 grade = header.get('grade', 'N/A')
                 job_category = header.get('job_category', 'Unknown')
+                job_id = header.get('job_id')
+                
+                # If report exists in file history, it is considered EVALUATED by default 
+                # unless we have specific logic effectively saying otherwise.
+                # Timestamp in filename is usually finished_at or saved_at.
+                # We use it as started_at fallback if not available, OR leave started_at None.
+                # Review: Plan says "started_at" filter required. 
+                # If report doesn't have started_at, we might need to use timestamp as proxy 
+                # or add started_at to ReportHeader. 
+                # For now, let's use timestamp as proxy for started_at for existing reports 
+                # (Assuming short interviews).
                 
                 meta = HistoryMetadata(
                     interview_id=interview_id,
@@ -175,6 +186,9 @@ class FileHistoryRepository(HistoryRepository):
                     total_score=total_score,
                     grade=grade,
                     job_category=job_category,
+                    job_id=job_id,
+                    status="EVALUATED", # Persisted reports are evaluated
+                    started_at=timestamp, # Proxy using save time
                     file_path=filename
                 )
                 results.append(meta)

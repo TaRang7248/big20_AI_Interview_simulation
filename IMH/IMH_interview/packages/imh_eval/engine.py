@@ -15,6 +15,7 @@ class EvaluationContext(BaseModel):
     Combines raw analysis results and mock data for missing providers.
     """
     job_category: str = Field(..., description="DEV or NON_TECH")
+    job_id: Optional[str] = Field(None, description="Job ID")
     
     # Analysis Inputs
     answer_text: str
@@ -121,5 +122,6 @@ class RubricEvaluator:
         return EvaluationResult(
             total_score=total_weighted_score,
             details=items,
-            job_category=context.job_category
+            job_category=context.job_category,
+            job_id=context.job_id
         )

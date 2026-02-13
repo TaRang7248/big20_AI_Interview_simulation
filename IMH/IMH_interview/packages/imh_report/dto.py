@@ -8,6 +8,7 @@ class ReportHeader(BaseModel):
     total_score: float = Field(..., description="Weighted total score (0-100)")
     grade: str = Field(..., description="Letter grade (S/A/B/C/D)")
     job_category: str = Field(..., description="Job Category (DEV or NON_TECH)")
+    job_id: Optional[str] = Field(default=None, description="Linked Job Posting ID")
     keywords: List[str] = Field(default_factory=list, description="Top keywords representing the candidate")
 
 class ReportDetail(BaseModel):

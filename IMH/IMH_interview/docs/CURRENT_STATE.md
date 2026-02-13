@@ -13,111 +13,53 @@
   반드시 `interview_env` 활성화 상태에서 수행한다.
 - 글로벌(시스템) Python 환경에 패키지 설치는 금지한다.
 
-### 검증 상태
-- TASK-004 기준:
-  - `scripts/verify_task_004.py`를
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+## 검증 상태 요약 (Phase 1 ~ Phase 5)
 
-- TASK-006 기준:
-  - `scripts/verify_task_006.py`를
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
-  - 파일 확장자 검증, 페이지 수 제한(50),
-    용량 제한(10MB), 텍스트 추출 및
-    NO_TEXT_FOUND(422) 정책 검증 완료
+### 1. Core Processing Layer (TASK-004 ~ 011)
 
-- TASK-007 기준:
-  - `scripts/verify_task_007.py`를
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
-  - Query Text → Embedding 벡터 변환 파이프라인(Mock Provider) 검증 완료
-  - 대화 전체/STT 결과 임베딩 제외 정책 확인
+- 파일 검증, 텍스트 추출, 임베딩 파이프라인 정상 동작 확인
+- 음성 분석(Pitch/Intensity/Jitter/Shimmer/HNR) 정책 검증 완료
+- 얼굴 분석(MediaPipe) 및 No Face 정책 검증 완료
+- 루브릭 기반 점수 산출 및 직군 가중치 로직 정상 동작 확인
+- 모든 검증은 Python 3.10.11 + interview_env 환경에서 수행됨
 
-- TASK-009 기준:
-  - `scripts/verify_task_009.py`를
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
-  - Sine Wave(440Hz) 입력 시 Pitch/Intensity/Jitter/Shimmer/HNR 정상 추출 확인
-  - 무음(Silence) 입력 시 크래시 없이 null/0 반환 정책 검증
-  - 비정상 파일 입력 시 422 Unprocessable Entity 반환 정책 검증 완료
+---
 
-- TASK-010 기준:
-  - `scripts/verify_task_010.py`를
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
-  - 얼굴 미검출(No Face) 입력 시
-    `has_face=False`, `presence_score=0.0` 반환 정책 검증 완료
-  - MediaPipe Provider 초기화 및 API Router Import 정상 동작 확인
+### 2. Report & Persistence Layer (TASK-013 ~ 014)
 
-- TASK-011 기준:
-  - 검증 스크립트: `scripts/verify_task_011.py`
-  - 실행 환경: Python 3.10.11 + `interview_env`
-  - 검증 항목:
-    - 루브릭 가이드 기반 4대 영역(직무 / 문제해결 / 의사소통 / 태도) 점수 산출
-    - 직군(DEV / NON_TECH)별 가중치 적용 로직 검증
-    - `tag_code` 식별자 규칙 준수 확인
-    - `evidence_data` JSON 스키마 필드 존재 및 구조 검증
-  - 결과: 정상 동작 확인
+- InterviewReport 파일 저장/조회/정렬 정책 검증 완료
+- `/reports` API 목록/상세 조회 정상 동작 확인
+- DTO 직렬화 및 404 처리 정책 검증 완료
+- 파일 기반 메타데이터 구성 정책 유지 확인
 
-- TASK-013 기준:
-  - `scripts/verify_task_013.py`를
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
-  - InterviewReport JSON 파일 저장(Save) 검증 완료
-  - interview_id 기반 단건 조회(Find By ID) 검증 완료
-  - 파일명 Timestamp 기준 목록 조회(Find All) 및 정렬 정책 검증 완료
-  - 별도 인덱스 파일 없이 파일명 + JSON 파싱 기반 메타데이터 구성 정책 확인
+---
 
-- TASK-014 기준:
-  - `scripts/verify_task_014.py`를 Python 3.10.11 + interview_env 환경에서 실행
-  - 리포트 생성 및 저장 후, 목록(`GET /reports`) 및 상세(`GET /reports/{id}`) API 정상 응답 확인
-  - 404 Not Found 에러 처리 검증 완료
-  - `HistoryMetadata` 및 `InterviewReport` DTO 직렬화 정상 확인
-  - 검증 스크립트는 구현 결과 확인을 위한 보조 도구이며, API Contract에는 영향을 주지 않음
+### 3. Session & Policy Engine Layer (TASK-017 ~ 019)
 
-- TASK-017 기준:
-  - `scripts/verify_task_017.py`를  
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인  
-  - 세션 상태 전이(APPLIED → IN_PROGRESS → COMPLETED/INTERRUPTED → EVALUATED) 검증 완료  
-  - 최소 질문 수 기본값 10개 보장 및 최소 질문 수 이전 조기 종료 금지 정책 검증 완료  
-  - 평가 계층 반환 신호 기반 조기 종료 처리 검증 완료 (점수 직접 판단 없음)  
-  - 침묵 2케이스 처리 검증 완료  
-    - 무응답 침묵 → `is_no_answer = true`  
-    - 답변 후 침묵 → 정상 답변 처리  
-  - `SILENCE_WARNING` 및 `SILENCE_TIMEOUT` 이벤트 발생 및 로그 기록 확인  
-  - Redis Hot State / PostgreSQL Persistent Record 구분 정책 준수 확인  
-  - 검증 스크립트는 세션 정책 동작 확인을 위한 보조 도구이며, 세션 계약(Plan 문서)에는 영향을 주지 않음  
+- 세션 상태 전이(APPLIED → IN_PROGRESS → COMPLETED/INTERRUPTED → EVALUATED) 정상 동작
+- 최소 질문 수 10개 정책 및 침묵 처리 정책 검증 완료
+- Actual / Practice 모드 분리 정책 검증 완료
+- 공고 상태 전이(DRAFT → PUBLISHED → CLOSED) 및 Immutable Policy 계약 검증 완료
+- AI-Sensitive Fields 불변 계약 유지 확인
 
-- TASK-018 기준:
-  - `scripts/verify_task_018.py`를
-    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
-  - 실전(Actual) 모드:
-    - `INTERRUPTED → IN_PROGRESS` 전이 금지 검증 완료
-    - 최소 질문 수 미충족 상태에서 조기 종료 금지 검증 완료
-    - 최소 질문 수 충족 이후 조기 종료 허용 로직 검증 완료
-    - 무응답 질문도 수행 질문으로 카운트되는지 확인
-  - 연습(Practice) 모드:
-    - `INTERRUPTED → IN_PROGRESS` 전이 허용 검증 완료
-    - 조기 종료 상시 허용 로직 검증 완료
-    - Resume 정책 분기 동작 정상 확인
-  - `InterviewMode` 기반 Policy 로딩 및 분기 처리 정상 확인
-  - `SessionConfig.mode` 값에 따른 Policy 구현체 주입 정상 확인
-  - `scripts/verify_task_017.py`를 통한 기존 엔진 흐름 회귀 테스트 통과
-  - 상태 ENUM(APPLIED / IN_PROGRESS / COMPLETED / INTERRUPTED / EVALUATED) 변경 없음 확인
-  - 검증 스크립트는 정책 분리 및 엔진 동작 확인을 위한 보조 도구이며,
-    런타임 API 진입점 구현에는 영향을 주지 않음
+---
 
-- TASK-019 기준:
-  - `scripts/verify_task_019.py`를  
-    Python 3.10.11 + `interview_env` 환경에서 실행하여 정상 동작 확인  
-  - 공고 상태 전이(DRAFT → PUBLISHED → CLOSED) 검증 완료  
-    - PUBLISHED/CLOSED 상태에서 허용되지 않은 전이 차단 확인  
-  - PUBLISHED 상태 전환은 되돌릴 수 없는 전이(Irreversible Transition)로 취급됨을 검증 완료  
-  - AI-Sensitive Fields 불변(Immutable Contract) 규칙 검증 완료  
-    - DRAFT 상태에서만 `update_policy()` 허용  
-    - PUBLISHED/CLOSED 상태에서 `update_policy()` 호출 시 `PolicyValidationError` 발생 확인  
-    - PUBLISHED 상태에서 `job.policy = ...` 직접 대입 시도 시 `PolicyValidationError` 발생(우회 경로 차단) 확인  
-  - 세션 스냅샷(SessionConfig) 생성 정책 검증 완료  
-    - `create_session_config()`에서 JobPolicy 참조 공유 없이 값 주입(Value Injection) 방식으로 스냅샷 생성 확인  
-  - 2주 내 합/불합 자동 통지 하한선은 “플랫폼 강제 규칙(Platform Policy)”으로서  
-    공고 정책으로 무력화 불가 원칙 유지 확인  
-  - 검증 스크립트는 공고 정책 엔진 규칙 동작 확인을 위한 보조 도구이며,  
-    런타임 API 진입점 구현에는 영향을 주지 않음
+### 4. Admin Query Layer (TASK-020)
+
+- Active + History 통합 조회(Federated Search) 정상 동작
+- 필수 필터(job_id, status, result, date) 계약 준수 확인
+- Result는 EVALUATED 상태에만 적용됨 검증 완료
+- is_interrupted alias 합집합 처리 확인
+- search_keyword 계약(2자 이상, email exact, name partial) 준수 확인
+- weakness 필터는 Deferred 처리(Phase 7 이후)
+- Scope Lock 위반 없음 확인
+
+---
+
+모든 TASK는 verify_task_xxx.py 스크립트를 통해 검증되었으며,
+검증 스크립트는 계약 동작 확인을 위한 보조 도구로 사용된다.
+
+
 
 ## 1. 프로젝트 목적 (확정)
 
@@ -329,6 +271,10 @@ IMH/IMH_Interview/
     - SessionConfig에 mode 추가 및 Engine 주입 로직 구현
     - 조기 종료/중단/재진입 정책 분리 검증 완료 (`verify_task_018.py`)
     - ※ 실전/연습 모드 진입점(API) 구현 시 mode 강제 주입 필요 (Phase 5 통합 단계)
+  - TASK-020: 관리자 지원자 조회/필터 규격 및 구현 완료
+    - `ApplicantQueryService` 구현 (Active Session + History Federated Search)
+    - `MemorySessionRepository` 인프라 구현 (`find_by_job_id` 지원)
+    - 관리자 조회 규격(필터/정렬/페이징) 및 정책 준수 검증 완료 (`verify_task_020.py`)
 
 
 

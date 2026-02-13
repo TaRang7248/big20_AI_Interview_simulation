@@ -297,6 +297,30 @@ Plan 수립
 - **산출물**:
     - [TASK-015_CONTRACT.md](TASK-015_CONTRACT.md)
 
+### TASK-020 관리자 지원자 조회/필터 규격 및 구현 (Admin Applicant Retrieval)
+- **요약**: 관리자가 공고별 지원자 목록을 조회하고 다양한 조건(상태, 합불, 날짜 등)으로 필터링할 수 있는 규격 정의 및 구현.
+- **변경 사항**:
+    - `packages/imh_session/query.py`: `ApplicantQueryService` 구현 (Active Session + History Report Federated Search).
+    - `packages/imh_session/infrastructure/memory_repo.py`: `MemorySessionRepository` 구현 (`find_by_job_id` 지원).
+    - `packages/imh_history/dto.py` & `repository.py`: `HistoryMetadata`에 `job_id`, `status`, `started_at` 필드 추가 및 매핑 로직 구현.
+    - `packages/imh_session/dto.py`: `SessionContext`에 `job_id`, `started_at` 필드 추가.
+    - `packages/imh_eval` & `imh_report`: `job_id` 전파 로직 구현 (Context -> Result -> Report Header).
+    - `docs/TASK-020_PLAN.md`: 관리자 조회 규격 및 필터 정책 확정.
+    - `scripts/verify_task_020.py`: 통합 조회 및 필터링(Status, Date, Result, Alias) 검증 스크립트 작성.
+- **검증 결과**:
+    - `python scripts/verify_task_020.py`: **Pass**
+        1. **Federated Search**: Active Session(Memory)과 Archived Report(File) 통합 조회 확인.
+        2. **Job ID Filter**: 특정 공고 ID에 대한 세션만 필터링됨을 확인.
+        3. **Status Filter**: `IN_PROGRESS`, `EVALUATED` 등 상태별 필터링 정상 동작 확인.
+        4. **Result Filter**: `PASS/FAIL` 필터가 `EVALUATED` 상태 세션에 대해 정상 동작함 확인.
+        5. **Date Filter**: `started_at` 기준 기간 필터링 동작 확인 (APPLIED 등 시작 시간 없는 세션 제외).
+        6. **Alias**: `is_interrupted=True` 시 `INTERRUPTED` 상태 자동 포함 확인.
+- **제약 사항**:
+    - `search_keyword` (이름/이메일) 및 `weakness` 필터는 데이터(PII/Detail) 부재로 인해 현재 단계에서는 제한적으로 동작함 (향후 Phase 확장 시 보완)..
+    - 구현 코드 없음 (Plan Only Task).
+- **산출물**:
+    - [TASK-015_CONTRACT.md](TASK-015_CONTRACT.md)
+
 ### TASK-017 Interview Session Engine (Phase 5 Core)
 - **요약**: 실시간 면접 세션의 동작 정책을 관장하는 Session Engine (`packages/imh_session`) 구현 완료.
 - **변경 사항**:
@@ -393,3 +417,33 @@ Plan 수립
 - **이슈**: Pydantic 모델의 `job.policy = ...` 직접 대입 허용으로 인한 불변성 우회 가능성 확인.
 - **수정**: `Job` 모델의 `policy` 필드를 `_policy` (PrivateAttr)로 변경하고, `@property` setter를 통해 상태 기반 쓰기 권한을 강제함.
 - **검증**: `verify_task_019.py`에 직접 대입 시도 테스트 케이스 추가 -> `PolicyValidationError` 발생 확인.
+
+### TASK-020 관리자 지원자 조회/필터 규격 및 구현 (Admin Applicant Retrieval)
+- **요약**: 관리자가 공고별 지원자 목록을 조회하고 다양한 조건(상태, 합불, 날짜 등)으로 필터링할 수 있는 규격 정의 및 구현.
+- **변경 사항**:
+    - `packages/imh_session/query.py`: `ApplicantQueryService` 구현 (Active Session + History Report Federated Search).
+    - `packages/imh_session/infrastructure/memory_repo.py`: `MemorySessionRepository` 구현 (`find_by_job_id` 지원).
+    - `packages/imh_history/dto.py` & `repository.py`: `HistoryMetadata`에 `job_id`, `status`, `started_at` 필드 추가 및 매핑 로직 구현.
+    - `packages/imh_session/dto.py`: `SessionContext`에 `job_id`, `started_at` 필드 추가.
+    - `packages/imh_eval` & `imh_report`: `job_id` 전파 로직 구현 (Context -> Result -> Report Header).
+    - `docs/TASK-020_PLAN.md`: 관리자 조회 규격 및 필터 정책 확정.
+    - `scripts/verify_task_020.py`: 통합 조회 및 필터링(Status, Date, Result, Alias) 검증 스크립트 작성.
+- **검증 결과**:
+    - `python scripts/verify_task_020.py`: **Pass**
+        1. **Federated Search**: Active Session(Memory)과 Archived Report(File) 통합 조회 확인.
+        2. **Job ID Filter**: 특정 공고 ID에 대한 세션만 필터링됨을 확인.
+        3. **Status Filter**: `IN_PROGRESS`, `EVALUATED` 등 상태별 필터링 정상 동작 확인.
+        4. **Result Filter**: `PASS/FAIL` 필터가 `EVALUATED` 상태 세션에 대해 정상 동작함 확인.
+        5. **Date Filter**: `started_at` 기준 기간 필터링 동작 확인 (APPLIED 등 시작 시간 없는 세션 제외).
+        6. **Alias**: `is_interrupted=True` 시 `INTERRUPTED` 상태 자동 포함 확인.
+- **제약 사항**:
+    - `search_keyword` (이름/이메일) 및 `weakness` 필터는 데이터(PII/Detail) 부재로 인해 현재 단계에서는 제한적으로 동작함 (향후 Phase 확장 시 보완).
+
+#### TASK-020 계약 정합성 보강 (2026-02-13 Hotfix)
+- **목적**: Plan 계약의 엄격한 준수를 위해 `weakness` 필터 제거 및 `search_keyword` 정식 지원(Validation) 적용.
+- **변경 사항**:
+    - `docs/TASK-020_PLAN.md`: `weakness` 필터 삭제(Deferred), `search_keyword` 제약 강제 명시.
+    - `packages/imh_session/query.py`: `search_keyword` 길이(<2) 검증 및 Email(@) Exact Match 로직 구현. `weakness` 요청 시 400 Error 발생하도록 수정.
+    - `scripts/verify_task_020.py`: Validation(Length, Weakness Rejection) 테스트 케이스 추가 및 검증 완료.
+- **검증 결과**: `Ran 8 tests in 0.061s OK` (All Cases Pass)
+

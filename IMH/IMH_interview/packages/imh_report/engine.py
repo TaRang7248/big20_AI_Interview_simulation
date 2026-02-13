@@ -29,6 +29,7 @@ class ReportGenerator:
             total_score=round(score_100, 1),
             grade=grade,
             job_category=eval_result.job_category,
+            job_id=eval_result.job_id,
             keywords=list(set(top_keywords)) # Deduplicate
         )
         

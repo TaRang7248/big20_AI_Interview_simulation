@@ -43,4 +43,6 @@ class EvaluationResult(BaseModel):
     """
     total_score: float = Field(..., description="Weighted total score")
     details: List[RubricScoreItem] = Field(..., description="List of detailed scores per category")
+    details: List[RubricScoreItem] = Field(..., description="List of detailed scores per category")
     job_category: str = Field(..., description="Job Category (DEV or NON_TECH)")
+    job_id: Optional[str] = Field(None, description="Job ID")

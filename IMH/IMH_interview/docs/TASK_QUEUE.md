@@ -255,7 +255,6 @@
   - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
 
 ---
-## ACTIVE
 
 ### TASK-020 관리자 지원자 조회/필터 규격 (Admin Applicant Filtering)
 - **Goal**:
@@ -277,9 +276,7 @@
   - 리포트 조회 API 계약(TASK-014) 및 UI 소비 규격(TASK-015)
 
 ---
-
-## BACKLOG
-
+## ACTIVE
 
 ### TASK-021 세션 중단 표기/처리 규격 (Interrupt Handling & Visibility)
 - **Goal**:
@@ -296,6 +293,8 @@
   - TASK-020 관리자 조회 규격 확정
 
 ---
+
+## BACKLOG
 
 ### TASK-022 질문은행 구조 정비 (Question Bank Structuring)
 - **Goal**:
