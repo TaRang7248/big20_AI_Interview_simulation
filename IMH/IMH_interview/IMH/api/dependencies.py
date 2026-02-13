@@ -2,80 +2,74 @@ from functools import lru_cache
 from typing import AsyncGenerator
 
 from packages.imh_core.config import IMHConfig
-from packages.imh_providers.stt.base import ISTTProvider
-from packages.imh_providers.stt.mock import MockSTTProvider
-from packages.imh_providers.pdf.base import IPDFProvider
-from packages.imh_providers.pdf.local_provider import LocalPDFProvider
-from packages.imh_providers.embedding.base import EmbeddingProvider
-from packages.imh_providers.embedding import get_embedding_provider as _get_embedding_provider_factory
-from packages.imh_providers.emotion.base import IEmotionProvider
-from packages.imh_providers.emotion.deepface_impl import DeepFaceEmotionProvider
+from packages.imh_job.repository import JobPostingRepository, MemoryJobPostingRepository
+from packages.imh_session.infrastructure.memory_repo import MemorySessionRepository
+from packages.imh_session.repository import SessionStateRepository, SessionHistoryRepository
+from packages.imh_history.repository import FileHistoryRepository
+from packages.imh_service.concurrency import ConcurrencyManager
+from packages.imh_service.session_service import SessionService
+from packages.imh_service.admin_query import AdminQueryService
+
+# --- Providers (External Adapters) ---
 
 @lru_cache
 def get_config() -> IMHConfig:
     return IMHConfig.load()
 
-async def get_stt_provider() -> AsyncGenerator[ISTTProvider, None]:
-    """
-    Dependency to get an instance of the STT Provider.
-    currently returns MockSTTProvider.
-    In the future, this can switch implementations based on config.
-    """
-    config = get_config()
-    # In the future: if config.STT_PROVIDER == "whisper": return FasterWhisperProvider(...)
-    provider = MockSTTProvider(config)
-    yield provider
+# --- Repositories (Persistence) ---
 
-async def get_pdf_provider() -> AsyncGenerator[IPDFProvider, None]:
+@lru_cache
+def get_job_posting_repository() -> JobPostingRepository:
     """
-    Dependency to get an instance of the PDF Provider.
-    Currently returns LocalPDFProvider (pypdf).
+    Singleton Job Repository (Memory).
+    Preloaded with dummy data for verification if empty.
     """
-    # config = get_config() # Can be used for limits configuration later
-    provider = LocalPDFProvider()
-    yield provider
+    repo = MemoryJobPostingRepository()
+    return repo
 
-async def get_embedding_provider() -> AsyncGenerator[EmbeddingProvider, None]:
+@lru_cache
+def get_session_state_repository() -> SessionStateRepository:
     """
-    Dependency to get an instance of the Embedding Provider.
-    Currently returns MockEmbeddingProvider.
+    Singleton Session State Repository (Memory/Redis).
+    Must be shared across requests to maintain state.
     """
-    # In the future: if config.EMBEDDING_PROVIDER == "local": return LocalEmbeddingProvider(...)
-    provider = _get_embedding_provider_factory("mock")
-    yield provider
+    return MemorySessionRepository()
 
-async def get_emotion_provider() -> IEmotionProvider:
+@lru_cache
+def get_session_history_repository() -> SessionHistoryRepository:
     """
-    Dependency to get an instance of the Emotion Provider.
-    For TASK-008, uses DeepFaceEmotionProvider.
+    Singleton History Repository (File-based).
     """
-    config = get_config()
-    return DeepFaceEmotionProvider(config)
-
-async def get_voice_provider() -> "IVoiceProvider":
-    """
-    Dependency to get an instance of the Voice Provider.
-    For TASK-009, uses ParselmouthVoiceProvider.
-    """
-    # config = get_config()
-    from packages.imh_providers.voice.parselmouth_impl import ParselmouthVoiceProvider
-    from packages.imh_providers.voice.base import IVoiceProvider
-    return ParselmouthVoiceProvider()
-
-async def get_visual_provider() -> "MediaPipeVisualProvider":
-    """
-    Dependency to get an instance of the Visual Provider.
-    For TASK-010, uses MediaPipeVisualProvider.
-    """
-    # config = get_config()
-    from packages.imh_providers.visual.mediapipe_impl import MediaPipeVisualProvider
-    return MediaPipeVisualProvider()
-
-def get_history_repository() -> "HistoryRepository":
-    """
-    Dependency to get an instance of the History Repository.
-    For TASK-014, uses FileHistoryRepository.
-    """
-    from packages.imh_history.repository import FileHistoryRepository, HistoryRepository
-    # Base dir defaults to project standard, or can comes from config
     return FileHistoryRepository()
+
+# --- Infrastructure Services ---
+
+@lru_cache
+def get_concurrency_manager() -> ConcurrencyManager:
+    """
+    Singleton Concurrency Manager (File Lock).
+    """
+    return ConcurrencyManager()
+
+# --- Domain Services (Application Logic) ---
+
+def get_session_service() -> SessionService:
+    """
+    Transient Session Service.
+    Injected with Singleton Repositories.
+    """
+    return SessionService(
+        state_repo=get_session_state_repository(),
+        history_repo=get_session_history_repository(),
+        job_repo=get_job_posting_repository()
+    )
+
+def get_admin_query_service() -> AdminQueryService:
+    """
+    Transient Admin Query Service.
+    Reads from standard Repositories (Read-Only Logic internal to Service).
+    """
+    return AdminQueryService(
+        repository=get_session_state_repository(),
+        job_repo=get_job_posting_repository()
+    )

@@ -9,8 +9,19 @@ class AdminQueryService:
     Bypasses Domain Logic and Concurrency Control.
     Directly accesses Repository for reading state snapshots.
     """
-    def __init__(self, repository: SessionStateRepository):
+    def __init__(self, repository: SessionStateRepository, job_repo: "JobPostingRepository" = None):
         self.repository = repository
+        self.job_repo = job_repo
+
+    def get_all_jobs(self) -> List[dict]:
+        """
+        Retrieves all published jobs.
+        """
+        if not self.job_repo:
+            return []
+        jobs = self.job_repo.find_published()
+        # Return dict representation for simple DTO mapping
+        return [j.dict() for j in jobs]
 
 
     def get_all_sessions(self, limit: int = 100, offset: int = 0) -> SessionListDTO:

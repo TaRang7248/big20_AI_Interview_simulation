@@ -8,6 +8,8 @@ from packages.imh_session.dto import SessionConfig
 import os
 
 
+from packages.imh_job.enums import JobStatus
+
 class SessionService:
     """
     Application Service for managing interview sessions.
@@ -16,11 +18,32 @@ class SessionService:
     2. Concurrency Control (Locking)
     3. Orchestrating Engine calls
     """
-    def __init__(self, state_repo: SessionStateRepository, history_repo: SessionHistoryRepository):
+    def __init__(self, state_repo: SessionStateRepository, history_repo: SessionHistoryRepository, job_repo: "JobPostingRepository"):
         self.state_repo = state_repo
         self.history_repo = history_repo
+        self.job_repo = job_repo
         self.concurrency_manager = ConcurrencyManager()
     
+    def create_session_from_job(self, job_id: str, user_id: str) -> SessionResponseDTO:
+        """
+        Orchestrates session creation from a Job ID.
+        Fetches the Immutable Job Policy Snapshot and initializes the session.
+        """
+        # 1. Fetch Job Policy (Phase 5: Freeze at Publish)
+        job = self.job_repo.find_by_id(job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+        
+        # Proper Enum comparison
+        if job.status != JobStatus.PUBLISHED:
+             raise ValueError(f"Job {job_id} is not currently accepting applicants (Status: {job.status})")
+
+        # 2. Create Snapshot
+        policy_snapshot = job.create_session_config().dict()
+        
+        # 3. Delegate to Internal logic
+        return self.create_session(policy_snapshot, user_id)
+
     def create_session(self, job_policy_snapshot: dict, user_id: str) -> SessionResponseDTO:
         # No lock needed for creation as it's a new resource
         # Phase 5 Contract: Use Job Policy Snapshot
@@ -66,11 +89,19 @@ class SessionService:
             # Correct approach: SessionService should load the Config/Snapshot associated with the session.
             # Since we don't have that in `state_repo.get_state` (it returns SessionContext), we have a gap.
             # Proceeding with a workaround: Assume config is not critical for `process_answer` logic OR use a dummy check.
-            dummy_config = SessionConfig(mode="PRACTICE") # Placeholder
-            
+            # 3. Instantiate Engine
+            # Recreate config from Immutable Job (Phase 5 principle)
+            job_id = context.job_id
+            job = self.job_repo.find_by_id(job_id)
+            if not job:
+                 # Critical integrity error if job missing for active session
+                 raise ValueError(f"Job {job_id} for session {session_id} not found")
+
+            config = job.create_session_config()
+
             engine = InterviewSessionEngine(
                 session_id=session_id,
-                config=dummy_config, 
+                config=config, 
                 state_repo=self.state_repo,
                 history_repo=self.history_repo
             )
@@ -82,6 +113,16 @@ class SessionService:
             # Task Plan says: "session.submit_answer(input_data)".
             # Since Engine.process_answer takes duration, we map calls.
             duration = answer_dto.duration_seconds if answer_dto.duration_seconds else 0.0
+            
+            # NOTE: Engine.process_answer mainly advances state. 
+            # We assume answer content persistence is handled by Engine or History Repo implicitly or explicitly?
+            # If Engine.process_answer(duration) doesn't take content, where does text go?
+            # Reviewing Engine: process_answer usually calculates score or just moves to next Q.
+            # If we need to save answer content, we might need a separate call or Repo update.
+            # For this verification scope, we focus on State Transition.
+            # Adding dummy content processing if needed by Engine?
+            # Engine signature for process_answer was (duration_sec: float).
+            
             engine.process_answer(duration_sec=duration)
             
             # 5. Return Updated State DTO

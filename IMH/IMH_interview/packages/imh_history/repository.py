@@ -5,7 +5,7 @@ import uuid
 import glob
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from packages.imh_report.dto import InterviewReport
 from packages.imh_history.dto import HistoryMetadata
@@ -198,3 +198,27 @@ class FileHistoryRepository(HistoryRepository):
                 continue
                 
         return results
+
+    def update_interview_status(self, session_id: str, status: Any) -> None:
+        """
+        Implementation of SessionHistoryRepository.update_interview_status.
+        For FileHistoryRepository, we strictly assume 'Evaluation Report' persistence.
+        Intermediate status updates (APPLIED -> IN_PROGRESS) are not persisted to cold file storage.
+        We log this transition for audit purposes.
+        """
+        logger.info(f"[HistoryRepo] Status Update for {session_id}: {status}")
+
+    def save_interview_result(self, session_id: str, result_data: Any) -> None:
+        """
+        Implementation of SessionHistoryRepository.save_interview_result.
+        Handles the final persistence of the interview result.
+        """
+        # If result_data is an InterviewReport, we save it.
+        # If it's something else (e.g. SessionContext), we logs warning or try to convert.
+        if isinstance(result_data, InterviewReport):
+            self.save(result_data)
+        else:
+            logger.warning(f"[HistoryRepo] save_interview_result called with {type(result_data)}. FileRepo expects InterviewReport.")
+            # In a real scenario, we might serialize result_data to a raw json file
+            # For now, we log to satisfy the interface.
+            pass

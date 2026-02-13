@@ -486,3 +486,80 @@ Plan 수립
     - **Strict Isolation**: Domain Entity가 API 외부로 절대 노출되지 않도록 Mapper 강제.
     - **Concurrency Identity**: Session ID 기반 파일 락으로 Race Condition 방지 (Redis 도입 전 임시 조치).
 
+
+### TASK-023 API Layer & Runtime Contract Definition
+- **요약**: 인터뷰 세션 실행을 외부에서 호출 가능한 **API 인터페이스 계층(API Layer)** 구현 및 검증 완료.
+- **변경 사항**:
+    - `IMH/api/` 패키지 구현
+        - `schemas.py`: Request/Response 스키마 정의 (Pydantic).
+        - `dependencies.py`: Dependency Injection Composition Root 구현 (Singleton Repo, Transient Service).
+        - `session.py`: 세션 생성/조회/답변 API Router 구현.
+        - `admin.py`: 관리자 조회 API Router 구현 (Service Layer Bypass).
+    - `IMH/main.py`: FastAPI Application Bootstrap 구현.
+    - `packages/imh_service/session_service.py`: `create_session_from_job` 오케스트레이션 추가 및 Config 로딩 로직 개선.
+    - `packages/imh_job/repository.py`: `MemoryJobPostingRepository` 구현.
+    - `packages/imh_history/repository.py`: `FileHistoryRepository` 인터페이스 정합성 보완 (`update_interview_status`, `save_interview_result` 추가).
+    - `scripts/verify_task_023.py`: API 통합 검증 스크립트 작성 (Lifecycle, Concurrency, Snapshot Integrity).
+- **검증 결과**:
+    - `python scripts/verify_task_023.py`: **Pass**
+        1. **Session Lifecycle**: 생성(APPLIED) -> 조회(IN_PROGRESS) -> 답변(IN_PROGRESS) 흐름 확인.
+        2. **Snapshot**: Job Policy(Immutable) 기반 세션 Config 생성 확인.
+        3. **Fail-Fast**: 동시성 제어(423 Locked) 정상 동작 확인.
+        4. **Admin Read-Only**: 관리자 API 조회 정상 동작 확인.
+- **주요 설계 반영**:
+    - **Contract-First**: API Layer는 Service Layer의 Facade 역할만 수행하며, 로직을 직접 처리하지 않음.
+    - **Strict Isolation**: Service Layer가 Repository/Engine 접근을 전담(API는 Service만 호출).
+    - **Runtime Entry**: `main.py`를 통해 ASGI 호환 런타임 진입점 확보.
+
+
+### TASK-023 API Layer & Runtime Contract Definition
+- **요약**: 인터뷰 세션 실행을 외부에서 호출 가능한 **API 인터페이스 계층(API Layer)** 구현 및 검증 완료.
+- **변경 사항**:
+    - `IMH/api/` 패키지 구현
+        - `schemas.py`: Request/Response 스키마 정의 (Pydantic).
+        - `dependencies.py`: Dependency Injection Composition Root 구현 (Singleton Repo, Transient Service).
+        - `session.py`: 세션 생성/조회/답변 API Router 구현.
+        - `admin.py`: 관리자 조회 API Router 구현 (Service Layer Bypass).
+    - `IMH/main.py`: FastAPI Application Bootstrap 구현.
+    - `packages/imh_service/session_service.py`: `create_session_from_job` 오케스트레이션 추가 및 Config 로딩 로직 개선.
+    - `packages/imh_job/repository.py`: `MemoryJobPostingRepository` 구현.
+    - `packages/imh_history/repository.py`: `FileHistoryRepository` 인터페이스 정합성 보완 (`update_interview_status`, `save_interview_result` 추가).
+    - `scripts/verify_task_023.py`: API 통합 검증 스크립트 작성 (Lifecycle, Concurrency, Snapshot Integrity).
+- **검증 결과**:
+    - `python scripts/verify_task_023.py`: **Pass**
+        1. **Session Lifecycle**: 생성(APPLIED) -> 조회(IN_PROGRESS) -> 답변(IN_PROGRESS) 흐름 확인.
+        2. **Snapshot**: Job Policy(Immutable) 기반 세션 Config 생성 확인.
+        3. **Fail-Fast**: 동시성 제어(423 Locked) 정상 동작 확인.
+        4. **Admin Read-Only**: 관리자 API 조회 정상 동작 확인.
+- **주요 설계 반영**:
+    - **Contract-First**: API Layer는 Service Layer의 Facade 역할만 수행하며, 로직을 직접 처리하지 않음.
+    - **Strict Isolation**: Service Layer가 Repository/Engine 접근을 전담(API는 Service만 호출).
+    - **Runtime Entry**: `main.py`를 통해 ASGI 호환 런타임 진입점 확보.
+
+#### TASK-023 Hardening Patch (2026-02-13)
+- **목적**: API Layer의 동시성 정책 검증 강화 및 아키텍처 위반 방지 가드레일 추가.
+- **변경 사항**:
+    - `scripts/verify_task_023.py`: 
+        1. `test_real_parallel_execution`: `ThreadPoolExecutor` 기반 병렬 호출 테스트 추가.
+           - Thread A: Lock 수동 점유 (1.0s Sleep)
+           - Thread B: API 호출 -> 즉시 Fail-Fast (423) 반환 및 대기 시간 < 0.5s 검증.
+        2. `test_api_guardrails`: API Router 파일(`session.py`, `admin.py`) 정적 분석 추가.
+           - `packages.imh_session.engine`, `repository` 직접 Import 여부 검사.
+- **검증 결과**:
+    - Parallel Test: Status 423, Duration 0.0040s (No Wait Confirmed).
+    - Guardrails: All Pass (No Prohibited Imports).
+
+#### TASK-023 Hardening Patch v2 (2026-02-13)
+- **목적**: 동시성 테스트의 실제 경쟁 상황 재현 및 가드레일 정적 분석 강화 (AST 기반).
+- **변경 사항**:
+    - `scripts/verify_task_023.py`:
+        1. `test_real_parallel_execution`: 
+           - **Real API Race**: `test_client`를 통한 실제 API 요청 2개 동시 실행 (ThreadPoolExecutor).
+           - **Retry Loop**: 경쟁 상태가 발생할 때까지 최대 50회 반복 (Iteration 1에서 즉시 423 충돌 확인).
+           - **No Manual Lock**: `cm.acquire_lock()` 직접 호출 제거, 순수 API 레벨 경쟁 검증.
+        2. `test_api_guardrails`:
+           - **AST Parsing**: `ast` 모듈을 사용하여 Import 구문 파싱.
+           - **Robustness**: 단순 문자열 매칭 한계(alias, from-import) 극복 및 정확한 모듈 경로/클래스명 감지.
+- **검증 결과**:
+    - Race Condition: Iteration 1에서 충돌 발생 (Status 423/200). Fail-Fast 동작 확인.
+    - AST Guardrails: All Pass.

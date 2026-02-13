@@ -308,8 +308,6 @@
 
 ---
 
-## ACTIVE
-
 ### TASK-023 API 레이어 구현 및 연동 (API Layer Implementation)
 - **Goal**:
   - Service Layer를 호출하는 FastAPI 엔드포인트를 구현하여 외부에서 인터뷰 세션을 수행할 수 있게 한다.
@@ -317,31 +315,46 @@
   - `IMH/api/session.py` (면접자용): 생성, 진행, 답변 제출
   - `IMH/api/admin.py` (관리자용): 조회, 관리
   - Exception Handling 및 Status Code 매핑
-- **Out of Scope**:
-  - 인증/인가 (Dummy User ID 사용)
-- **Dependencies**:
-  - TASK-022 Service Layer 완료
+- **Verification**: `python scripts/verify_task_023.py` Pass
 
+---
+
+## ACTIVE
+
+### TASK-024 질문은행 구조 정비 (Question Bank Structure)
+- **Goal**:
+  - 질문 생성 품질 저하 또는 실패 시 사용할 정적/동적 질문은행 구조를 정비한다.
+- **Scope**:
+  - `packages/imh_qbank` 패키지 신설
+  - 질문 출처(Source) 계층 정의 (Generated vs Banked)
+  - 태그 기반 질문 검색/매핑 전략
+  - (원칙) qbank는 “질문 후보 조회/선택 지원”까지만 담당하며, 실제 질문 채택/상태 전이는 Engine/Service 계약을 통해서만 수행한다.
+
+- **Out of Scope**:
+  - DB 정식 도입 (Phase 8)
+- **Dependencies**:
+  - TASK-022 완료
+  - 세션 엔진(TASK-017) 구조 확정
 ---
 
 ## BACKLOG
 
-### TASK-024 RAG Fallback 엔진 통합
+### TASK-025 RAG Fallback 엔진 통합
 - **Goal**:
-  - 질문 생성 품질 저하 또는 실패 시 질문은행을 fallback으로 활용한다.
+  - LLM 질문 생성 실패 시 질문은행을 Fallback으로 사용하는 로직을 통합한다.
 - **Scope**:
-  - 질문 생성 실패 조건 정의
-  - 태그 기반 질문 검색 전략 정의
-  - 공고 직무/인재상과 질문 매핑 정책 반영
+  - RAG 기반 유사 질문 검색
+  - (초기 구현) PGVector 없이도 Embedding Provider + 로컬/메모리 인덱스 기반 유사도 검색으로 시작 가능 (정식 벡터DB는 Out of Scope 유지)
+  - Fallback 트리거 정책 정의
+  - Snapshot 계약 침범 방지 하에 통합
 - **Out of Scope**:
   - PGVector 정식 도입
 - **Dependencies**:
-  - TASK-022 완료
-  - 세션 엔진(TASK-017) 구조 확정
+  - TASK-024 (질문은행) 완료
 
 ---
 
-### TASK-024 PostgreSQL 도입 (공고/세션/평가 영속화)
+### TASK-026 PostgreSQL 도입 (공고/세션/평가 영속화)
 - **Goal**:
   - 현재 파일 기반 저장 구조를 PostgreSQL 기반으로 전환한다.
 - **Scope**:
@@ -350,12 +363,13 @@
 - **Out of Scope**:
   - 인프라 배포 자동화
 - **Dependencies**:
-  - Phase 5 후반부 완료
-  - 데이터 아키텍처 설계 문서
+  - Phase 7 완료
+  - 데이터 아키텍처 설계 문서(예: docs/26.02.05(목)데이터 아키텍쳐,ERD 가이드.md)
+
 
 ---
 
-### TASK-025 Redis 세션 상태 도입
+### TASK-027 Redis 세션 상태 도입
 - **Goal**:
   - 실시간 세션 상태 및 락 관리를 안정화한다.
 - **Scope**:
@@ -366,21 +380,22 @@
   - 클러스터링/고가용성 구성
 - **Dependencies**:
   - TASK-017 세션 엔진 완료
-  - PostgreSQL 도입 완료
+  - TASK-026 (PostgreSQL) 완료
 
 ---
 
-### TASK-026 관리자 통계 대시보드
+### TASK-028 관리자 통계 대시보드
 - **Goal**:
   - 공고별/직무별/평가축별 통계 시각화 기능 제공
 - **Scope**:
   - 평균 점수
   - 합격률
   - 평가축별 약점 분포
+  - Query 전용 확장 (Read Model 분리 고도화)
 - **Out of Scope**:
   - 외부 BI 도구 연동
 - **Dependencies**:
-  - PostgreSQL 정식 도입
+  - TASK-026 (PostgreSQL) 완료
 
 ---
 ## HOLD
