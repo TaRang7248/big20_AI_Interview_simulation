@@ -29,6 +29,6 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Mount root static files (index.html, styles.css, app.js)
 # We serve index.html as the default for root
-app.mount("/", StaticFiles(directory=".", html=True), name="static")
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 logger.info("Application initialized with routers and static files.")

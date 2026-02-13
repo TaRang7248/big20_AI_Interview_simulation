@@ -16,16 +16,15 @@ logger = logging.getLogger(__name__)
 # 새 경로: .../LDW/text09/app/config.py
 # 따라서 한 단계 더 올라가야 함.
 
+# New path adjustment: config is in app/config.py.
+# __file__ = .../text09/app/config.py
+# dirname(__file__) = .../text09/app
+# dirname(dirname(__file__)) = .../text09 (This is the project root now)
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # .../LDW/text09
-ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR)) # .../big20 (추정) - 원본 로직 유지
+ROOT_DIR = os.path.dirname(os.path.dirname(BASE_DIR)) # .../big20 (Keep original logic if needed)
 
-# 원본 코드: os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
-# server.py 기준: dir(server.py) = text09
-# dir(text09) = LDW
-# dir(LDW) = big20_AI_Interview_simulation (아, 여기가 루트인가 봅니다)
-# 원본이 잘 작동했다면, 새 위치인 app/config.py에서는 dirname을 4번 해야 같음.
-
-load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), '.env'))
+# Load .env (Adjust path if needed, assuming it's still in big20 root)
+load_dotenv(os.path.join(ROOT_DIR, '.env'))
 
 # Configuration
 DB_HOST = os.getenv("DB_HOST", "localhost")
@@ -35,9 +34,13 @@ DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 # Paths (Relative to execute entry point, usually text09/)
-UPLOAD_FOLDER = 'uploads/resumes'
+# Updated for new structure
+UPLOAD_FOLDER = 'uploads/resumes' # Keep uploads in root or move to data? Let's keep in root for now as per plan
 AUDIO_FOLDER = 'uploads/audio'
 TTS_FOLDER = 'uploads/tts_audio'
+
+# Use data folder for specific data files if referenced
+DATA_FOLDER = 'data'
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
