@@ -123,9 +123,10 @@ def summarize_resume(text):
         logger.error(f"Resume Summary Error: {e}")
         return text[:1000] # Fallback to truncation
 
-def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase):
+def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None):
     """
     Evaluates the applicant's answer and generates the next question or closing remark.
+    Enhanced to use Resume Summary and Reference Questions from Pool.
     """
     if next_phase == "END":
          evaluation_prompt = f"""
@@ -151,12 +152,32 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
              return "평가 실패", "면접이 종료되었습니다."
          
     else:
+        # Construct Context for Prompt
+        resume_context = ""
+        if resume_summary:
+            resume_context = f"""
+            [지원자 이력서 요약]
+            {resume_summary}
+            """
+            
+        ref_context = ""
+        if ref_questions:
+            # Join top 3-5 questions
+            ref_q_text = "\n".join([f"- {q}" for q in ref_questions[:5]])
+            ref_context = f"""
+            [직무 관련 참고 질문 (질문 생성 시 참고용)]
+            {ref_q_text}
+            """
+
         prompt = f"""
         [상황]
         직무: {job_title}
         면접자: {applicant_name}
         현재 진행 단계: {current_q_count}번째 질문 완료. 다음은 {current_q_count + 1}번째 질문인 [{next_phase}] 단계입니다.
         
+        {resume_context}
+        {ref_context}
+
         [이전 질문]
         {prev_question}
         
@@ -169,6 +190,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         
         [작업 2] 다음 질문을 생성해주세요.
         - 다음 단계([{next_phase}])에 맞는 질문이어야 합니다.
+        - [지원자 이력서 요약]이 있다면, 해당 내용을 검증하거나 구체적인 경험을 묻는 질문을 우선적으로 생성하세요.
+        - [직무 관련 참고 질문]이 있다면, 그 질문들과 유사한 맥락이거나 그 중 하나를 상황에 맞게 변형하여 질문하세요.
         - 이전 답변과 자연스럽게 이어지거나, 새로운 주제로 전환하세요.
         - 질문은 구어체로 정중하게 1~2문장으로 작성해주세요.
         
