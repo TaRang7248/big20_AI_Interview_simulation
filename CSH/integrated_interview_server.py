@@ -60,11 +60,14 @@ load_dotenv()
 # JSON Resilience 유틸리티
 from json_utils import resilient_json_parse, parse_evaluation_json
 
-# 보안 유틸리티 (bcrypt 비밀번호 해싱, JWT 토큰 인증, TLS)
+# 보안 유틸리티 (bcrypt 비밀번호 해싱, JWT 토큰 인증, TLS, AES-256 파일 암호화)
 from security import (
     hash_password, verify_password, needs_rehash,
     create_access_token, decode_access_token, get_current_user, get_current_user_optional,
-    get_ssl_context
+    get_ssl_context,
+    # REQ-N-003: 저장 데이터 AES-256-GCM 암호화
+    encrypt_file, decrypt_file, is_encrypted_file,
+    AES_ENCRYPTION_AVAILABLE
 )
 
 # 지연 시간 측정 및 SLA 모니터링 (REQ-N-001: 초저지연 1.5초 이내)
@@ -3065,6 +3068,216 @@ async def delete_user_account(request: UserDeleteRequest, current_user: Dict = D
     )
 
 
+# ========== GDPR '잊힐 권리' (Right to be Forgotten) 일괄 삭제 API ==========
+# REQ-N-003: GDPR 대응을 위해 사용자의 모든 개인정보를 한 번에 영구 삭제
+# 삭제 대상: 계정 정보, 이력서(파일+DB), 면접 세션, 녹화 파일, 감정 분석 데이터, 채팅 이력
+
+class GDPRDeleteRequest(BaseModel):
+    """GDPR 일괄 삭제 요청 — 비밀번호로 본인 확인"""
+    password: str  # 본인 확인용 비밀번호
+    confirm: bool = False  # 삭제 확인 (true여야 진행)
+
+class GDPRDeleteResponse(BaseModel):
+    """GDPR 일괄 삭제 응답"""
+    success: bool
+    message: str
+    deleted_items: Optional[Dict[str, Any]] = None  # 삭제된 항목별 상세 내역
+
+
+@app.post("/api/gdpr/delete-all-data")
+async def gdpr_delete_all_user_data(
+    request: GDPRDeleteRequest,
+    current_user: Dict = Depends(get_current_user)
+):
+    """
+    GDPR '잊힐 권리' (Right to be Forgotten) 일괄 삭제 API (인증 필요)
+    
+    사용자의 모든 개인 데이터를 영구적으로 삭제합니다:
+    1. 이력서 파일 (uploads/ 디렉토리에서 물리적 삭제)
+    2. 이력서 DB 레코드 (user_resumes 테이블)
+    3. 녹화 파일 (recording 서비스)
+    4. 감정 분석 데이터 (Redis 키)
+    5. 면접 세션 데이터 (인메모리)
+    6. 채용 공고 (본인 작성 공고)
+    7. 사용자 계정 (users 테이블)
+    
+    이 작업은 되돌릴 수 없습니다.
+    """
+    user_email = current_user.get("email", "")
+    deleted_items = {
+        "resumes_files": 0,
+        "resumes_db": 0,
+        "recordings": 0,
+        "emotion_keys": 0,
+        "sessions": 0,
+        "job_postings": 0,
+        "account": False,
+    }
+
+    # ── 0) 사전 검증 ──
+    if not request.confirm:
+        return GDPRDeleteResponse(
+            success=False,
+            message="삭제를 확인하려면 confirm=true로 설정해야 합니다."
+        )
+
+    # 비밀번호 본인 확인
+    user_record = get_user_by_email(user_email)
+    if not user_record:
+        return GDPRDeleteResponse(
+            success=False,
+            message="사용자를 찾을 수 없습니다."
+        )
+
+    if not verify_password(request.password, user_record.get("password_hash", "")):
+        return GDPRDeleteResponse(
+            success=False,
+            message="비밀번호가 일치하지 않습니다."
+        )
+
+    print(f"🗑️ [GDPR] 사용자 전체 데이터 삭제 시작: {user_email}")
+
+    # ── 1) 이력서 파일 삭제 (물리적 삭제) ──
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                resumes = db.query(UserResume).filter(
+                    UserResume.user_email == user_email
+                ).all()
+                for resume in resumes:
+                    # 파일 시스템에서 물리적 삭제
+                    if resume.file_path and os.path.exists(resume.file_path):
+                        try:
+                            os.remove(resume.file_path)
+                            deleted_items["resumes_files"] += 1
+                            print(f"  🗑️ 이력서 파일 삭제: {resume.file_path}")
+                        except Exception as e:
+                            print(f"  ⚠️ 이력서 파일 삭제 실패: {resume.file_path} - {e}")
+                    # 암호화 파일(.enc)도 함께 삭제
+                    enc_path = resume.file_path + ".enc" if resume.file_path else None
+                    if enc_path and os.path.exists(enc_path):
+                        try:
+                            os.remove(enc_path)
+                            print(f"  🗑️ 암호화 이력서 삭제: {enc_path}")
+                        except Exception:
+                            pass
+                # DB 레코드 삭제
+                resume_count = db.query(UserResume).filter(
+                    UserResume.user_email == user_email
+                ).delete()
+                deleted_items["resumes_db"] = resume_count
+                db.commit()
+                print(f"  🗑️ 이력서 DB 레코드 삭제: {resume_count}건")
+            except Exception as e:
+                db.rollback()
+                print(f"  ⚠️ 이력서 삭제 중 오류: {e}")
+            finally:
+                db.close()
+
+    # ── 2) 녹화 파일 삭제 ──
+    if RECORDING_AVAILABLE and recording_service:
+        try:
+            all_recordings = recording_service.get_all_recordings()
+            for rec in all_recordings:
+                # 세션 데이터에서 사용자 이메일과 매칭
+                session_id = rec.get("session_id", "")
+                session = state.get_session(session_id)
+                if session and session.get("user_email") == user_email:
+                    recording_service.delete_recording(session_id)
+                    deleted_items["recordings"] += 1
+                    print(f"  🗑️ 녹화 삭제: {session_id}")
+        except Exception as e:
+            print(f"  ⚠️ 녹화 삭제 중 오류: {e}")
+
+    # ── 3) 감정 분석 데이터 삭제 (Redis) ──
+    r = get_redis()
+    if r:
+        try:
+            # 사용자의 세션 ID 목록 수집
+            user_session_ids = [
+                sid for sid, sess in state.sessions.items()
+                if sess.get("user_email") == user_email
+            ]
+            for session_id in user_session_ids:
+                # emotion:* 키 패턴으로 삭제
+                pattern = f"emotion:{session_id}:*"
+                keys = r.keys(pattern)
+                if keys:
+                    r.delete(*keys)
+                    deleted_items["emotion_keys"] += len(keys)
+                    print(f"  🗑️ 감정 데이터 삭제: {len(keys)}개 키 (세션: {session_id})")
+        except Exception as e:
+            print(f"  ⚠️ 감정 데이터 삭제 중 오류: {e}")
+
+    # ── 4) 면접 세션 데이터 삭제 (인메모리) ──
+    sessions_to_delete = [
+        sid for sid, sess in state.sessions.items()
+        if sess.get("user_email") == user_email
+    ]
+    for session_id in sessions_to_delete:
+        # uploads/ 내 세션별 이력서 파일도 삭제
+        session = state.sessions.get(session_id, {})
+        resume_path = session.get("resume_path")
+        if resume_path and os.path.exists(resume_path):
+            try:
+                os.remove(resume_path)
+                print(f"  🗑️ 세션 이력서 삭제: {resume_path}")
+            except Exception:
+                pass
+        del state.sessions[session_id]
+        deleted_items["sessions"] += 1
+    print(f"  🗑️ 세션 데이터 삭제: {deleted_items['sessions']}건")
+
+    # ── 5) 채용 공고 삭제 (본인 작성 공고) ──
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                jp_count = db.query(JobPosting).filter(
+                    JobPosting.recruiter_email == user_email
+                ).delete()
+                deleted_items["job_postings"] = jp_count
+                db.commit()
+                print(f"  🗑️ 채용 공고 삭제: {jp_count}건")
+            except Exception as e:
+                db.rollback()
+                print(f"  ⚠️ 채용 공고 삭제 중 오류: {e}")
+            finally:
+                db.close()
+
+    # ── 6) 사용자 계정 삭제 (최종 단계) ──
+    if DB_AVAILABLE:
+        db = get_db()
+        if db:
+            try:
+                db_user = db.query(User).filter(User.email == user_email).first()
+                if db_user:
+                    db.delete(db_user)
+                    db.commit()
+                    deleted_items["account"] = True
+                    print(f"  🗑️ 사용자 계정 삭제: {user_email}")
+            except Exception as e:
+                db.rollback()
+                print(f"  ⚠️ 계정 삭제 중 오류: {e}")
+            finally:
+                db.close()
+    
+    # 폴백: 메모리 저장소
+    if not deleted_items["account"] and user_email in users_db:
+        del users_db[user_email]
+        deleted_items["account"] = True
+
+    print(f"✅ [GDPR] 사용자 전체 데이터 삭제 완료: {user_email}")
+    print(f"   삭제 내역: {deleted_items}")
+
+    return GDPRDeleteResponse(
+        success=True,
+        message="GDPR '잊힐 권리'에 따라 모든 개인 데이터가 영구 삭제되었습니다.",
+        deleted_items=deleted_items,
+    )
+
+
 # ========== 채용 공고 API (Job Postings) ==========
 
 # ── Pydantic 모델 ──
@@ -3360,6 +3573,16 @@ async def upload_resume(
         with open(file_path, "wb") as f:
             f.write(contents)
         print(f"✅ 이력서 저장 완료: {file_path}")
+        
+        # REQ-N-003: 저장 시 AES-256-GCM 암호화
+        # 원본 파일을 암호화하고, 원본은 즉시 삭제하여 평문 데이터 노출 방지
+        if AES_ENCRYPTION_AVAILABLE:
+            encrypted_path = encrypt_file(file_path)
+            if encrypted_path and encrypted_path != file_path:
+                # 원본 평문 파일 삭제 (암호화 파일로 대체)
+                os.remove(file_path)
+                file_path = encrypted_path
+                print(f"🔒 이력서 AES-256 암호화 완료: {file_path}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"파일 저장 실패: {str(e)}")
     
@@ -3465,8 +3688,8 @@ async def upload_resume(
 
 
 @app.get("/api/resume/status/{session_id}")
-async def get_resume_status(session_id: str):
-    """세션의 이력서 업로드 상태 확인"""
+async def get_resume_status(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """세션의 이력서 업로드 상태 확인 (인증 필요)"""
     session = state.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
@@ -3615,12 +3838,12 @@ async def index_qa_data(current_user: Dict = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"인덱싱 실패: {str(e)}")
 
 @app.get("/api/qa-data/status")
-async def qa_data_status():
-    """Q&A 데이터 인덱싱 상태 조회"""
+async def qa_data_status(current_user: Dict = Depends(get_current_user)):
+    """Q&A 데이터 인덱싱 상태 조회 (인증 필요)"""
     return _qa_index_status
 
 @app.get("/api/qa-data/search")
-async def search_qa_data(q: str, k: int = 4):
+async def search_qa_data(q: str, k: int = 4, current_user: Dict = Depends(get_current_user)):
     """
     인덱싱된 면접 Q&A 데이터에서 관련 내용을 검색합니다.
     질문과 유사한 모범 답변을 반환합니다.
@@ -3876,8 +4099,8 @@ async def create_session(request: SessionCreateRequest = None, current_user: Dic
 
 
 @app.get("/api/session/{session_id}")
-async def get_session(session_id: str):
-    """세션 정보 조회"""
+async def get_session(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """세션 정보 조회 (인증 필요)"""
     session = state.get_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
@@ -3907,8 +4130,8 @@ class StartUserTurnRequest(BaseModel):
     question: str
 
 @app.post("/api/intervention/start-turn")
-async def start_user_turn(request: StartUserTurnRequest):
-    """사용자 발화 시작 - 질문 후 호출"""
+async def start_user_turn(request: StartUserTurnRequest, current_user: Dict = Depends(get_current_user)):
+    """사용자 발화 시작 - 질문 후 호출 (인증 필요)"""
     session = state.get_session(request.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
@@ -3929,7 +4152,7 @@ async def start_user_turn(request: StartUserTurnRequest):
 
 
 @app.post("/api/intervention/vad-signal")
-async def update_vad_signal(request: VADSignalRequest):
+async def update_vad_signal(request: VADSignalRequest, current_user: Dict = Depends(get_current_user)):
     """VAD 신호 업데이트 (실시간 스트리밍)"""
     session = state.get_session(request.session_id)
     if not session:
@@ -3954,7 +4177,7 @@ async def update_vad_signal(request: VADSignalRequest):
 
 
 @app.post("/api/intervention/check")
-async def check_intervention(request: InterventionCheckRequest):
+async def check_intervention(request: InterventionCheckRequest, current_user: Dict = Depends(get_current_user)):
     """개입 필요 여부 확인"""
     session = state.get_session(request.session_id)
     if not session:
@@ -3984,7 +4207,7 @@ async def check_intervention(request: InterventionCheckRequest):
 
 
 @app.post("/api/intervention/end-turn")
-async def end_user_turn(session_id: str):
+async def end_user_turn(session_id: str, current_user: Dict = Depends(get_current_user)):
     """사용자 발화 종료"""
     session = state.get_session(session_id)
     if not session:
@@ -3999,7 +4222,7 @@ async def end_user_turn(session_id: str):
 
 
 @app.get("/api/intervention/stats/{session_id}")
-async def get_intervention_stats(session_id: str):
+async def get_intervention_stats(session_id: str, current_user: Dict = Depends(get_current_user)):
     """세션의 개입 통계 조회"""
     session = state.get_session(session_id)
     if not session:
@@ -4026,7 +4249,7 @@ class InterventionSettingsRequest(BaseModel):
     topic_relevance_threshold: Optional[float] = None
 
 @app.post("/api/intervention/settings")
-async def update_intervention_settings(request: InterventionSettingsRequest):
+async def update_intervention_settings(request: InterventionSettingsRequest, current_user: Dict = Depends(get_current_user)):
     """개입 설정 업데이트"""
     if request.max_answer_time:
         intervention_manager.MAX_ANSWER_TIME_SECONDS = request.max_answer_time
@@ -4049,7 +4272,7 @@ async def update_intervention_settings(request: InterventionSettingsRequest):
 
 
 @app.get("/api/intervention/settings")
-async def get_intervention_settings():
+async def get_intervention_settings(current_user: Dict = Depends(get_current_user)):
     """현재 개입 설정 조회"""
     return {
         "max_answer_time_seconds": intervention_manager.MAX_ANSWER_TIME_SECONDS,
@@ -5224,6 +5447,35 @@ async def download_recording(session_id: str, current_user=Depends(get_current_u
     if not file_path or not os.path.exists(file_path):
         raise HTTPException(status_code=404, detail="녹화 파일 없음 (트랜스코딩 미완료)")
 
+    # AES-256 암호화된 파일인 경우 복호화하여 전송
+    # is_encrypted_file()로 매직 바이트(AESF)를 확인하여 암호화 여부를 판단
+    if AES_ENCRYPTION_AVAILABLE and is_encrypted_file(file_path):
+        try:
+            decrypted_path = file_path + ".decrypted.tmp"
+            decrypt_file(file_path, decrypted_path)
+            
+            # 임시 복호화 파일을 전송 후 자동 삭제하도록 BackgroundTask 사용
+            from starlette.background import BackgroundTask
+            
+            def cleanup_temp_file(path: str):
+                """전송 완료 후 임시 복호화 파일 삭제"""
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except Exception:
+                    pass
+            
+            filename = f"interview_{session_id[:8]}.mp4"
+            return FileResponse(
+                path=decrypted_path,
+                filename=filename,
+                media_type="video/mp4",
+                background=BackgroundTask(cleanup_temp_file, decrypted_path),
+            )
+        except Exception as e:
+            # 복호화 실패 시 원본 파일 그대로 전송 (Graceful Degradation)
+            print(f"⚠️ [Recording] AES 복호화 실패, 원본 전송: {e}")
+
     filename = f"interview_{session_id[:8]}.mp4"
     return FileResponse(
         path=file_path,
@@ -5245,8 +5497,8 @@ async def delete_recording(session_id: str, current_user=Depends(get_current_use
 
 
 @app.get("/api/recording/status")
-async def get_recording_service_status():
-    """녹화 서비스 상태 확인"""
+async def get_recording_service_status(current_user: Dict = Depends(get_current_user)):
+    """녹화 서비스 상태 확인 (인증 필요)"""
     return {
         "available": RECORDING_AVAILABLE,
         "media_tool": MEDIA_TOOL if RECORDING_AVAILABLE else None,
@@ -5347,8 +5599,8 @@ async def emotion_page(request: Request):
 
 
 @app.get("/api/emotion/current")
-async def get_emotion_current():
-    """현재 감정 상태 조회 (API)"""
+async def get_emotion_current(current_user: Dict = Depends(get_current_user)):
+    """현재 감정 상태 조회 (인증 필요)"""
     async with state.emotion_lock:
         if state.last_emotion is None:
             return {"status": "no_data"}
@@ -5356,8 +5608,8 @@ async def get_emotion_current():
 
 
 @app.get("/emotion/sessions")
-async def get_emotion_sessions():
-    """모든 세션 목록 조회"""
+async def get_emotion_sessions(current_user: Dict = Depends(get_current_user)):
+    """모든 세션 목록 조회 (인증 필요)"""
     r = get_redis()
     sessions = set()
     if r:
@@ -5374,8 +5626,8 @@ async def get_emotion_sessions():
 
 
 @app.get("/emotion/timeseries")
-async def get_emotion_timeseries(session_id: str, emotion: str, limit: int = 100):
-    """감정 시계열 데이터 조회"""
+async def get_emotion_timeseries(session_id: str, emotion: str, limit: int = 100, current_user: Dict = Depends(get_current_user)):
+    """감정 시계열 데이터 조회 (인증 필요)"""
     r = get_redis()
     data = []
     if r:
@@ -5394,8 +5646,8 @@ async def get_emotion_timeseries(session_id: str, emotion: str, limit: int = 100
 
 
 @app.get("/emotion/stats")
-async def get_emotion_stats(session_id: str):
-    """감정 통계 조회"""
+async def get_emotion_stats(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """감정 통계 조회 (인증 필요)"""
     r = get_redis()
     emotions = ["happy", "sad", "angry", "surprise", "fear", "disgust", "neutral"]
     stats = {}
@@ -5425,8 +5677,8 @@ async def get_emotion_stats(session_id: str):
 # ========== Service Status ==========
 
 @app.get("/api/status")
-async def get_status():
-    """서비스 상태 확인"""
+async def get_status(current_user: Optional[Dict] = Depends(get_current_user_optional)):
+    """서비스 상태 확인 (선택적 인증)"""
     return {
         "status": "running",
         "services": {
@@ -5449,8 +5701,8 @@ async def get_status():
 
 
 @app.get("/api/stt/status")
-async def get_stt_status():
-    """STT 서비스 상태 상세 조회"""
+async def get_stt_status(current_user: Optional[Dict] = Depends(get_current_user_optional)):
+    """STT 서비스 상태 상세 조회 (선택적 인증)"""
     status = {
         "primary": {
             "engine": "Deepgram (Nova-3)",
@@ -5474,16 +5726,16 @@ async def get_stt_status():
 # ========== 이벤트 버스 모니터링 API ==========
 
 @app.get("/api/events/stats")
-async def get_event_stats():
-    """이벤트 버스 통계 조회"""
+async def get_event_stats(current_user: Dict = Depends(get_current_user)):
+    """이벤트 버스 통계 조회 (인증 필요)"""
     if not EVENT_BUS_AVAILABLE or not event_bus:
         return {"status": "disabled"}
     return event_bus.get_stats()
 
 
 @app.get("/api/events/history")
-async def get_event_history(limit: int = 50, event_type: Optional[str] = None):
-    """이벤트 히스토리 조회"""
+async def get_event_history(limit: int = 50, event_type: Optional[str] = None, current_user: Dict = Depends(get_current_user)):
+    """이벤트 히스토리 조회 (인증 필요)"""
     if not EVENT_BUS_AVAILABLE or not event_bus:
         return {"status": "disabled", "events": []}
     return {
@@ -5493,8 +5745,8 @@ async def get_event_history(limit: int = 50, event_type: Optional[str] = None):
 
 
 @app.get("/api/events/registered")
-async def get_registered_events():
-    """등록된 이벤트 타입 및 핸들러 목록"""
+async def get_registered_events(current_user: Dict = Depends(get_current_user)):
+    """등록된 이벤트 타입 및 핸들러 목록 (인증 필요)"""
     if not EVENT_BUS_AVAILABLE or not event_bus:
         return {"status": "disabled"}
     return {
@@ -5506,8 +5758,8 @@ async def get_registered_events():
 # ========== LangGraph 워크플로우 시각화/감사 API ==========
 
 @app.get("/api/workflow/status")
-async def get_workflow_status():
-    """LangGraph 워크플로우 서비스 상태"""
+async def get_workflow_status(current_user: Dict = Depends(get_current_user)):
+    """LangGraph 워크플로우 서비스 상태 (인증 필요)"""
     return {
         "langgraph_available": LANGGRAPH_AVAILABLE,
         "workflow_initialized": interview_workflow is not None,
@@ -5523,8 +5775,8 @@ async def get_workflow_status():
 
 
 @app.get("/api/workflow/graph")
-async def get_workflow_graph():
-    """LangGraph 워크플로우 그래프 다이어그램 (Mermaid)"""
+async def get_workflow_graph(current_user: Dict = Depends(get_current_user)):
+    """LangGraph 워크플로우 그래프 다이어그램 (인증 필요)"""
     if not interview_workflow:
         raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
     return {
@@ -5534,16 +5786,16 @@ async def get_workflow_graph():
 
 
 @app.get("/api/workflow/graph-definition")
-async def get_workflow_graph_definition():
-    """LangGraph 워크플로우 정적 그래프 구조 정보"""
+async def get_workflow_graph_definition(current_user: Dict = Depends(get_current_user)):
+    """LangGraph 워크플로우 정적 그래프 구조 정보 (인증 필요)"""
     if not interview_workflow:
         raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
     return interview_workflow.get_graph_definition()
 
 
 @app.get("/api/workflow/{session_id}/trace")
-async def get_workflow_trace(session_id: str):
-    """세션의 LangGraph 실행 추적 이력"""
+async def get_workflow_trace(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """세션의 LangGraph 실행 추적 이력 (인증 필요)"""
     if not interview_workflow:
         raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
     traces = interview_workflow.get_execution_trace(session_id)
@@ -5555,16 +5807,16 @@ async def get_workflow_trace(session_id: str):
 
 
 @app.get("/api/workflow/{session_id}/state")
-async def get_workflow_state(session_id: str):
-    """세션의 현재 워크플로우 상태 요약"""
+async def get_workflow_state(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """세션의 현재 워크플로우 상태 요약 (인증 필요)"""
     if not interview_workflow:
         raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
     return interview_workflow.get_current_state_summary(session_id)
 
 
 @app.get("/api/workflow/{session_id}/checkpoint")
-async def get_workflow_checkpoint(session_id: str):
-    """세션의 마지막 체크포인트 정보"""
+async def get_workflow_checkpoint(session_id: str, current_user: Dict = Depends(get_current_user)):
+    """세션의 마지막 체크포인트 정보 (인증 필요)"""
     if not interview_workflow:
         raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
     checkpoint = interview_workflow.get_checkpoint(session_id)
@@ -5574,8 +5826,8 @@ async def get_workflow_checkpoint(session_id: str):
 
 
 @app.get("/api/workflow/{session_id}/checkpoints")
-async def list_workflow_checkpoints(session_id: str, limit: int = 10):
-    """세션의 체크포인트 이력 목록"""
+async def list_workflow_checkpoints(session_id: str, limit: int = 10, current_user: Dict = Depends(get_current_user)):
+    """세션의 체크포인트 이력 목록 (인증 필요)"""
     if not interview_workflow:
         raise HTTPException(status_code=503, detail="LangGraph 워크플로우가 비활성화됨")
     checkpoints = interview_workflow.list_checkpoints(session_id, limit=limit)
