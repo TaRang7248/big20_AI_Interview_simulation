@@ -163,8 +163,24 @@ async def submit_answer(
         ref_questions = get_job_questions(job_title)
 
         # 5. Evaluate & Generate Next Question
+        # Fetch ALL previous questions to prevent duplicates
+        c.execute("SELECT Create_Question FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
+        history_rows = c.fetchall()
+        
+        # history_rows is list of tuples, e.g. [('q1',), ('q2',)]
+        # Use a consistent name 'history_questions'
+        history_questions = [r[0] for r in history_rows if r[0]]
+
         evaluation, next_question = evaluate_answer(
-            job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary, ref_questions
+            job_title, 
+            applicant_name, 
+            current_q_count, 
+            prev_question, 
+            applicant_answer, 
+            next_phase, 
+            resume_summary, 
+            ref_questions,
+            history_questions  # Pass history
         )
 
         # 5. Save Current Answer & Evaluation

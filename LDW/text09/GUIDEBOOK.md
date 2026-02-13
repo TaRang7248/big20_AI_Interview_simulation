@@ -1,105 +1,88 @@
 # AI 면접 시뮬레이션 가이드북 (GUIDEBOOK)
 
 ## 1. 시뮬레이션 개요
-본 프로젝트는 사용자의 이력서와 지원 직무를 기반으로 AI가 면접관이 되어 실전과 유사한 면접 경험을 제공하는 웹 기반 시뮬레이션입니다.
-LLM(Large Language Model)을 활용하여 지원자의 답변을 분석하고, 꼬리 질문을 생성하며, 피드백을 제공합니다.
-
----
+본 시뮬레이션은 사용자가 실제 면접처럼 음성으로 질문에 답변하고, AI 면접관이 이를 평가하여 꼬리 질문을 이어가는 웹 기반 인터뷰 연습 플랫폼입니다.
+OpenAI GPT-4o와 Whisper, TTS 기술을 활용하여 실시간 상호작용이 가능합니다.
 
 ## 2. 시뮬레이션 환경
--   **OS**: Windows (테스트 환경)
--   **Language**: Python 3.10+
--   **Framework**: FastAPI (Backend)
--   **Database**: PostgreSQL
--   **AI Engines**:
-    -   **LLM**: OpenAI GPT-4o (질문 생성 및 답변 평가, 이력서 요약)
-    -   **STT**: OpenAI Whisper (음성 인식)
-    -   **TTS**: OpenAI TTS (음성 합성)
+- **OS**: Windows (권장)
+- **Language**: Python 3.9+
+- **Frontend**: HTML5, CSS (Vanilla), JavaScript
+- **Backend**: FastAPI (Python)
+- **Database**: PostgreSQL (Docker 또는 로컬 설치)
 
----
-
-## 3. 실행 방법
+## 3. 시뮬레이션 실행 방법
 
 ### 사전 준비
-1.  Python 및 PostgreSQL 설치
-2.  가상 환경 생성 및 활성화 (권장)
-3.  패키지 설치: `pip install -r requirements.txt`
-4.  `.env` 파일 설정 (DB 접속 정보 및 OpenAI API Key)
+1. `requirements.txt` 패키지 설치:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. PostgreSQL 데이터베이스 실행 및 연결 설정 (`app/config.py` 또는 환경 변수 확인)
+3. OpenAI API Key 설정 (`.env` 파일 또는 환경변수)
 
 ### 서버 실행
-cmd 또는 터미널에서 프로젝트 루트(`C:\big20\big20_AI_Interview_simulation\LDW\text09`)로 이동 후 다음 명령어를 실행합니다.
-
 ```bash
 python server.py
 ```
+- 실행 시 자동으로 브라우저가 열리며 `http://localhost:5000`으로 접속됩니다.
+- 포트 5000번이 사용 중인 경우 `server.py`에서 포트를 변경하세요.
 
--   서버가 시작되면 브라우저가 자동으로 열립니다 (`http://localhost:5000`).
--   API 문서는 `http://localhost:5000/docs`에서 확인할 수 있습니다.
+## 4. 사용되는 모델 및 라이브러리 목록
 
----
+### AI Models (API)
+- **LLM (Large Language Model)**: OpenAI `gpt-4o` (질문 생성, 답변 평가, 이력서 요약)
+- **STT (Speech-to-Text)**: OpenAI `whisper-1` (사용자 음성 답변 -> 텍스트 변환)
+- **TTS (Text-to-Speech)**: OpenAI `tts-1` (AI 면접관 음성 생성)
 
-## 4. 모델 및 라이브러리 목록
-
-| 구분 | 이름 | 용도 |
-| :--- | :--- | :--- |
-| **Framework** | **FastAPI** | 고성능 웹 프레임워크 |
-| | **Uvicorn** | ASGI 서버 |
-| **Database** | **Psycopg2** | PostgreSQL 어댑터 |
-| **AI / ML** | **OpenAI API** | GPT-4o, Whisper, TTS 모델 사용 |
-| **Utilities** | **PyPDF2** | PDF 이력서 텍스트 추출 |
-| | **Python-Multipart** | 파일 업로드 처리 |
-| | **Webbrowser** | 브라우저 자동 실행 |
-
----
+### Key Libraries
+- **FastAPI**: 웹 서버 프레임워크
+- **Uvicorn**: ASGI 서버
+- **Psycopg2**: PostgreSQL 데이터베이스 어댑터
+- **Pydantic**: 데이터 검증
+- **OpenAI**: AI API 클라이언트
 
 ## 5. 주요 기능 사용법
 
-### 1) 회원가입 및 로그인
--   지원자(Applicant) 또는 관리자(Admin)로 회원가입 후 로그인합니다.
+### 1) 이력서 등록
+- 메인 화면에서 이름(ID)과 직무를 입력하고 PDF 형식의 이력서를 업로드합니다.
+- 업로드된 이력서는 텍스트로 추출되어 면접 질문 생성에 활용됩니다.
 
-### 2) 이력서 등록
--   [이력서 등록] 페이지에서 PDF 형식의 이력서를 업로드하고, 지원할 직무를 선택합니다.
+### 2) 면접 시작
+- 이력서 등록 후 [면접 시작] 버튼을 누르면 AI 면접관이 자기소개를 요청합니다.
+- 브라우저의 마이크 권한을 허용해야 합니다.
 
-### 3) 면접 시작
--   [면접 시작] 버튼을 누르면 AI 면접관이 자기소개를 요청하며 면접이 시작됩니다.
--   면접은 총 12개의 질문으로 구성됩니다.
-    -   **1번**: 자기소개
-    -   **2~6번**: 직무 기술 (Technical Skill)
-    -   **7~11번**: 인성 및 가치관 (Culture Fit)
-    -   **12번**: 마무리 질문
+### 3) 답변 녹음 및 제출
+- 질문을 듣고 [답변 시작] 버튼을 눌러 녹음을 시작합니다.
+- 답변이 끝나면 [답변 종료] 버튼을 누르면 자동으로 서버로 전송됩니다.
+- AI가 답변을 분석하고 꼬리 질문을 생성하여 다음 단계로 넘어갑니다.
 
-### 4) 답변 및 진행
--   질문을 듣고 마이크를 통해 답변을 녹음합니다.
--   답변이 완료되면 AI가 내용을 분석하고 다음 질문을 생성합니다.
--   이때, **등록한 이력서의 내용**과 **직무별 기출 질문**을 바탕으로 맞춤형 질문이 제시됩니다.
-
-### 5) 결과 확인
--   면접이 종료되면 [결과 페이지]에서 합격/불합격 여부와 AI의 상세 피드백을 확인할 수 있습니다.
-
----
+### 4) 면접 결과 확인
+- 총 10~12개의 질문이 끝나면 면접이 종료됩니다.
+- [결과 보기] 페이지에서 각 질문에 대한 평가, 피드백, 합격/불합격 여부를 확인할 수 있습니다.
 
 ## 6. 파일 구조 설명
 
 ```
-C:\big20\big20_AI_Interview_simulation\LDW\text09
+C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── app/
-│   ├── main.py              # FastAPI 앱 초기화 및 설정
-│   ├── models.py            # Pydantic 데이터 모델 정의
-│   ├── database.py          # DB 연결 및 세션 관리
-│   ├── config.py            # 환경 변수 및 설정 로드
-│   ├── routers/             # API 엔드포인트
-│   │   ├── interview.py     # 면접 진행 로직 (핵심)
-│   │   ├── auth.py          # 인증 관련
-│   │   └── ...
-│   └── services/            # 비즈니스 로직 및 외부 API 연동
-│       ├── llm_service.py   # OpenAI GPT 연동 (질문 생성, 평가)
-│       ├── stt_service.py   # Whisper STT 연동
-│       ├── tts_service.py   # TTS 연동
-│       └── pdf_service.py   # PDF 처리
-├── scripts/                 # 유틸리티 및 데이터베이스 스크립트
+│   ├── main.py              # FastAPI 앱 진입점
+│   ├── config.py            # 설정 파일 (DB, API Key 등)
+│   ├── database.py          # DB 연결 관리
+│   ├── models.py            # Pydantic 모델 정의
+│   ├── routers/             # API 라우터
+│   │   └── interview.py     # 면접 관련 API (핵심 로직)
+│   └── services/            # 비즈니스 로직
+│       ├── llm_service.py   # OpenAI 연동 (질문 생성, 평가)
+│       ├── stt_service.py   # 음성 인식
+│       ├── tts_service.py   # 음성 합성
+│       └── pdf_service.py   # PDF 텍스트 추출
 ├── static/                  # 프론트엔드 정적 파일 (HTML, CSS, JS)
-├── uploads/                 # 사용자 업로드 파일 저장소
-├── server.py                # 서버 실행 진입점
-├── requirements.txt         # 의존성 패키지 목록
-└── GUIDEBOOK.md             # 본 가이드북
+├── uploads/                 # 업로드된 이력서 저장소
+├── server.py                # 실행 스크립트
+├── requirements.txt         # 의존성 목록
+└── GUIDEBOOK.md             # 본 가이드 문서
 ```
+
+## 7. 최신 업데이트 사항 (v1.1)
+- **중복 질문 방지 기능**: 같은 면접 세션 내에서 AI가 동일하거나 유사한 질문을 반복하지 않도록 개선되었습니다.

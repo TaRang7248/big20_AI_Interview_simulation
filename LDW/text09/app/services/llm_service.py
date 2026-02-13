@@ -123,7 +123,7 @@ def summarize_resume(text):
         logger.error(f"Resume Summary Error: {e}")
         return text[:1000] # Fallback to truncation
 
-def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None):
+def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None, history_questions=None):
     """
     Evaluates the applicant's answer and generates the next question or closing remark.
     Enhanced to use Resume Summary and Reference Questions from Pool.
@@ -169,6 +169,17 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
             {ref_q_text}
             """
 
+        history_context = ""
+        if history_questions:
+            # Join previous questions
+            hist_text = "\n".join([f"- {q}" for q in history_questions])
+            history_context = f"""
+            [이미 질문한 내역 (중복 질문 절대 금지)]
+            {hist_text}
+            
+            ※ 주의: 위 [이미 질문한 내역]에 있는 질문들과 의미가 유사하거나 겹치는 질문은 절대로 다시 하지 마세요. 새로운 관점이나 더 깊이 있는 질문을 해주세요.
+            """
+
         prompt = f"""
         [상황]
         직무: {job_title}
@@ -177,6 +188,7 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         
         {resume_context}
         {ref_context}
+        {history_context}
 
         [이전 질문]
         {prev_question}
@@ -192,6 +204,7 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         - 다음 단계([{next_phase}])에 맞는 질문이어야 합니다.
         - [지원자 이력서 요약]이 있다면, 해당 내용을 검증하거나 구체적인 경험을 묻는 질문을 우선적으로 생성하세요.
         - [직무 관련 참고 질문]이 있다면, 그 질문들과 유사한 맥락이거나 그 중 하나를 상황에 맞게 변형하여 질문하세요.
+        - 이미 질문한 내용과 중복되지 않도록 주의하세요.
         - 이전 답변과 자연스럽게 이어지거나, 새로운 주제로 전환하세요.
         - 질문은 구어체로 정중하게 1~2문장으로 작성해주세요.
         
