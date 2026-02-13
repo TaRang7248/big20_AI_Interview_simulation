@@ -7,6 +7,7 @@
 fastapi
 uvicorn[standard]
 pydantic
+python-multipart
 python-dotenv
 httpx
 
@@ -56,6 +57,7 @@ pyannote-audio
 # --- CV / Emotion (선택: 필요 시 사용) ---
 opencv-python
 deepface
+tf-keras
 
 # --- Dev tools ---
 pytest

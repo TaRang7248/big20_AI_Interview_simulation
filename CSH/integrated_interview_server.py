@@ -163,8 +163,8 @@ async def run_deepface_async(img, actions=None):
 
 
 # ========== PostgreSQL 데이터베이스 설정 ==========
-# POSTGRES_CONNECTION_STRING 환경변수가 있으면 우선 사용
-DATABASE_URL = os.getenv("POSTGRES_CONNECTION_STRING")
+# DATABASE_URL 또는 POSTGRES_CONNECTION_STRING 환경변수가 있으면 우선 사용
+DATABASE_URL = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_CONNECTION_STRING")
 
 # 없으면 개별 환경변수로 조합
 if not DATABASE_URL:
