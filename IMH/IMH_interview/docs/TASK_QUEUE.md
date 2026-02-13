@@ -233,7 +233,6 @@
   - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
 
 ---
-## ACTIVE
 
 ### TASK-019 공고(채용) 정책 엔진 (Job Posting Policy Engine)
 - **Goal**:
@@ -256,7 +255,7 @@
   - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
 
 ---
-## BACKLOG
+## ACTIVE
 
 ### TASK-020 관리자 지원자 조회/필터 규격 (Admin Applicant Filtering)
 - **Goal**:
@@ -278,6 +277,9 @@
   - 리포트 조회 API 계약(TASK-014) 및 UI 소비 규격(TASK-015)
 
 ---
+
+## BACKLOG
+
 
 ### TASK-021 세션 중단 표기/처리 규격 (Interrupt Handling & Visibility)
 - **Goal**:

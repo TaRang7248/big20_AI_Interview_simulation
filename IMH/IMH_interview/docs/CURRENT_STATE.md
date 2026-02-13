@@ -102,6 +102,22 @@
   - 검증 스크립트는 정책 분리 및 엔진 동작 확인을 위한 보조 도구이며,
     런타임 API 진입점 구현에는 영향을 주지 않음
 
+- TASK-019 기준:
+  - `scripts/verify_task_019.py`를  
+    Python 3.10.11 + `interview_env` 환경에서 실행하여 정상 동작 확인  
+  - 공고 상태 전이(DRAFT → PUBLISHED → CLOSED) 검증 완료  
+    - PUBLISHED/CLOSED 상태에서 허용되지 않은 전이 차단 확인  
+  - PUBLISHED 상태 전환은 되돌릴 수 없는 전이(Irreversible Transition)로 취급됨을 검증 완료  
+  - AI-Sensitive Fields 불변(Immutable Contract) 규칙 검증 완료  
+    - DRAFT 상태에서만 `update_policy()` 허용  
+    - PUBLISHED/CLOSED 상태에서 `update_policy()` 호출 시 `PolicyValidationError` 발생 확인  
+    - PUBLISHED 상태에서 `job.policy = ...` 직접 대입 시도 시 `PolicyValidationError` 발생(우회 경로 차단) 확인  
+  - 세션 스냅샷(SessionConfig) 생성 정책 검증 완료  
+    - `create_session_config()`에서 JobPolicy 참조 공유 없이 값 주입(Value Injection) 방식으로 스냅샷 생성 확인  
+  - 2주 내 합/불합 자동 통지 하한선은 “플랫폼 강제 규칙(Platform Policy)”으로서  
+    공고 정책으로 무력화 불가 원칙 유지 확인  
+  - 검증 스크립트는 공고 정책 엔진 규칙 동작 확인을 위한 보조 도구이며,  
+    런타임 API 진입점 구현에는 영향을 주지 않음
 
 ## 1. 프로젝트 목적 (확정)
 
@@ -277,6 +293,12 @@ IMH/IMH_Interview/
   - TASK-013: 리포트 저장소(FileHistoryRepository) 구현 완료
   - JSON 파일 기반 영구 저장 및 이력 조회 검증됨
 
+- `packages/imh_job/`: ✅ DONE
+  - TASK-019: 공고 정책 엔진(Job Policy Engine) 구현 완료
+  - JobStatus(DRAFT/PUBLISHED/CLOSED) 전이 및 AI-Sensitive Fields 불변성 강제 검증됨
+  - Session Snapshot 생성 로직 구현됨
+
+
 - `IMH/api/`: ✅ DONE
   - TASK-014: 리포트 조회 API 노출
     - 리포트 목록(List) / 상세(Detail) 조회 API 구현
@@ -284,7 +306,7 @@ IMH/IMH_Interview/
     - List / Detail 데이터 노출 정책 분리
     - Read-only API 동작 검증 스크립트 기반 검증 완료
 
-- `IMH/IMH_Interview/docs/`: ✅ DONE
+- `IMH/IMH_Interview/_refs/`: ✅ DONE
   - TASK-015: UI / Client 리포트 소비 규격 정의
     - `TASK-015_CONTRACT.md` 문서를 통해
       리포트 해석, 표현, Null 처리, 책임 경계 규칙 확정

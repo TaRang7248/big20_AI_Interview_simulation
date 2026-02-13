@@ -366,3 +366,30 @@ Plan 수립
 - 향후 엔진 안정화 단계에서 상태 전이 중앙 검증(guard/validator) 도입을 고려할 수 있다.
 - 단, 본 TASK-018 범위에서는 구조 리팩터링이 금지되었으므로 변경하지 않았다.
 
+
+### TASK-019 공고 정책 엔진 구현 (Job Policy Engine)
+- **요약**: 공고(Job Posting)를 "불변의 AI 평가 스키마"로 정의하고, 상태(DRAFT/PUBLISHED/CLOSED)에 따른 엄격한 수정 통제 및 정책 스냅샷 로직을 구현.
+- **변경 사항**:
+    - `packages/imh_job/` 패키지 신설.
+    - `enums.py`: `JobStatus` 정의.
+    - `models.py`: `Job`, `JobPolicy` 모델 구현.
+        - `JobPolicy`: AI-Sensitive Fields(Time limits, Weights, Requirements 등) 정의 및 유효성 검사.
+        - `Job`: `publish()`, `close()`, `update_policy()` 메서드를 통한 상태 전이 및 불변성 강제.
+        - `create_session_config()`: `SessionConfig` 스냅샷 생성 로직 구현.
+    - `errors.py`: `JobStateError`, `PolicyValidationError` 정의.
+    - `scripts/verify_task_019.py`: 상태 전이 및 정책 불변성 검증 스크립트 작성.
+- **검증 결과**:
+    - `python scripts/verify_task_019.py`: **Pass**
+        - DRAFT 상태에서 정책 수정 가능 확인.
+        - PUBLISHED 전환 후 정책 수정 시도 시 `PolicyValidationError` 발생 확인 (AI-Sensitive Fields 보호).
+        - Session Snapshot 생성 시 값이 정확히 매핑됨을 확인.
+        - CLOSED 상태에서 메타데이터 수정 차단 확인.
+- **주요 정책 반영**:
+    - **Irreversible Transition**: PUBLISHED 상태 이후 되돌리기 불가.
+    - **Minimum Questions**: 최소 질문 수 10개 강제 (System Policy).
+    - **Result Exposure**: 14일 자동 통지 규칙을 상위 제약으로 명시.
+
+### TASK-019 결함 수정 (Bug Fix)
+- **이슈**: Pydantic 모델의 `job.policy = ...` 직접 대입 허용으로 인한 불변성 우회 가능성 확인.
+- **수정**: `Job` 모델의 `policy` 필드를 `_policy` (PrivateAttr)로 변경하고, `@property` setter를 통해 상태 기반 쓰기 권한을 강제함.
+- **검증**: `verify_task_019.py`에 직접 대입 시도 테스트 케이스 추가 -> `PolicyValidationError` 발생 확인.
