@@ -1,0 +1,48 @@
+# =============================================================================
+# .dockerignore — Docker 빌드 시 제외할 파일/디렉토리
+# =============================================================================
+
+# Python 가상환경 (컨테이너 내부에서 별도 설치)
+interview_env/
+__pycache__/
+*.pyc
+*.pyo
+
+# Node.js (컨테이너 내부에서 npm ci 실행)
+**/node_modules/
+**/.next/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 환경 파일 (비밀키 포함 — 절대 이미지에 포함 금지)
+.env
+.env.local
+.env.*.local
+
+# 로그 및 임시 파일
+*.log
+*.tmp
+turn_outputs.jsonl
+health_result.txt
+
+# 문서 (이미지 용량 절약)
+docs/
+*.md
+!README.md
+
+# SSL 인증서 (Docker volume으로 마운트)
+CSH/nginx/ssl/
+
+# 테스트 데이터
+LDW/
+YJH/
+YYR/
+Data/
