@@ -250,3 +250,6 @@ uploads/
 # mkcert로 생성된 로컬 인증서 및 키 파일 제외
 *.pem
 *-key.pem
+
+# SSL 인증서 (개인키 노출 방지)
+CSH/nginx/ssl/
