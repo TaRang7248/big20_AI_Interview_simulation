@@ -563,3 +563,27 @@ Plan 수립
 - **검증 결과**:
     - Race Condition: Iteration 1에서 충돌 발생 (Status 423/200). Fail-Fast 동작 확인.
     - AST Guardrails: All Pass.
+
+### TASK-024 질문은행 구조 정비 (Question Bank Structure)
+- **요약**: 질문 생성 실패 시 Fallback 및 정적 자산 관리를 위한 `packages/imh_qbank` 패키지 구현.
+- **변경 사항**:
+    - `packages/imh_qbank/domain.py`: `Question`, `SourceType`, `SourceMetadata` 정의. Soft Delete 상태(`DELETED`) 지원.
+    - `packages/imh_qbank/repository.py`: `JsonFileQuestionRepository` 구현 (파일 기반 저장소).
+    - `packages/imh_qbank/service.py`: `QuestionBankService` 구현 (Candidate Provider).
+        - Soft Delete된 질문은 후보군(Candidates)에서 자동 제외 정책 적용.
+    - `scripts/verify_task_024.py`: Soft Delete 및 Session Immutability(Edit-Tolerant, Delete-Tolerant) 검증 스크립트 작성.
+- **검증 결과**:
+    - `python scripts/verify_task_024.py`: **Pass**
+        1. **Static Question Addition**: 저장 및 조회 성공.
+        2. **Edit-Tolerant**: 질문은행 수정 시에도 세션 스냅샷(Copy) 불변성 유지 확인.
+        3. **Soft Delete**: `soft_delete_question` 호출 시 Status `DELETED` 변경 확인.
+        4. **Candidate Exclusion**: Soft Delete된 질문이 `get_candidates` 결과에서 제외됨 확인.
+        5. **Delete-Tolerant**: 삭제 후에도 ID 기반 조회(History/Audit) 가능함 확인.
+- **주요 설계 반영**:
+    - **Boundaries**: Engine/Service에 대한 역방향 의존성 없음 (QBank는 수동적 Provider).
+    - **Source Layer**: Static Origin과 Generated Origin을 구분 가능한 도메인 모델 적용.
+    - **Policy**: Soft Delete를 기본 삭제 정책으로 채택하여 이력 추적성 확보.
+- **로그 및 산출물**:
+    - `packages/imh_qbank/` 패키지 신설.
+    - `logs/agent/` 로그 파일 참조.
+

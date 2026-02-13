@@ -13,11 +13,11 @@
   반드시 `interview_env` 활성화 상태에서 수행한다.
 - 글로벌(시스템) Python 환경에 패키지 설치는 금지한다.
 
-# 검증 상태 요약 (Phase 1 ~ Phase 6, TASK-004 ~ TASK-023)
+# 검증 상태 요약 (Phase 1 ~ Phase 6, TASK-004 ~ TASK-024)
 
 # Phase 1 ~ Phase 4. Core Processing & Report Layer
 
-## 1. Core Processing Layer (TASK-004 ~ 011)
+## 1. Core Processing Layer (TASK-004 ~ TASK-011)
 
 - 파일 검증, 텍스트 추출, 임베딩 파이프라인 정상 동작 검증 완료
 - 음성 분석(Pitch/Intensity/Jitter/Shimmer/HNR) 정책 계약 동작 확인
@@ -27,7 +27,7 @@
 
 ---
 
-## 2. Report & Persistence Layer (TASK-013 ~ 014)
+## 2. Report & Persistence Layer (TASK-013 ~ TASK-014)
 
 - InterviewReport 파일 저장/조회/정렬 계약 동작 검증 완료
 - `/reports` API 목록/상세 조회 정상 동작 확인
@@ -39,7 +39,7 @@
 
 # Phase 5. Session & Policy Engine Architecture 고정
 
-## 3. Session & Policy Engine Layer (TASK-017 ~ 019, 021)
+## 3. Session & Policy Engine Layer (TASK-017 ~ TASK-019, TASK-021)
 
 - 세션 상태 전이(APPLIED → IN_PROGRESS → COMPLETED/INTERRUPTED → EVALUATED) 계약 동작 검증 완료
 - 최소 질문 수 10개 규칙 및 침묵 처리 규칙 계약 동작 검증 완료
@@ -109,6 +109,27 @@
 
 ---
 
+# Phase 7 기반 정비 완료
+
+## 7. Question Bank Layer (TASK-024)
+
+- `packages/imh_qbank` 신설 (Domain / Repository / Service 구조 확정)
+- Source 계층 정의 (Static Origin / Generated Origin)
+- Soft Delete 정책 도입 (status=DELETED, 신규 세션 후보군 자동 제외)
+- Session Snapshot과 완전 독립(Value Object 기반) 구조 검증 완료
+- QBank 변경이 과거 세션 스냅샷에 영향을 주지 않음 확인
+- Hard Delete 경로 부재 확인
+- Engine / Service 경계 침범 없음 검증 완료
+- `verify_task_024.py` 검증 PASS
+
+📌 **Phase 7 진입 준비 상태**
+- 질문 자산 레이어 안정화 완료
+- RAG Fallback 엔진 통합 가능 구조 확보
+- Generated Origin 확장 기반 마련
+- Snapshot 계약 침범 없는 동적 질문 통합 준비 완료
+
+---
+
 # 검증 방법 및 기준
 
 - 모든 TASK는 `scripts/verify_task_xxx.py` 기반 계약 동작 검증 수행
@@ -125,6 +146,7 @@
 - **state**: 세션 진행 상태(APPLIED / IN_PROGRESS / COMPLETED / INTERRUPTED / EVALUATED)
 
 
+
 ## 1. 프로젝트 목적 (확정)
 
 - 목적: **AI 모의면접 시스템**
@@ -136,7 +158,7 @@
 ---
 ## 2. 현재 개발 단계
 
-- 상태: **Phase 6 완료 → Phase 7 착수 준비 단계**
+- 상태: **Phase 6 완료 → Phase 7 진행 중 (질문은행 구조 정비 완료 상태)**
 
   - Phase 5 완료: End-to-End 인터뷰 실행 아키텍처 통합 구현 완료 (TASK-021)
     - 세션 엔진 통합
@@ -154,10 +176,14 @@
     - API Guardrail(AST) 적용
     - (세부 구현: Service Layer 구축, API Adapter, Runtime Bootstrap 완료)
 
-  - Phase 7 진입 예정 (질문은행 및 RAG 통합):
-    - 질문 출처 계층 분리
-    - RAG Fallback 전략 정의
-    - Snapshot 계약 침범 금지
+  - Phase 7 진행 중:
+    - 질문은행 구조 정비 완료 (TASK-024)
+      - Source 계층 정의 (Static Origin / Generated Origin)
+      - Soft Delete 정책 도입
+      - Session Snapshot과 완전 독립(Value Object) 구조 검증
+      - Engine/Service 경계 침범 없음 확인
+    - RAG Fallback 전략 정의 예정 (TASK-025)
+    - Snapshot 계약 침범 금지 원칙 유지
 
   - (설계 기준)
     - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 고정
@@ -166,7 +192,7 @@
 
 ---
 
-### 완료 항목 (Phase 1 ~ Phase 6 결과)
+### 완료 항목 (Phase 1 ~ Phase 7 현재까지 결과)
 
 - Analysis 결과를 입력으로 받아 정량 점수 및 평가 근거(Evidence)를 산출하는 Rule-based Evaluation Engine 구현 및 검증 완료 (TASK-011)
 - 평가 결과를 사용자 친화적 리포트(JSON)로 변환하는 Reporting Layer 구현 완료 (TASK-012)
@@ -192,15 +218,29 @@
   - AST 기반 Import Guardrail 적용 완료
   - Phase 5 계약(Freeze / Snapshot / State Contract) 침범 없음 확인
 
+- 질문은행 구조 정비 완료 (TASK-024)
+  - `packages/imh_qbank` 신설 (Domain / Repository / Service)
+  - Source 계층 분리 및 메타데이터 구조 정의
+  - Soft Delete 정책 도입 및 후보군 자동 제외 보장
+  - Snapshot과 완전 독립(Value Object) 구조 확정
+  - 과거 세션 무결성 보존 검증 완료
+
 📌 **현재 기준선**
 - Phase 5 핵심 계약 고정
 - Phase 6 서비스/외부 경계 고정
+- Phase 7 질문 자산 레이어 안정화 완료
 - 외부 런타임 진입점 확정
 - 구조 계약 위반 방지 가드레일 확보
 
 ---
 
 ### 미포함 항목 (향후 단계)
+
+- **Phase 7 (진행 예정)**
+  - RAG Fallback 엔진 통합 (TASK-025)
+  - LLM 기반 질문 생성 로직을 Engine 경계 내에서 통합
+  - Generated Origin 확장
+  - Snapshot 계약 침범 없는 동적 질문 연결 구조 확정
 
 - **Phase 8: DB 정식 전환 (PostgreSQL / Redis)**
   - 파일 기반 저장소 → RDB 전환
@@ -210,7 +250,7 @@
   - 관리자 통계 대시보드
   - Query 전용 확장
 
-- **기타**:
+- **기타**
   - 실제 프론트엔드 UI 구현(면접자/관리자 화면)
   - 외부 인증/권한 체계(SSO, OAuth 등)
   - 운영 환경 배포/모니터링/로그 집계 인프라
@@ -220,7 +260,6 @@
 
 ### 현재 Phase의 목적 (Phase 7 목표)
 
-- 질문은행 구조 정비 및 출처(Source) 계층 정합성 확보
 - RAG Fallback 엔진 통합
 - LLM 기반 질문 생성 로직을 Engine 경계 내에서 통합
 - Snapshot 계약 침범 없이 질문 생성/평가/상태 전이 경계 유지
@@ -341,7 +380,8 @@ IMH/IMH_Interview/
 │   ├── imh_history/
 │   ├── imh_job/
 │   ├── imh_session/
-│   └── imh_service/
+│   ├── imh_service/
+│   └── imh_qbank/
 ├── docs/                 # 운영 문서 (사람/에이전트용)
 ├── logs/                 # 실제 로그 파일 (.log)
 │   ├── agent/
@@ -419,6 +459,13 @@ IMH/IMH_Interview/
     - session_id 단위 File/Memory Lock 기반 Fail-Fast 동시성 제어 적용
     - Engine 상태 변경은 반드시 엔진 메서드를 통해서만 수행됨 확인
     - Phase 5 계약(Freeze / Snapshot / State Contract) 훼손 없음 검증 완료 (`verify_task_022.py`)
+
+- `packages/imh_qbank/`: ✅ DONE
+  - TASK-024: 질문은행 구조 정비 완료
+    - 질문 자산 관리(SourceType 분리) 및 Soft Delete 정책 구현
+    - Candidate Provider 인터페이스(Service Layer 연동 준비) 구현
+    - Session Immutability(Edit/Delete Tolerant) 검증 완료 (`verify_task_024.py`)
+    - Engine/Service 경계 준수(단방향 의존) 확인
 
 - `IMH/api/`: ✅ DONE
   - TASK-014: 리포트 조회 API 노출
@@ -526,21 +573,14 @@ IMH/IMH_Interview/
 ## 10. 현재 최우선 목표
 
 ## ACTIVE
-- **(없음)** : 현재 승인된 Active Task 없음 
-  - Phase 7 진입 준비 및 TASK-024 승인 대기 단계.
 
 ## Next Approval Target (Phase 7)
-- **TASK-024 질문은행 구조 정비 (Question Bank Structure)**
-  - 질문 생성 실패 시 사용할 질문은행 구조 설계 (Source 계층 분리)
-  - `packages/imh_qbank` 패키지 신설
-  - 태그 기반 질문 검색/매핑 전략 수립
-
 - **TASK-025 RAG Fallback 엔진 통합**
   - 생성 모델 실패 시 질문은행 Fallback 트리거 정책 연결
   - Snapshot 계약 침범 방지 하에 통합
 
 - **승인 절차**:
-  - `TASK-024_PLAN.md` 작성이 다음 에이전트의 첫 번째 목표가 된다.
+  - `TASK-025_PLAN.md` 작성이 다음 에이전트의 첫 번째 목표가 된다.
 
 
 ---

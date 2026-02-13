@@ -319,8 +319,6 @@
 
 ---
 
-## ACTIVE
-
 ### TASK-024 질문은행 구조 정비 (Question Bank Structure)
 - **Goal**:
   - 질문 생성 품질 저하 또는 실패 시 사용할 정적/동적 질문은행 구조를 정비한다.
@@ -329,15 +327,11 @@
   - 질문 출처(Source) 계층 정의 (Generated vs Banked)
   - 태그 기반 질문 검색/매핑 전략
   - (원칙) qbank는 “질문 후보 조회/선택 지원”까지만 담당하며, 실제 질문 채택/상태 전이는 Engine/Service 계약을 통해서만 수행한다.
+- **Verification**: `python scripts/verify_task_024.py` Pass
 
-- **Out of Scope**:
-  - DB 정식 도입 (Phase 8)
-- **Dependencies**:
-  - TASK-022 완료
-  - 세션 엔진(TASK-017) 구조 확정
 ---
 
-## BACKLOG
+## ACTIVE
 
 ### TASK-025 RAG Fallback 엔진 통합
 - **Goal**:
@@ -351,6 +345,8 @@
   - PGVector 정식 도입
 - **Dependencies**:
   - TASK-024 (질문은행) 완료
+
+## BACKLOG
 
 ---
 
