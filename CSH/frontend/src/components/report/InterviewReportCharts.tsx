@@ -591,9 +591,15 @@ function ProsodyRadarChart({ prosody }: { prosody: ProsodyAnalysis }) {
                 borderRadius: 8,
                 color: "#fff",
               }}
-              formatter={(value: number, _name: string, props: { payload: { key: string; 등급: string } }) =>
-                [`${value}% (등급: ${props.payload.등급})`, PROSODY_LABELS[props.payload.key] || props.payload.key]
-              }
+              formatter={(value, _name, item) => {
+                const safeValue = typeof value === "number" ? value : Number(value ?? 0);
+                const payload = (item && typeof item === "object" && "payload" in item)
+                  ? (item as { payload?: { key?: string; 등급?: string } }).payload
+                  : undefined;
+                const key = payload?.key ?? "unknown";
+                const grade = payload?.등급 ?? "N/A";
+                return [`${safeValue}% (등급: ${grade})`, PROSODY_LABELS[key] || key];
+              }}
             />
             <Bar dataKey="점수" radius={[0, 4, 4, 0]}>
               {barData.map((entry, idx) => (
@@ -776,7 +782,7 @@ export default function InterviewReportCharts({ report }: { report: ReportData }
         {report.gaze_analysis && <GazeBarChart gaze={report.gaze_analysis} />}
 
         {/* 음성 감정 분석 (Prosody) */}
-        {report.prosody_analysis && report.prosody_analysis.total_samples > 0 && (
+        {report.prosody_analysis && (report.prosody_analysis.total_samples ?? 0) > 0 && (
           <ProsodyRadarChart prosody={report.prosody_analysis} />
         )}
       </div>

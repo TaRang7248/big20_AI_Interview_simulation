@@ -15,8 +15,10 @@ FROM python:3.11-slim
 # - ffmpeg: 미디어 녹화/인코딩에 필요
 # - curl: 헬스 체크에 사용
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     gcc \
     libpq-dev \
+    portaudio19-dev \
     ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -49,6 +51,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # --workers 2: 멀티 워커 (프로덕션에서는 CPU 코어 수에 맞춰 조절)
 # --forwarded-allow-ips '*': NGINX 프록시의 X-Forwarded-* 헤더 신뢰
 CMD ["python", "-m", "uvicorn", "integrated_interview_server:app", \
-     "--host", "0.0.0.0", "--port", "8000", \
-     "--workers", "2", \
-     "--forwarded-allow-ips", "*"]
+    "--host", "0.0.0.0", "--port", "8000", \
+    "--workers", "2", \
+    "--forwarded-allow-ips", "*"]
