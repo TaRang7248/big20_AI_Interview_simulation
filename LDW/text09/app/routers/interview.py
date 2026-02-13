@@ -9,7 +9,7 @@ from ..database import get_db_connection, logger
 from ..config import UPLOAD_FOLDER, AUDIO_FOLDER
 from ..models import StartInterviewRequest
 from ..services.pdf_service import extract_text_from_pdf
-from ..services.llm_service import summarize_resume, evaluate_answer
+from ..services.llm_service import summarize_resume, evaluate_answer, get_job_questions
 from ..services.stt_service import transcribe_audio
 from ..services.tts_service import generate_tts_audio
 from ..services.analysis_service import analyze_interview_result
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api", tags=["interview"])
 # Note: Using "/api" prefix because we mix /api/interview and /api/upload and /api/interview-results
 
 @router.post("/interview/start")
-async def start_interview(data: StartInterviewRequest):
+async def start_interview(background_tasks: BackgroundTasks, data: StartInterviewRequest):
     """
     1. Load Resume & Job Info.
     2. Prepare Pool (Get or Create).
@@ -58,6 +58,9 @@ async def start_interview(data: StartInterviewRequest):
 
         # Resume Summarization (New Feature)
         resume_summary = summarize_resume(resume_text)
+
+        # Prepare Question Pool in Background
+        background_tasks.add_task(get_job_questions, data.job_title)
 
         # Save to DB
         c.execute('''
@@ -134,7 +137,7 @@ async def submit_answer(
              
         current_row_id = row[0]
         prev_question = row[1]
-        resume_context = row[2] if row[2] else ""
+        resume_summary = row[2] if row[2] else ""
         id_name = row[3]
         
         # Get session_name
@@ -156,9 +159,28 @@ async def submit_answer(
         else:
             next_phase = "END"
 
-        # 4. Evaluate & Generate Next Question
+        # 4. Fetch Job Questions for Reference
+        ref_questions = get_job_questions(job_title)
+
+        # 5. Evaluate & Generate Next Question
+        # Fetch ALL previous questions to prevent duplicates
+        c.execute("SELECT Create_Question FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
+        history_rows = c.fetchall()
+        
+        # history_rows is list of tuples, e.g. [('q1',), ('q2',)]
+        # Use a consistent name 'history_questions'
+        history_questions = [r[0] for r in history_rows if r[0]]
+
         evaluation, next_question = evaluate_answer(
-            job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase
+            job_title, 
+            applicant_name, 
+            current_q_count, 
+            prev_question, 
+            applicant_answer, 
+            next_phase, 
+            resume_summary, 
+            ref_questions,
+            history_questions  # Pass history
         )
 
         # 5. Save Current Answer & Evaluation
@@ -178,7 +200,7 @@ async def submit_answer(
                 INSERT INTO Interview_Progress (
                     Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (interview_number, applicant_name, job_title, resume_context, next_question, id_name, session_name))
+            ''', (interview_number, applicant_name, job_title, resume_summary, next_question, id_name, session_name))
         
         conn.commit()
         conn.close()
