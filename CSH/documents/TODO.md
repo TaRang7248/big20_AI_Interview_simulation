@@ -6,8 +6,7 @@
 
 | # | SAD 설계 항목 | 설계 기술 | 실제 구현 | 판정 |
 |---|---|---|---|---|
-| 1 | API Gateway | NGINX / Traefik | **없음** — FastAPI 직접 서빙 | ❌ 미구현 |
-| 2 | 객체 저장소 | GCP Cloud Storage | **없음** — 로컬 파일시스템 | ❌ 미구현 |
+| 1 | 객체 저장소 | GCP Cloud Storage | **없음** — 로컬 파일시스템 | ❌ 미구현 |
 
 ---
 
@@ -33,7 +32,6 @@
 
 | 우선순위 | 항목 | 설명 |
 |---|---|---|
-| 🔴 **Major** | SAD-3 API Gateway | NGINX/Traefik/SSL 없음 |
 | 🟠 **High** | REQ-N-002 확장성 | Dockerfile·K8s 없음, 수평 확장 불가 |
 | 🟢 **Low** | REQ-N-004 공정성 | 학술 프로젝트 단계에서는 후순위 |
 
