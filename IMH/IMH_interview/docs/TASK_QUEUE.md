@@ -292,26 +292,41 @@
   - TASK-020 관리자 조회 규격 확정
 
 ---
+### TASK-022 서비스 레이어 및 DTO 구현 (Service Layer & Integration)
+- **Goal**:
+  - API 계층과 도메인 계층(세션 엔진)을 중재하는 Service Layer를 구현하고,
+    DTO/Mapper를 통해 외부 계약과 내부 로직을 완전 격리한다.
+- **Scope**:
+  - `packages/imh_service/` 구현 (SessionService, AdminQueryService)
+  - `packages/imh_dto/` 및 `Mapper` 구현
+  - 동시성 제어(`ConcurrencyManager`) 및 트랜잭션 경계 설정
+- **Out of Scope**:
+  - 실제 API 엔드포인트 구현 (다음 단계)
+- **Dependencies**:
+  - TASK-021 (통합 아키텍처) 완료
+  - TASK-022 계획(PLAN) 준수
+
+---
+
 ## ACTIVE
 
-### TASK-022 질문은행 구조 정비 (Question Bank Structuring)
+### TASK-023 API 레이어 구현 및 연동 (API Layer Implementation)
 - **Goal**:
-  - 보유한 약 6천 개 질문/답변 데이터를 정책 기반으로 정비한다.
+  - Service Layer를 호출하는 FastAPI 엔드포인트를 구현하여 외부에서 인터뷰 세션을 수행할 수 있게 한다.
 - **Scope**:
-  - 질문 태그 체계 정렬(직무/인재상/루브릭 연결)
-  - 필수 질문과의 충돌 정책 정의
-  - 공고 기반 질문 구성 전략 수립
+  - `IMH/api/session.py` (면접자용): 생성, 진행, 답변 제출
+  - `IMH/api/admin.py` (관리자용): 조회, 관리
+  - Exception Handling 및 Status Code 매핑
 - **Out of Scope**:
-  - 실제 DB 마이그레이션
+  - 인증/인가 (Dummy User ID 사용)
 - **Dependencies**:
-  - 인터뷰 정책 스펙 확정본
-  - 질문 태그 설계 문서
+  - TASK-022 Service Layer 완료
 
 ---
 
 ## BACKLOG
 
-### TASK-023 RAG Fallback 엔진 통합
+### TASK-024 RAG Fallback 엔진 통합
 - **Goal**:
   - 질문 생성 품질 저하 또는 실패 시 질문은행을 fallback으로 활용한다.
 - **Scope**:

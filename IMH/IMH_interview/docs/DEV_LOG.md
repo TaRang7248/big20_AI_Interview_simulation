@@ -464,3 +464,25 @@ Plan 수립
     - **Snapshot Double Lock**: Job Policy(Template) -> Session Config(Instance) 이중 잠금 체계 완성.
     - **Result Exposure**: 평가 공개 정책이 스냅샷에 포함되어 Evaluation Engine으로 전달됨을 보장.
 
+
+### TASK-022 서비스 레이어 및 DTO 구현 (Service Layer & Integration)
+- **요약**: API 모듈과 도메인(세션 엔진)을 중재하는 Service Layer(`packages/imh_service`)를 구현하고, DTO/Mapper를 통해 외부 의존성을 격리함.
+- **변경 사항**:
+    - `packages/imh_service/`:
+        - `SessionService`: 세션 생성, 답변 제출(Command) 오케스트레이션 및 리포지토리 트랜잭션 관리.
+        - `AdminQueryService`: Admin용 Read-Only 조회 서비스 (Lock Bypass 정책 적용).
+        - `ConcurrencyManager`: 파일 기반 Lock(`Fail-Fast` 정책) 구현.
+        - `Mapper`: Domain Entity ↔ API DTO 간 명시적 변환 로직 구현.
+    - `packages/imh_dto/`: `SessionResponseDTO`, `AnswerSubmissionDTO` 등 API 계약용 객체 정의.
+    - `scripts/verify_task_022.py`: 서비스 레이어 로직 및 동시성 제어, DTO 매핑 검증 스크립트 작성.
+- **검증 결과**:
+    - `python scripts/verify_task_022.py`: **Pass**
+        1. **Fail-Fast Lock**: Lock 점유 상태에서 `submit_answer` 호출 시 `BlockingIOError` 발생 확인.
+        2. **DTO Separation**: Service 메소드 반환값이 Domain Object가 아닌 DTO임을 확인.
+        3. **Admin Query Bypass**: Lock 상태에서도 `AdminQueryService`는 정상 조회됨을 확인 (Read-Only Contract).
+        4. **Creation Flow**: `JobConfig` 스냅샷 기반 세션 생성 및 초기 상태 매핑 확인.
+- **주요 설계 반영**:
+    - **Layered Arch**: API -> DTO -> Service -> Domain 방향성 준수.
+    - **Strict Isolation**: Domain Entity가 API 외부로 절대 노출되지 않도록 Mapper 강제.
+    - **Concurrency Identity**: Session ID 기반 파일 락으로 Race Condition 방지 (Redis 도입 전 임시 조치).
+
