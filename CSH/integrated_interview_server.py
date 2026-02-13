@@ -275,6 +275,48 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Requested-With", "Accept"],
 )
 
+# ========== Trusted Proxy 미들웨어 (SAD: API Gateway 연동) ==========
+# NGINX가 전달하는 X-Forwarded-For, X-Real-IP 헤더를 신뢰하여
+# 원본 클라이언트 IP를 정확히 추적합니다.
+# - 로깅, Rate Limiting, 보안 감사(Audit) 시 실제 클라이언트 IP 사용
+# - NGINX에서 설정한 X-Request-ID를 전파하여 분산 트레이싱 지원
+TRUSTED_PROXIES = os.getenv("TRUSTED_PROXIES", "127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16").split(",")
+
+@app.middleware("http")
+async def trusted_proxy_middleware(request: Request, call_next):
+    """NGINX API Gateway에서 전달된 프록시 헤더를 처리합니다.
+    
+    SAD 설계서 Gateway Layer 연동:
+    - X-Real-IP: NGINX가 설정한 실제 클라이언트 IP
+    - X-Forwarded-For: 프록시 체인을 통과한 IP 목록
+    - X-Forwarded-Proto: 원본 요청의 프로토콜 (http/https)
+    - X-Request-ID: NGINX가 부여한 요청 추적 ID (분산 트레이싱)
+    """
+    # NGINX가 전달한 X-Request-ID를 request.state에 저장 (로깅/트레이싱에 활용)
+    nginx_request_id = request.headers.get("x-request-id")
+    if nginx_request_id:
+        request.state.nginx_request_id = nginx_request_id
+    
+    # X-Real-IP 헤더가 있으면 실제 클라이언트 IP로 사용
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        request.state.client_ip = real_ip
+    else:
+        # X-Forwarded-For에서 첫 번째 IP 추출 (최초 클라이언트)
+        forwarded_for = request.headers.get("x-forwarded-for")
+        if forwarded_for:
+            request.state.client_ip = forwarded_for.split(",")[0].strip()
+        else:
+            request.state.client_ip = request.client.host if request.client else "unknown"
+    
+    response = await call_next(request)
+    
+    # 응답에 X-Request-ID 전파 (프론트엔드 디버깅 지원)
+    if nginx_request_id:
+        response.headers["X-Request-ID"] = nginx_request_id
+    
+    return response
+
 # ========== 지연 시간 측정 미들웨어 (REQ-N-001) ==========
 @app.middleware("http")
 async def latency_measurement_middleware(request: Request, call_next):
