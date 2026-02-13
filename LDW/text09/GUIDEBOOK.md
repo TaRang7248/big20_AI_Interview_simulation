@@ -43,6 +43,21 @@ python server.py
 - 서버는 기본적으로 `http://localhost:5000` 에서 동작합니다.
 - 브라우저가 자동으로 열리지 않을 경우, 주소창에 위 주소를 직접 입력하세요.
 
+### 3단계: Docker를 이용한 실행 방법 (권장)
+Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수 있습니다.
+
+1. **컨테이너 빌드 및 실행**:
+   ```bash
+   docker-compose up --build
+   ```
+   > **주의사항**: 상위 폴더(`.../big20/`)에 `.env` 파일이 존재해야 정상적으로 실행됩니다. (API Key 등 필수 설정 포함)
+
+2. **접속**:
+   웹 브라우저를 열고 `http://localhost:5000`으로 접속합니다.
+   (Docker 환경에서는 브라우저가 자동으로 실행되지 않을 수 있습니다.)
+3. **종료**:
+   `Ctrl + C`를 눌러 서버를 중지하거나, 다른 터미널에서 `docker-compose down`을 실행합니다.
+
 ---
 
 ## 4. 사용 모델 및 라이브러리 목록
@@ -100,5 +115,7 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── static/                  # CSS, JS, 이미지 등 정적 파일
 ├── templates/               # HTML 템플릿 파일
 ├── requirements.txt         # 프로젝트 의존성 패키지 목록
-└── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
+├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
+├── Dockerfile               # 도커 이미지 빌드 설정 파일
+└── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
 ```
