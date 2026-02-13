@@ -12,9 +12,24 @@ from packages.imh_service.admin_query import AdminQueryService
 
 # --- Providers (External Adapters) ---
 
+from packages.imh_qbank.repository import JsonFileQuestionRepository
+from packages.imh_qbank.service import QuestionBankService
+from packages.imh_providers.question import QuestionGenerator
+from packages.imh_providers.mock_question import MockQuestionGenerator
+import os
+
+# --- Providers (External Adapters) ---
+
 @lru_cache
 def get_config() -> IMHConfig:
     return IMHConfig.load()
+
+@lru_cache
+def get_question_generator() -> QuestionGenerator:
+    """
+    Singleton Question Generator (Mock for now).
+    """
+    return MockQuestionGenerator(latency=0.5)
 
 # --- Repositories (Persistence) ---
 
@@ -42,26 +57,36 @@ def get_session_history_repository() -> SessionHistoryRepository:
     """
     return FileHistoryRepository()
 
-# --- Infrastructure Services ---
-
 @lru_cache
-def get_concurrency_manager() -> ConcurrencyManager:
+def get_question_repository() -> JsonFileQuestionRepository:
     """
-    Singleton Concurrency Manager (File Lock).
+    Singleton Question Bank Repository (File-based).
     """
-    return ConcurrencyManager()
+    # Hardcoded path for now, should be in config
+    base_dir = os.path.join(os.getcwd(), "data", "qbank")
+    file_path = os.path.join(base_dir, "questions.json")
+    return JsonFileQuestionRepository(file_path=file_path)
 
 # --- Domain Services (Application Logic) ---
+
+@lru_cache
+def get_question_bank_service() -> QuestionBankService:
+    """
+    Singleton Question Bank Service.
+    """
+    return QuestionBankService(repository=get_question_repository())
 
 def get_session_service() -> SessionService:
     """
     Transient Session Service.
-    Injected with Singleton Repositories.
+    Injected with Singleton Repositories and Services.
     """
     return SessionService(
         state_repo=get_session_state_repository(),
         history_repo=get_session_history_repository(),
-        job_repo=get_job_posting_repository()
+        job_repo=get_job_posting_repository(),
+        question_generator=get_question_generator(),
+        qbank_service=get_question_bank_service()
     )
 
 def get_admin_query_service() -> AdminQueryService:

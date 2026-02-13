@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from enum import Enum
 from .policy import InterviewMode
 
 class SessionConfig(BaseModel):
@@ -31,3 +32,34 @@ class SessionContext(BaseModel):
     completed_questions_count: int = 0
     early_exit_signaled: bool = False # Signal from Evaluation Layer
     history: list = Field(default_factory=list)
+    
+class SessionQuestionType(str, Enum):
+    STATIC = "STATIC"
+    GENERATED = "GENERATED"
+
+class SessionQuestion(BaseModel):
+    """
+    Represents a question in the session.
+    Value Object that is part of the Session Snapshot.
+    """
+    id: str
+    content: str
+    source_type: SessionQuestionType
+    source_metadata: dict = Field(default_factory=dict)
+    
+class SessionContext(BaseModel):
+    """
+    Runtime context for a session.
+    Represents the Hot State (Redis-like).
+    """
+    session_id: str
+    job_id: str
+    status: str
+    started_at: Optional[float] = None # Timestamp
+    current_step: int = 0
+    completed_questions_count: int = 0
+    early_exit_signaled: bool = False # Signal from Evaluation Layer
+    
+    # Snapshot Data
+    current_question: Optional[SessionQuestion] = None
+    question_history: list = Field(default_factory=list) # List of SessionQuestion

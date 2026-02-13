@@ -13,7 +13,7 @@
   반드시 `interview_env` 활성화 상태에서 수행한다.
 - 글로벌(시스템) Python 환경에 패키지 설치는 금지한다.
 
-# 검증 상태 요약 (Phase 1 ~ Phase 6, TASK-004 ~ TASK-024)
+# 검증 상태 요약 (Phase 1 ~ Phase 7, TASK-004 ~ TASK-025)
 
 # Phase 1 ~ Phase 4. Core Processing & Report Layer
 
@@ -74,6 +74,62 @@
 - Admin Query Read-Only 경계 확정
 
 ---
+
+# Phase 6. Service Layer & API Boundary 고정 (TASK-022 ~ TASK-023)
+
+## 5. Service & API Layer Stabilization
+
+- Service Layer / Engine Layer 책임 분리 고정
+- Command / Query 분리 계약(CQRS) 적용 완료
+- DTO / Mapper 분리 적용 완료
+- Fail-Fast 동시성 정책 적용 완료
+- API Guardrail(AST) 적용 완료
+- Engine 경계 침범 없음 검증 완료
+- Scope Lock 위반 없음 확인
+
+📌 **Phase 6 종료 상태**
+- Service/API 경계 고정
+- Engine 정책 주체 고정
+- 동시성 및 예외 처리 정책 확정
+
+---
+
+# Phase 7. Question Bank & RAG Fallback Integration
+
+## 6. Question Bank 구조 정비 (TASK-024)
+
+- Source 계층 정의(STATIC / GENERATED ORIGIN) 계약 확정
+- Soft Delete 정책 도입 및 후보군 필터링 검증 완료
+- Session Snapshot 독립성 유지 확인
+- Engine/Service 경계 침범 없음 검증 완료
+- Generated 질문의 Session-local 자산 정책 확정
+- Static Question Bank 승격(Promotion) 금지 정책 유지
+
+---
+
+## 7. RAG Fallback Engine 통합 (TASK-025)
+
+- SessionEngine 단일 판단 주체(Fallback Authority) 계약 확정
+- 3-Tier 전략 구현 검증 완료:
+  - RAG 생성 시도
+  - Static QBank Fallback
+  - Emergency Safe Fallback
+- Fallback은 상태 전이(State Contract)를 유발하지 않음 검증 완료
+- Snapshot Value Object 불변성 유지 확인
+- Generated 질문은 Snapshot에 Value로 고정됨 검증 완료
+- Snapshot Independence 검증 완료 (Provider 변경 시 기존 세션 영향 없음)
+- Freeze 계약 침범 없음 확인
+- Engine 외부에서 질문 Source 변경 경로 없음 확인
+- 동시성(File Lock 기반) 보호 유지 확인
+- Contract Stability 재검증 완료 (위반 없음)
+
+📌 **Phase 7 현재 상태**
+- Question Source 이중 구조 안정화
+- RAG 실패 시 면접 흐름 Always-On 보장
+- Engine 권한 단일화 유지
+- Snapshot 오염 없음 (metadata controlled openness 상태)
+- 전체 계약(Freeze / Snapshot / State Contract) 보호 유지
+
 
 # Phase 6. Service & API Boundary 확정
 
@@ -154,11 +210,13 @@
   - 1단계: **API 기반 모델로 핵심 기능을 빠르게 구현**
   - 2단계: **on-premise 모델로 교체하여 성능/비용 최적화**
 - 모든 모델은 **API / Local(on-prem)** 방식으로 언제든 교체 가능하도록 추상화한다.
+- 질문 생성(RAG/LLM) 또한 Provider 추상화를 통해 교체 가능하도록 설계한다.
+- Engine은 정책 판단의 단일 주체이며, 외부 모델은 수동적 공급자 역할만 수행한다.
 
 ---
 ## 2. 현재 개발 단계
 
-- 상태: **Phase 6 완료 → Phase 7 진행 중 (질문은행 구조 정비 완료 상태)**
+- 상태: **Phase 7 완료 → 구조 안정화 단계 진입**
 
   - Phase 5 완료: End-to-End 인터뷰 실행 아키텍처 통합 구현 완료 (TASK-021)
     - 세션 엔진 통합
@@ -174,25 +232,39 @@
     - Fail-Fast 동시성 정책 적용
     - Runtime Entry 확정
     - API Guardrail(AST) 적용
-    - (세부 구현: Service Layer 구축, API Adapter, Runtime Bootstrap 완료)
+    - API → Service → Engine 단일 Command 경로 고정
+    - Engine 외부 정책 판단 경로 차단
 
-  - Phase 7 진행 중:
+  - Phase 7 완료:
     - 질문은행 구조 정비 완료 (TASK-024)
       - Source 계층 정의 (Static Origin / Generated Origin)
       - Soft Delete 정책 도입
       - Session Snapshot과 완전 독립(Value Object) 구조 검증
       - Engine/Service 경계 침범 없음 확인
-    - RAG Fallback 전략 정의 예정 (TASK-025)
-    - Snapshot 계약 침범 금지 원칙 유지
+
+    - RAG Fallback 엔진 통합 완료 (TASK-025)
+      - SessionEngine 단일 판단 주체(Fallback Authority) 고정
+      - 3-Tier 전략 구현:
+        1) RAG 생성 시도
+        2) Static QBank Fallback
+        3) Emergency Safe Fallback
+      - Fallback은 상태 전이를 유발하지 않음 검증 완료
+      - Snapshot Value Object 불변성 유지 검증 완료
+      - Generated 질문은 Snapshot에 Value로 고정됨
+      - Freeze 계약 침범 없음 확인
+      - Snapshot Independence 검증 완료
+      - 동시성(File Lock 기반) 보호 유지 확인
+      - Contract Stability 재검증 완료 (위반 없음)
 
   - (설계 기준)
     - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 고정
     - 통합 실행 아키텍처 기준 문서 고정
     - Phase 5 핵심 계약은 변경 불가 기준선으로 유지
+    - Engine 단일 정책 판단 구조 확정
 
 ---
 
-### 완료 항목 (Phase 1 ~ Phase 7 현재까지 결과)
+### 완료 항목 (Phase 1 ~ Phase 7 결과)
 
 - Analysis 결과를 입력으로 받아 정량 점수 및 평가 근거(Evidence)를 산출하는 Rule-based Evaluation Engine 구현 및 검증 완료 (TASK-011)
 - 평가 결과를 사용자 친화적 리포트(JSON)로 변환하는 Reporting Layer 구현 완료 (TASK-012)
@@ -214,7 +286,7 @@
 
 - API 인터페이스 계층 및 Runtime Entry 확정 완료 (TASK-023)
   - API → Service → Engine 단일 Command 경로 고정
-  - 실제 병렬 API 요청 경쟁 기반 Fail-Fast 검증 완료 (Hardening Patch v2)
+  - 병렬 API 요청 경쟁 기반 Fail-Fast 검증 완료 (Hardening Patch v2)
   - AST 기반 Import Guardrail 적용 완료
   - Phase 5 계약(Freeze / Snapshot / State Contract) 침범 없음 확인
 
@@ -225,46 +297,52 @@
   - Snapshot과 완전 독립(Value Object) 구조 확정
   - 과거 세션 무결성 보존 검증 완료
 
+- RAG Fallback 엔진 통합 완료 (TASK-025)
+  - Engine 단일 판단 주체 확정
+  - Generated / Static Source 분리 유지
+  - Emergency Safe Fallback 보장
+  - Snapshot 오염 없음 (Controlled Metadata 상태)
+  - Contract Stability 검증 완료
+
 📌 **현재 기준선**
-- Phase 5 핵심 계약 고정
+- Phase 5 핵심 계약 고정 (Freeze / Snapshot / State Contract)
 - Phase 6 서비스/외부 경계 고정
-- Phase 7 질문 자산 레이어 안정화 완료
-- 외부 런타임 진입점 확정
+- Phase 7 질문 자산 및 RAG Fallback 구조 안정화 완료
+- Engine 정책 단일화 구조 확정
 - 구조 계약 위반 방지 가드레일 확보
+- Always-On 인터뷰 흐름 보장
 
 ---
 
 ### 미포함 항목 (향후 단계)
 
-- **Phase 7 (진행 예정)**
-  - RAG Fallback 엔진 통합 (TASK-025)
-  - LLM 기반 질문 생성 로직을 Engine 경계 내에서 통합
-  - Generated Origin 확장
-  - Snapshot 계약 침범 없는 동적 질문 연결 구조 확정
-
 - **Phase 8: DB 정식 전환 (PostgreSQL / Redis)**
   - 파일 기반 저장소 → RDB 전환
   - 세션 상태 관리 Redis 도입
+  - Snapshot 영속화 전략 확정
+  - Metadata size guard 도입 고려
 
 - **Phase 9: 운영 통계 및 고도화**
   - 관리자 통계 대시보드
   - Query 전용 확장
+  - 질문 품질 점수 도입 가능성 검토
 
 - **기타**
   - 실제 프론트엔드 UI 구현(면접자/관리자 화면)
   - 외부 인증/권한 체계(SSO, OAuth 등)
   - 운영 환경 배포/모니터링/로그 집계 인프라
   - 고도화된 평가 모델(ML 기반, CV/Audio 모델 교체 등)
+  - Streaming 기반 LLM 연동은 구조 검토 후 별도 Phase로 분리
 
 ---
 
-### 현재 Phase의 목적 (Phase 7 목표)
+### 현재 Phase의 목적 (구조 안정화 단계 목표)
 
-- RAG Fallback 엔진 통합
-- LLM 기반 질문 생성 로직을 Engine 경계 내에서 통합
-- Snapshot 계약 침범 없이 질문 생성/평가/상태 전이 경계 유지
-- 질문 생성 + Evaluation 결과 + LLM 해석을 결합한 확장 가능한 인터뷰 흐름 구조 확정
-- API/Service 경계를 유지한 채 확장 가능한 오케스트레이션 구조 고도화
+- RAG Fallback 구조의 운영 안정성 강화
+- Snapshot 메타데이터 통제 전략 확정
+- Phase 8 영속화 전환 대비 구조 점검
+- Engine 단일 정책 구조 유지
+- 확장 시 계약 붕괴 방지 구조 강화
 
 
 ## 3. 확정된 핵심 방향 (변경 금지)
@@ -276,47 +354,67 @@
    - 문서(PDF) 업로드 → Text 추출(PDF→Text)
    - 목적: 개발/검증/테스트 하네스(Regression) 역할 유지
    - Phase 6 이후에도 독립 테스트 환경으로 유지
+   - Session Engine / Snapshot 구조와 완전히 분리 유지
 
-2. **현재 최우선: Phase 7 “질문은행 및 RAG 통합 설계”**
-   - 기존 Session Engine / State Contract / Snapshot 계약을 침범하지 않는 방식으로
-     질문 생성 계층을 통합
-   - 질문 출처(Source) 분리 구조 설계
-   - RAG Fallback 전략 정의 (정책 스펙 불변 유지 조건)
+2. **Phase 7 완료: 질문은행 + RAG Fallback 통합 구조 확정**
+   - Session Engine 단일 정책 판단 구조 유지
+   - Question Source 분리 구조 확정:
+     - STATIC (Question Bank)
+     - GENERATED (RAG/LLM)
+   - RAG 실패 시 3-Tier 전략 고정:
+     1) RAG 생성 시도
+     2) Static QBank Fallback
+     3) Emergency Safe Fallback
+   - Fallback은 상태 전이를 유발하지 않음 (State Contract 불변)
+   - Generated 질문은 Snapshot에 Value Object로 고정
+   - Freeze / Snapshot / State Contract 계약 침범 금지
+   - Engine 외부에서 질문 Source 변경 경로 금지
 
 3. **TTS(Text→Speech)**
    - 실시간 면접 단계의 구성요소
    - 현재는 HOLD 유지
-   - 질문 생성 계층(RAG) 안정화 이후 재개
+   - 질문 생성 계층(RAG) 및 Snapshot 안정화 이후 재개
+   - Engine 경계 침범 없이 Provider 방식으로 통합 예정
 
 4. **RAG / 질문은행 / 임베딩**
    - 온프레미스 저성능 모델 보정 목적
    - 질문 품질 안정화 및 직무/공고 기반 보강
-   - Phase 7 범위에서 통합 설계 및 점진적 적용
+   - Phase 7에서 Fallback 구조까지 안정화 완료
+   - 향후 Phase 8에서는:
+     - PGVector / 외부 RAG 도입 가능
+     - Engine 경계 불변 유지
    - Snapshot 계약과 충돌 금지
+   - metadata는 최소 집합 유지 (Snapshot 오염 방지)
 
 5. **UI/프론트 연동**
    - API 및 질문 생성 계층 안정화 이후 확장
+   - API → Service → Engine 단일 Command 경로 유지
    - Command/Query 분리 원칙 유지
    - 상태 전이(State Contract) API 우회 금지
+   - 질문 Source 조작 API 금지
 
 ---
 
 - (세션 상태) APPLIED / IN_PROGRESS / COMPLETED / INTERRUPTED / EVALUATED
   → 기준 상태값으로 유지 (변경 금지)
+  → Fallback은 해당 상태에 영향을 주지 않음
 
 ---
 
 ### 3.2 모델 구성 (현재 기준)
 
 | 분석 항목 | 모델 | 실행 환경 |
-|---------|------|-----------|
+|----------|------|-----------|
 | STT | Faster-Whisper | GPU (VRAM ~1GB) |
 | LLM | GPT-4o / Qwen3-4B / A.X-4.0-Light / EXAONE 7.8B / Llama3.1-KO | GPU (~4.5GB) |
 | Emotion | DeepFace | CPU (1fps) |
 | Visual | MediaPipe | CPU |
 | Voice | Parselmouth | CPU |
 
-※ 모델 교체 가능, 인터페이스 고정
+※ 모델 교체 가능 (Provider 인터페이스 고정)
+※ Engine은 모델에 의존하지 않음 (정책 판단 분리 유지)
+※ RAG/LLM은 동기 Request/Response 방식 기준으로 통합 완료
+※ Streaming 방식은 별도 Phase에서 구조 검토 후 도입
 
 ---
 
@@ -467,6 +565,12 @@ IMH/IMH_Interview/
     - Session Immutability(Edit/Delete Tolerant) 검증 완료 (`verify_task_024.py`)
     - Engine/Service 경계 준수(단방향 의존) 확인
 
+  - TASK-025: RAG Fallback 엔진 통합 완료
+    - Session Engine 내 RAG -> Fallback -> Emergency 전략 구현
+    - `QuestionGenerator` (Mock) 및 `QBankService` 통합
+    - `SessionQuestion` Value Object 기반 Snapshot 불변성 보장
+    - `verify_task_025.py` 검증 PASS (Success/Fallback/Critical/Snapshot 시나리오)
+
 - `IMH/api/`: ✅ DONE
   - TASK-014: 리포트 조회 API 노출
     - 리포트 목록(List) / 상세(Detail) 조회 API 구현
@@ -555,18 +659,24 @@ IMH/IMH_Interview/
 
 ## 9. 지금 당장 하면 안 되는 것 (중요)
 
-아래 항목은 현재 단계(Phase 7 초입)에서 **명시적으로 금지**한다.
+아래 항목은 현재 단계(Phase 7 완료 → 구조 안정화 단계)에서 **명시적으로 금지**한다.
 
-- DB 마이그레이션/스키마 확정(ERD 반영 구현 포함)
+- DB 마이그레이션/스키마 확정(ERD 반영 구현 포함)  
+  → Phase 8에서 별도 계약 하에 진행
 - 실시간 면접의 네트워크/스트리밍 인프라 구현(WebRTC/저지연 스트리밍 파이프라인)
 - LLM 평가 엔진의 대규모 재구현(루브릭/스코어링 로직 재설계)
 - 신규 도메인 확장 목적의 엔드포인트 대량 생성 (Phase 6 범위 외 기능 확장 금지)
 - 프론트/UI 개발(대시보드/관리자 화면 포함)
+- Streaming 기반 LLM 구조 전환(Async/WebSocket 전환 포함)
 - Phase 5에서 확정된 상태 ENUM / Snapshot 계약 / Freeze 계약 변경
 - TASK-022에서 확정된 Service Layer 구조(명령/조회 분리, DTO 격리, Lock 정책) 변경
+- Engine 단일 정책 판단 구조 변경
+- Question Source 구조(STATIC / GENERATED) 변경
+- Generated 질문의 Session-local 자산 정책 변경
+- Fallback 3-Tier 전략 변경
 
-> 현재는 “질문은행 및 RAG 통합 엔진을 설계/구현하는 단계”이며,  
-> 핵심 정책/상태/스냅샷 계약은 변경하지 않는다.
+> 현재는 “RAG Fallback 구조 안정화 및 계약 보호 단계”이며,  
+> 핵심 정책/상태/스냅샷/엔진 경계 계약은 변경하지 않는다.
 
 ---
 
@@ -574,25 +684,39 @@ IMH/IMH_Interview/
 
 ## ACTIVE
 
-## Next Approval Target (Phase 7)
-- **TASK-025 RAG Fallback 엔진 통합**
-  - 생성 모델 실패 시 질문은행 Fallback 트리거 정책 연결
-  - Snapshot 계약 침범 방지 하에 통합
+### Phase 7 안정화 및 구조 고정 검증
+
+- RAG Fallback 통합 이후 운영 안정성 검증
+- Snapshot 메타데이터 통제 전략 유지
+- Engine 단일 정책 판단 구조 유지
+- Contract Stability 추가 검증
+- Phase 8 전환 대비 구조 리스크 점검
+
+---
+
+## Next Approval Target (Phase 8 준비 단계)
+
+- **DB 영속화 전환 설계 (PostgreSQL / Redis)**
+  - Snapshot 영속화 전략 정의
+  - Metadata Size Guard 정책 도입 여부 검토
+  - File 기반 저장소 → RDB 전환 설계
+  - Engine 계약 침범 없는 Repository 교체 전략 수립
 
 - **승인 절차**:
-  - `TASK-025_PLAN.md` 작성이 다음 에이전트의 첫 번째 목표가 된다.
-
+  - `TASK-026_PLAN.md` (Phase 8 설계 문서)가 다음 에이전트의 첫 번째 목표가 된다.
 
 ---
 
 ## HOLD
 
 ### TASK-016 TTS Provider (Text → Speech)
+
 - **Goal**:
   - AI 면접 질문을 음성(TTS)으로 출력하기 위한 Provider 계층 준비
 - **보류 사유**:
-  - TTS는 실시간 면접 세션 엔진의 질문 출력 구조가
-    명확히 정의된 이후에 통합하는 것이 적절함
+  - 질문 생성 계층(RAG Fallback) 구조는 확정되었으나,
+    실시간 면접 출력 흐름은 Phase 8 이후에 안정적으로 통합하는 것이 적절함
 - **재개 조건**:
-  - 질문 생성 계층(RAG) 구조 확정
-  - Engine 경계 내 질문 생성 흐름 안정화
+  - DB 전환 이후 Snapshot 영속화 안정화
+  - Engine 경계 내 질문 생성 흐름 장기 안정성 검증 완료
+  - Streaming 전략 별도 승인 후 진행

@@ -18,10 +18,19 @@ class SessionService:
     2. Concurrency Control (Locking)
     3. Orchestrating Engine calls
     """
-    def __init__(self, state_repo: SessionStateRepository, history_repo: SessionHistoryRepository, job_repo: "JobPostingRepository"):
+    def __init__(
+        self, 
+        state_repo: SessionStateRepository, 
+        history_repo: SessionHistoryRepository, 
+        job_repo: "JobPostingRepository",
+        question_generator: "QuestionGenerator",
+        qbank_service: "QuestionBankService"
+    ):
         self.state_repo = state_repo
         self.history_repo = history_repo
         self.job_repo = job_repo
+        self.question_generator = question_generator
+        self.qbank_service = qbank_service
         self.concurrency_manager = ConcurrencyManager()
     
     def create_session_from_job(self, job_id: str, user_id: str) -> SessionResponseDTO:
@@ -57,7 +66,9 @@ class SessionService:
             session_id=session_id,
             config=config,
             state_repo=self.state_repo,
-            history_repo=self.history_repo
+            history_repo=self.history_repo,
+            question_generator=self.question_generator,
+            qbank_service=self.qbank_service
         )
         
         # 3. Start Session (State Transition: APPLIED -> IN_PROGRESS)
@@ -78,18 +89,6 @@ class SessionService:
                 raise ValueError(f"Session {session_id} not found")
 
             # 3. Instantiate Engine
-            # We need the config to instantiate engine. Assuming config is stored in repo or we need to pass it?
-            # InterviewSessionEngine needs config. 
-            # If state_repo only stores context, we might be missing config persistence?
-            # Creating a dummy config for now as we are relying on loaded context state mostly?
-            # STRICTNESS: The Engine requires config. 
-            # Let's assume for this mock implementation we can retrieve it or pass a dummy if only state matters for process_answer.
-            # But in reality, we need to load the Job Policy Snapshot.
-            # For now, we'll try to reconstruct or assume it's available.
-            # Correct approach: SessionService should load the Config/Snapshot associated with the session.
-            # Since we don't have that in `state_repo.get_state` (it returns SessionContext), we have a gap.
-            # Proceeding with a workaround: Assume config is not critical for `process_answer` logic OR use a dummy check.
-            # 3. Instantiate Engine
             # Recreate config from Immutable Job (Phase 5 principle)
             job_id = context.job_id
             job = self.job_repo.find_by_id(job_id)
@@ -103,25 +102,15 @@ class SessionService:
                 session_id=session_id,
                 config=config, 
                 state_repo=self.state_repo,
-                history_repo=self.history_repo
+                history_repo=self.history_repo,
+                question_generator=self.question_generator,
+                qbank_service=self.qbank_service
             )
             
             # Force context to be the loaded one (Engine does this in init)
 
             # 4. Delegate to Engine (Command)
-            # Adapting: Engine doesn't take content, so likely we should save content here if needed?
-            # Task Plan says: "session.submit_answer(input_data)".
-            # Since Engine.process_answer takes duration, we map calls.
             duration = answer_dto.duration_seconds if answer_dto.duration_seconds else 0.0
-            
-            # NOTE: Engine.process_answer mainly advances state. 
-            # We assume answer content persistence is handled by Engine or History Repo implicitly or explicitly?
-            # If Engine.process_answer(duration) doesn't take content, where does text go?
-            # Reviewing Engine: process_answer usually calculates score or just moves to next Q.
-            # If we need to save answer content, we might need a separate call or Repo update.
-            # For this verification scope, we focus on State Transition.
-            # Adding dummy content processing if needed by Engine?
-            # Engine signature for process_answer was (duration_sec: float).
             
             engine.process_answer(duration_sec=duration)
             

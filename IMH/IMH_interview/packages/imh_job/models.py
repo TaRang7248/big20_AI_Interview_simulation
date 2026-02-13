@@ -4,8 +4,8 @@ from pydantic import BaseModel, Field, PrivateAttr, validator, model_validator
 
 from .enums import JobStatus
 from .errors import JobStateError, PolicyValidationError
-from imh_session.dto import SessionConfig
-from imh_session.policy import InterviewMode
+from packages.imh_session.dto import SessionConfig
+from packages.imh_session.policy import InterviewMode
 
 class JobPolicy(BaseModel):
     """

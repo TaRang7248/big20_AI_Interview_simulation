@@ -331,8 +331,6 @@
 
 ---
 
-## ACTIVE
-
 ### TASK-025 RAG Fallback 엔진 통합
 - **Goal**:
   - LLM 질문 생성 실패 시 질문은행을 Fallback으로 사용하는 로직을 통합한다.
@@ -341,14 +339,10 @@
   - (초기 구현) PGVector 없이도 Embedding Provider + 로컬/메모리 인덱스 기반 유사도 검색으로 시작 가능 (정식 벡터DB는 Out of Scope 유지)
   - Fallback 트리거 정책 정의
   - Snapshot 계약 침범 방지 하에 통합
-- **Out of Scope**:
-  - PGVector 정식 도입
-- **Dependencies**:
-  - TASK-024 (질문은행) 완료
-
-## BACKLOG
+- **Verification**: `python scripts/verify_task_025.py` Pass
 
 ---
+## ACTIVE
 
 ### TASK-026 PostgreSQL 도입 (공고/세션/평가 영속화)
 - **Goal**:
@@ -362,8 +356,7 @@
   - Phase 7 완료
   - 데이터 아키텍처 설계 문서(예: docs/26.02.05(목)데이터 아키텍쳐,ERD 가이드.md)
 
-
----
+## BACKLOG
 
 ### TASK-027 Redis 세션 상태 도입
 - **Goal**:

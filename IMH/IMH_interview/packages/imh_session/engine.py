@@ -2,9 +2,13 @@ import logging
 import time
 from typing import Optional
 from .state import SessionStatus, SessionEvent, TerminationReason
-from .dto import SessionConfig, SessionContext
+from .dto import SessionConfig, SessionContext, SessionQuestion, SessionQuestionType
 from .policy import get_policy, InterviewMode
 from .repository import SessionStateRepository, SessionHistoryRepository
+from packages.imh_providers.question import QuestionGenerator
+from packages.imh_qbank.service import QuestionBankService
+import uuid
+import random
 
 # Logger setup
 logger = logging.getLogger("imh.session")
@@ -13,19 +17,23 @@ class InterviewSessionEngine:
     """
     Core Logic for Interview Session.
     Orchestrates state transitions and policy enforcement.
-    Strict compliance with TASK-017_PLAN.md.
+    Strict compliance with TASK-017_PLAN.md & TASK-025_PLAN.md.
     """
     def __init__(
         self,
         session_id: str,
         config: SessionConfig,
         state_repo: SessionStateRepository,
-        history_repo: SessionHistoryRepository
+        history_repo: SessionHistoryRepository,
+        question_generator: QuestionGenerator,
+        qbank_service: QuestionBankService
     ):
         self.session_id = session_id
         self.config = config
         self.state_repo = state_repo
         self.history_repo = history_repo
+        self.question_generator = question_generator
+        self.qbank_service = qbank_service
         
         # Initialize Policy
         self.policy = get_policy(self.config.mode)
@@ -40,8 +48,66 @@ class InterviewSessionEngine:
             return existing
         return SessionContext(
             session_id=self.session_id,
-            job_id=self.config.job_id or "UNKNOWN", # Fallback if None, or change Context strictness
+            job_id=self.config.job_id or "UNKNOWN", 
             status=SessionStatus.APPLIED
+        )
+
+    def _get_next_question(self) -> SessionQuestion:
+        """
+        TASK-025: Determine the next question using RAG -> Fallback strategy.
+        Strict Immutable Rule: Engine decides source.
+        """
+        # 1. Prepare Context for Generator
+        # We can pass job info, history, etc.
+        gen_context = {
+            "job_id": self.context.job_id, 
+            "step": self.context.current_step + 1,
+            # Add more context as needed (e.g. previous answers)
+        }
+
+        # 2. Try RAG Generation (Primary Strategy)
+        try:
+            # Check policy or config if we should even try RAG (Optional, for now assume yes)
+            result = self.question_generator.generate_question(gen_context)
+            
+            if result.success:
+                logger.info(f"RAG Generation Success for session {self.session_id}")
+                return SessionQuestion(
+                    id=str(uuid.uuid4()),
+                    content=result.content,
+                    source_type=SessionQuestionType.GENERATED,
+                    source_metadata=result.metadata
+                )
+            else:
+                logger.warning(f"RAG Generation Failed: {result.error}. Triggering Fallback.")
+        except Exception as e:
+            logger.error(f"RAG Generation Exception: {e}. Triggering Fallback.")
+
+        # 3. Fallback to Static QBank (Secondary Strategy)
+        # Fetch candidates
+        candidates = self.qbank_service.get_candidates(
+            # We assume we can get job_role from config or job_id (here just passing None for simplicity or need lookup)
+            # ideally config has job_role
+            tags=["BEHAVIORAL"] # Default tag for generic fallback?
+        )
+        
+        if not candidates:
+             # Critical Failure: Safe Fallback Set
+             logger.error("CRITICAL: Static QBank Empty! Using Emergency Question.")
+             return SessionQuestion(
+                 id="emergency-fallback",
+                 content="Please introduce yourself and your key strengths.",
+                 source_type=SessionQuestionType.STATIC,
+                 source_metadata={"note": "Emergency Fallback"}
+             )
+             
+        # Select one random candidate
+        selected = random.choice(candidates)
+        return SessionQuestion(
+            id=selected.id,
+            content=selected.content,
+            source_type=SessionQuestionType.STATIC,
+            source_metadata={"bank_id": selected.id, "tags": selected.tags}
         )
 
     def start_session(self):
@@ -52,8 +118,13 @@ class InterviewSessionEngine:
         
         logger.info(f"Starting session {self.session_id}")
         self._update_status(SessionStatus.IN_PROGRESS)
-        self.context.current_step = 1  # 1-indexed for user facing, or 0? 
-        # Plan says "First question start". Let's assume 1-based index for step count.
+        self.context.current_step = 1
+        
+        # Prepare First Question
+        next_q = self._get_next_question()
+        self.context.current_question = next_q
+        self.context.question_history.append(next_q)
+        
         self._commit_state()
 
     def process_answer(self, duration_sec: float):
@@ -124,8 +195,14 @@ class InterviewSessionEngine:
                 self.terminate_session(TerminationReason.EARLY_EXIT_SIGNAL)
                 return
 
-        # Continue to next step
+        # Prepare Next Step
         self.context.current_step += 1
+        
+        # Fetch Next Question
+        next_q = self._get_next_question()
+        self.context.current_question = next_q
+        self.context.question_history.append(next_q)
+        
         self._commit_state()
 
     def _check_early_exit_signal(self) -> bool:
