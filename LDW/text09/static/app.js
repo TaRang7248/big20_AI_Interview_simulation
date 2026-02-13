@@ -624,7 +624,8 @@ async function handleStartInterview() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 id_name: AppState.currentUser.id_name,
-                job_title: job.job
+                job_title: job.job,
+                announcement_id: job.id
             })
         });
         const startResult = await startResp.json();
