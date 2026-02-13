@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
-from .policy import InterviewMode, get_policy
+from .policy import InterviewMode
 
 class SessionConfig(BaseModel):
     """
@@ -14,6 +14,7 @@ class SessionConfig(BaseModel):
     early_exit_enabled: bool = Field(default=False, description="Whether early exit based on score is enabled")
     mode: InterviewMode = Field(default=InterviewMode.ACTUAL, description="Session Mode: ACTUAL or PRACTICE")
     job_id: Optional[str] = Field(default=None, description="Linked Job Posting ID (if applicable)")
+    result_exposure: str = Field(default="AFTER_14_DAYS", description="Result exposure policy (Snapshot)")
     
     # Contract: min_question_count must default to 10 as per policy
     

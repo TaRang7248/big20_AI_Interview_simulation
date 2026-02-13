@@ -447,3 +447,20 @@ Plan 수립
     - `scripts/verify_task_020.py`: Validation(Length, Weakness Rejection) 테스트 케이스 추가 및 검증 완료.
 - **검증 결과**: `Ran 8 tests in 0.061s OK` (All Cases Pass)
 
+### TASK-021 End-to-End 인터뷰 실행 아키텍처 통합 (Integration)
+- **요약**: Session Engine, Job Policy Engine, Mode Policy, Admin Query Layer를 통합하여 전체 면접 실행 흐름을 구현.
+- **변경 사항**:
+    - `packages/imh_job/models.py`: `create_session_config`에 `result_exposure` 스냅샷 로직 추가.
+    - `packages/imh_session/dto.py`: `SessionConfig`에 `result_exposure` 필드 추가.
+    - `packages/imh_session/engine.py`: `SessionContext` 생성 시 `job_id` 주입 로직 보완.
+    - `scripts/verify_task_021.py`: 통합 검증 스크립트 작성 (Job Freeze, Snapshot, Mode Policy, Admin Query 흐름 검증).
+- **검증 결과**:
+    - `python scripts/verify_task_021.py`: **Pass**
+        1. **Job Policy Freeze**: PUBLISHED 상태 공고의 정책 수정 차단 확인.
+        2. **Session Snapshot**: 공고 정책 변경이 기존 세션 스냅샷에 영향 주지 않음을 확인.
+        3. **Actual Mode Flow**: 중단 시 Resume 불가(Strict) 확인.
+        4. **Practice Mode Flow**: 중단 시 Resume 가능(Flexible) 확인.
+- **주요 계약 반영**:
+    - **Snapshot Double Lock**: Job Policy(Template) -> Session Config(Instance) 이중 잠금 체계 완성.
+    - **Result Exposure**: 평가 공개 정책이 스냅샷에 포함되어 Evaluation Engine으로 전달됨을 보장.
+

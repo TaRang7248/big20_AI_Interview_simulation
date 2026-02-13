@@ -83,7 +83,7 @@ class Job(BaseModel):
     def policy(self, value: JobPolicy):
         # Allow assignment only in DRAFT state
         if self.status != JobStatus.DRAFT:
-             raise PolicyValidationError(
+            raise PolicyValidationError(
                 f"Cannot update AI-Sensitive policy fields in {self.status} state. "
                 "Job Posting is an Immutable AI Evaluation Schema."
             )
@@ -124,7 +124,7 @@ class Job(BaseModel):
         Update metadata. Allowed in DRAFT/PUBLISHED.
         """
         if self.status == JobStatus.CLOSED:
-             raise JobStateError("Cannot update metadata for CLOSED job.")
+            raise JobStateError("Cannot update metadata for CLOSED job.")
         self.metadata.update(new_metadata)
 
     def create_session_config(self) -> SessionConfig:
@@ -138,5 +138,6 @@ class Job(BaseModel):
             silence_timeout_sec=self.policy.silence_timeout_sec,
             mode=self.policy.mode,
             job_id=self.job_id,
+            result_exposure=self.policy.result_exposure,
             early_exit_enabled=False
         )

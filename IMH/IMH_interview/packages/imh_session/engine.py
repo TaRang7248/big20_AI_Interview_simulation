@@ -40,6 +40,7 @@ class InterviewSessionEngine:
             return existing
         return SessionContext(
             session_id=self.session_id,
+            job_id=self.config.job_id or "UNKNOWN", # Fallback if None, or change Context strictness
             status=SessionStatus.APPLIED
         )
 

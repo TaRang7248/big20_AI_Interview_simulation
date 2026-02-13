@@ -276,7 +276,6 @@
   - 리포트 조회 API 계약(TASK-014) 및 UI 소비 규격(TASK-015)
 
 ---
-## ACTIVE
 
 ### TASK-021 세션 중단 표기/처리 규격 (Interrupt Handling & Visibility)
 - **Goal**:
@@ -293,8 +292,7 @@
   - TASK-020 관리자 조회 규격 확정
 
 ---
-
-## BACKLOG
+## ACTIVE
 
 ### TASK-022 질문은행 구조 정비 (Question Bank Structuring)
 - **Goal**:
@@ -310,6 +308,8 @@
   - 질문 태그 설계 문서
 
 ---
+
+## BACKLOG
 
 ### TASK-023 RAG Fallback 엔진 통합
 - **Goal**:
