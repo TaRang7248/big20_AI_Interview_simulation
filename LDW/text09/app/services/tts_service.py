@@ -3,7 +3,7 @@ import uuid
 import edge_tts
 from ..config import TTS_FOLDER, logger
 
-async def generate_tts_audio(text, voice="ko-KR-HyunsuMultilingualNeural"):
+async def generate_tts_audio(text, voice="fr-FR-RemyMultilingualNeural"):
     """
     Generates TTS audio using Microsoft Edge TTS and saves it to a file.
     Returns the relative path to the audio file.
