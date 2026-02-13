@@ -5,20 +5,24 @@ from ..database import get_db_connection, logger
 from ..services.llm_service import client
 from ..services.pdf_service import convert_pdf_to_images
 
-def analyze_interview_result(interview_number, job_title, applicant_name, id_name):
+def analyze_interview_result(interview_number, job_title, applicant_name, id_name, announcement_id=None):
     logger.info(f"Analyzing interview result for {interview_number}...")
     conn = get_db_connection()
     c = conn.cursor()
     
     try:
         # Fetch Announcement Details (Title & Job Description)
-        c.execute("""
-            SELECT title, job 
-            FROM interview_announcement 
-            WHERE title = %s 
-            ORDER BY created_at DESC 
-            LIMIT 1
-        """, (job_title,))
+        if announcement_id:
+             c.execute("SELECT title, job FROM interview_announcement WHERE id = %s", (announcement_id,))
+        else:
+             c.execute("""
+                SELECT title, job 
+                FROM interview_announcement 
+                WHERE title = %s 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """, (job_title,))
+        
         announcement_row = c.fetchone()
         
         announcement_title = announcement_row[0] if announcement_row else job_title
@@ -105,8 +109,9 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
                 title, announcement_job,
                 id_name, session_name,
                 email,
-                resume_image_path
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                resume_image_path,
+                announcement_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             interview_number,
             int(result.get("tech_score", 0)), result.get("tech_eval", ""),
@@ -117,7 +122,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             announcement_title, announcement_job,
             id_name, session_name,
             user_email,
-            None 
+            None,
+            announcement_id
         ))
         
         conn.commit()

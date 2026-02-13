@@ -19,7 +19,7 @@ def get_admin_applicants(admin_id: Optional[str] = None):
                    r.email
             FROM Interview_Result r
             JOIN users u ON r.id_name = u.id_name
-            JOIN interview_announcement ia ON r.title = ia.title
+            JOIN interview_announcement ia ON r.announcement_id = ia.id OR (r.announcement_id IS NULL AND r.title = ia.title)
             WHERE 1=1
         """
         params = []

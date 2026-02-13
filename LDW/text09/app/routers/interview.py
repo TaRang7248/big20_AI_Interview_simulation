@@ -65,9 +65,9 @@ async def start_interview(background_tasks: BackgroundTasks, data: StartIntervie
         # Save to DB
         c.execute('''
             INSERT INTO Interview_Progress (
-                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (interview_number, applicant_name, data.job_title, resume_summary, first_question, data.id_name, session_name))
+                Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name, announcement_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ''', (interview_number, applicant_name, data.job_title, resume_summary, first_question, data.id_name, session_name, data.announcement_id))
         
         conn.commit()
         
@@ -124,7 +124,7 @@ async def submit_answer(
         
         # We find the latest row for this interview
         c.execute("""
-            SELECT id, Create_Question, Resume, id_name FROM Interview_Progress 
+            SELECT id, Create_Question, Resume, id_name, announcement_id FROM Interview_Progress 
             WHERE Interview_Number = %s 
             ORDER BY id DESC LIMIT 1
         """, (interview_number,))
@@ -139,6 +139,7 @@ async def submit_answer(
         prev_question = row[1]
         resume_summary = row[2] if row[2] else ""
         id_name = row[3]
+        announcement_id = row[4]
         
         # Get session_name
         c.execute("SELECT session_name FROM Interview_Progress WHERE id = %s", (current_row_id,))
@@ -193,14 +194,14 @@ async def submit_answer(
         interview_finished = False
         if next_phase == "END":
              interview_finished = True
-             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, id_name)
+             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, id_name, announcement_id)
         else:
             # 6. Insert Next Question Record (if not END)
             c.execute('''
                 INSERT INTO Interview_Progress (
-                    Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', (interview_number, applicant_name, job_title, resume_summary, next_question, id_name, session_name))
+                    Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name, announcement_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (interview_number, applicant_name, job_title, resume_summary, next_question, id_name, session_name, announcement_id))
         
         conn.commit()
         conn.close()

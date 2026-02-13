@@ -53,3 +53,4 @@ class JobUpdate(BaseModel):
 class StartInterviewRequest(BaseModel):
     id_name: str
     job_title: str
+    announcement_id: Optional[int] = None
