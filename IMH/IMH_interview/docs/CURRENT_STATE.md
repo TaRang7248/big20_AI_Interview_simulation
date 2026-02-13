@@ -208,7 +208,9 @@ IMH/IMH_Interview/
 │   ├── imh_core/
 │   ├── imh_providers/
 │   ├── imh_analysis/
-│   └── imh_eval/
+│   ├── imh_analysis/
+│   ├── imh_eval/
+│   └── imh_session/
 ├── docs/                 # 운영 문서 (사람/에이전트용)
 ├── logs/                 # 실제 로그 파일 (.log)
 │   ├── agent/
@@ -259,6 +261,15 @@ IMH/IMH_Interview/
     - 세션 상태 ENUM(APPLIED / IN_PROGRESS / COMPLETED / INTERRUPTED / EVALUATED)
     - 결과 공개 정책(2주 내 합/불합 자동 통지 보장)
     - 실전/연습 모드 정책 분리
+    
+- `packages/imh_session/`: ✅ DONE
+  - TASK-017: Interview Session Engine 구현 완료
+    - 상태(APPLIED, IN_PROGRESS, COMPLETED, INTERRUPTED, EVALUATED) 정의
+    - 최소 질문 수(10) 및 조기 종료 정책 구현
+    - 침묵 2케이스(Post-Answer / No-Answer) 처리 로직 구현
+    - Redis / PostgreSQL 추상화 인터페이스 설계
+    - Strict Verification Script(`verify_task_017.py`) Pass
+
 
 
 

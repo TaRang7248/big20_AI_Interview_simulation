@@ -296,3 +296,28 @@ Plan 수립
     - 구현 코드 없음 (Plan Only Task).
 - **산출물**:
     - [TASK-015_CONTRACT.md](TASK-015_CONTRACT.md)
+
+### TASK-017 Interview Session Engine (Phase 5 Core)
+- **요약**: 실시간 면접 세션의 동작 정책을 관장하는 Session Engine (`packages/imh_session`) 구현 완료.
+- **변경 사항**:
+  - `packages/imh_session/` 패키지 구조화.
+  - `state.py`: 5대 세션 상태(APPLIED, IN_PROGRESS, COMPLETED, INTERRUPTED, EVALUATED) 정의.
+  - `dto.py`: `SessionConfig` (최소 10질문 기본값), `SessionContext` (Redis-like Hot State) 정의.
+  - `repository.py`: Hot State(Redis) / Cold Storage(PostgreSQL) 인터페이스 분리 설계.
+  - `engine.py`: Strict State Machine 및 Policy Enforcement 구현.
+    - 최소 질문 수(10) 미달 시 조기 종료 차단 로직.
+    - 침묵 2케이스(Post-Answer / No-Answer) 분기 처리 및 SILENCE_WARNING 이벤트 구조.
+    - 조기 종료 신호(`early_exit_signaled`) 수신 시 종료 처리 로직.
+  - `scripts/verify_task_017.py`: Mock Repository 기반 정책 검증 스크립트.
+- **검증 증거**:
+  - **스크립트 실행 결과**: `python scripts/verify_task_017.py` -> `Ran 7 tests in 0.003s OK`
+    1. **State Machine**: APPLIED -> IN_PROGRESS -> COMPLETED 전이 확인.
+    2. **Min Question Policy**: 10문제 미만에서 조기 종료 신호 무시 확인.
+    3. **Early Exit**: 10문제 이상 + 신호 발생 시만 COMPLETED 전이 확인.
+    4. **Silence Handling**: 
+       - `is_no_answer=True` (무응답) -> 완료 카운트 증가, 다음 질문 진행.
+       - `is_no_answer=False` (답변 후 침묵) -> 완료 카운트 증가.
+    5. **Interruption**: USER_ABORT 시 INTERRUPTED 상태 확정 확인.
+- **로그 및 산출물**:
+  - `packages/imh_session/` 패키지 사용.
+

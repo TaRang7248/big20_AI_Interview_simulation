@@ -194,10 +194,6 @@
   - TASK-014 (리포트 조회 API 계약) 완료
 
 ---
-## ACTIVE
-- (현재 ACTIVE 항목 없음)
-
-## BACKLOG
 
 ### TASK-017 Interview Session Engine (실시간 면접 세션 엔진)
 - **Goal**:
@@ -220,6 +216,8 @@
 
 ---
 
+## ACTIVE
+
 ### TASK-018 실전/연습 모드 분리 (Interview Mode Policy Split)
 - **Goal**:
   - “공고 기반 실전 면접”과 “AI 면접 연습”의 기능/권한/중단 정책을 분리한다.
@@ -237,6 +235,7 @@
   - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
 
 ---
+## BACKLOG
 
 ### TASK-019 공고(채용) 정책 엔진 (Job Posting Policy Engine)
 - **Goal**:
