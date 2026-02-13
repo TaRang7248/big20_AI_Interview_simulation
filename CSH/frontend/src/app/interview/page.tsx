@@ -27,8 +27,8 @@ declare global {
     readonly resultIndex: number;
     readonly results: SpeechRecognitionResultList;
   }
-  interface SpeechRecognitionResultList { readonly length: number; item(index: number): SpeechRecognitionResult; [index: number]: SpeechRecognitionResult; }
-  interface SpeechRecognitionResult { readonly length: number; readonly isFinal: boolean; item(index: number): SpeechRecognitionAlternative; [index: number]: SpeechRecognitionAlternative; }
+  interface SpeechRecognitionResultList { readonly length: number; item(index: number): SpeechRecognitionResult;[index: number]: SpeechRecognitionResult; }
+  interface SpeechRecognitionResult { readonly length: number; readonly isFinal: boolean; item(index: number): SpeechRecognitionAlternative;[index: number]: SpeechRecognitionAlternative; }
   interface SpeechRecognitionAlternative { readonly transcript: string; readonly confidence: number; }
 }
 
@@ -75,7 +75,6 @@ function InterviewPageInner() {
   const [resumeUploading, setResumeUploading] = useState(false);
 
   // Refs
-  const videoRef = useRef<HTMLVideoElement>(null);           // setup 카메라 프리뷰용
   const interviewVideoRef = useRef<HTMLVideoElement>(null);  // interview 화면 사용자 영상용
   const streamRef = useRef<MediaStream | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -120,27 +119,14 @@ function InterviewPageInner() {
       .catch(() => setDidAvailable(false));
   }, []);
 
-  // ── setup 화면 카메라 프리뷰 자동 초기화 ──
-  // phase가 "setup"일 때 카메라를 바로 켜서 프리뷰 영상을 보여줌
+  // ── 페이지 진입 시 자동으로 면접 시작 (setup 화면 스킵) ──
+  // 사용자 인증 완료 후 바로 startInterview()를 호출하여 면접을 시작
+  const autoStartedRef = useRef(false);
   useEffect(() => {
-    if (phase !== "setup" || !user) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        // 이미 스트림이 있으면 재사용
-        if (streamRef.current) {
-          if (videoRef.current) videoRef.current.srcObject = streamRef.current;
-          return;
-        }
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return; }
-        streamRef.current = stream;
-        if (videoRef.current) videoRef.current.srcObject = stream;
-      } catch {
-        // 권한 거부 등 — setup 화면에서는 조용히 무시 (시작 버튼 클릭 시 재시도)
-      }
-    })();
-    return () => { cancelled = true; };
+    if (phase !== "setup" || !user || autoStartedRef.current) return;
+    autoStartedRef.current = true;
+    startInterview();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, user]);
 
   // ── interview 화면 전환 시 사용자 비디오 스트림 재할당 ──
@@ -210,7 +196,7 @@ function InterviewPageInner() {
       // ICE Candidate 수집 → 서버로 전송
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          didApi.sendIceCandidate(sid, event.candidate.toJSON()).catch(() => {});
+          didApi.sendIceCandidate(sid, event.candidate.toJSON()).catch(() => { });
         }
       };
 
@@ -428,7 +414,7 @@ function InterviewPageInner() {
   // ========== 개입 체크 ==========
   const startInterventionCheck = (sid: string) => {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
-    interventionApi.startTurn(sid).catch(() => {});
+    interventionApi.startTurn(sid).catch(() => { });
     interventionTimerRef.current = setInterval(async () => {
       try {
         const res = await interventionApi.check(sid, sttText);
@@ -449,7 +435,7 @@ function InterviewPageInner() {
 
     // 개입 타이머 정지
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
-    interventionApi.endTurn(sessionId, answer).catch(() => {});
+    interventionApi.endTurn(sessionId, answer).catch(() => { });
 
     // 평가
     setStatus("processing");
@@ -478,7 +464,7 @@ function InterviewPageInner() {
 
     // D-ID 스트림 종료
     if (didConnected && sessionId) {
-      didApi.closeStream(sessionId).catch(() => {});
+      didApi.closeStream(sessionId).catch(() => { });
       peerConnectionRef.current?.close();
       peerConnectionRef.current = null;
       setDidConnected(false);
@@ -575,20 +561,18 @@ function InterviewPageInner() {
         </div>
       )}
 
-      {/* 면접 준비 화면 */}
+      {/* 면접 준비 중 로딩 화면 (자동 시작) */}
       {phase === "setup" && (
         <main className="flex-1 flex items-center justify-center p-6">
           <div className="glass-card max-w-lg w-full text-center">
             <h1 className="text-3xl font-bold gradient-text mb-4">AI 모의면접</h1>
-            <p className="text-[var(--text-secondary)] mb-8">
-              카메라와 마이크가 준비되었는지 확인한 후<br />면접을 시작해주세요.
-            </p>
-            <div className="rounded-xl overflow-hidden bg-black aspect-video mb-6">
-              <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+            <div className="flex flex-col items-center gap-4 py-8">
+              <Loader2 size={48} className="text-[var(--cyan)] animate-spin" />
+              <p className="text-[var(--text-secondary)]">
+                면접을 준비하고 있습니다...<br />
+                카메라와 마이크 권한을 허용해주세요.
+              </p>
             </div>
-            <button onClick={startInterview} className="btn-gradient text-lg px-12 py-4 rounded-2xl">
-              🎤 면접 시작
-            </button>
           </div>
         </main>
       )}
@@ -599,12 +583,11 @@ function InterviewPageInner() {
           {/* 상태 바 */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <span className={`px-4 py-1.5 rounded-full text-sm font-semibold ${
-                status === "ready" ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" :
+              <span className={`px-4 py-1.5 rounded-full text-sm font-semibold ${status === "ready" ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" :
                 status === "listening" ? "bg-[rgba(255,193,7,0.2)] text-[var(--warning)]" :
-                status === "speaking" ? "bg-[rgba(0,217,255,0.2)] text-[var(--cyan)]" :
-                "bg-[rgba(156,39,176,0.2)] text-purple-300"
-              }`}>
+                  status === "speaking" ? "bg-[rgba(0,217,255,0.2)] text-[var(--cyan)]" :
+                    "bg-[rgba(156,39,176,0.2)] text-purple-300"
+                }`}>
                 {status === "ready" && "대기"}
                 {status === "listening" && "🎤 듣는 중..."}
                 {status === "speaking" && "🔊 발화 중..."}
@@ -620,10 +603,9 @@ function InterviewPageInner() {
           {/* 진행 바 */}
           <div className="flex gap-1 mb-6">
             {Array.from({ length: totalQuestions }, (_, i) => (
-              <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${
-                i < questionNum ? "bg-gradient-to-r from-[var(--cyan)] to-[var(--green)]" :
+              <div key={i} className={`h-1.5 flex-1 rounded-full transition-all ${i < questionNum ? "bg-gradient-to-r from-[var(--cyan)] to-[var(--green)]" :
                 i === questionNum ? "bg-[var(--cyan)] animate-pulse" : "bg-[rgba(255,255,255,0.1)]"
-              }`} />
+                }`} />
             ))}
           </div>
 
@@ -678,15 +660,14 @@ function InterviewPageInner() {
                     )}
                     {/* 아바타 원형 */}
                     {!didLoading && (
-                      <div className={`relative w-48 h-48 rounded-full border-4 transition-all duration-500 ${
-                        status === "speaking"
-                          ? "border-[var(--green)] shadow-[0_0_40px_rgba(0,255,136,0.5)] scale-105"
-                          : status === "processing"
+                      <div className={`relative w-48 h-48 rounded-full border-4 transition-all duration-500 ${status === "speaking"
+                        ? "border-[var(--green)] shadow-[0_0_40px_rgba(0,255,136,0.5)] scale-105"
+                        : status === "processing"
                           ? "border-purple-400 shadow-[0_0_20px_rgba(156,39,176,0.3)]"
                           : status === "listening"
-                          ? "border-[var(--warning)] shadow-[0_0_20px_rgba(255,193,7,0.3)]"
-                          : "border-[var(--cyan)]"
-                      } bg-gradient-to-br from-[#2a4a6b] to-[#1a3050] flex items-center justify-center`}>
+                            ? "border-[var(--warning)] shadow-[0_0_20px_rgba(255,193,7,0.3)]"
+                            : "border-[var(--cyan)]"
+                        } bg-gradient-to-br from-[#2a4a6b] to-[#1a3050] flex items-center justify-center`}>
                         {/* 발화 중 이퀄라이저 바 */}
                         {status === "speaking" ? (
                           <div className="flex items-end gap-1.5 h-16">
@@ -712,16 +693,15 @@ function InterviewPageInner() {
                 )}
 
                 {/* 상태 라벨 (D-ID/폴백 공통) */}
-                <span className={`absolute bottom-3 left-3 text-xs px-2 py-1 rounded font-medium z-20 ${
-                  status === "speaking" ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]"
-                    : status === "processing" ? "bg-[rgba(156,39,176,0.2)] text-purple-300"
+                <span className={`absolute bottom-3 left-3 text-xs px-2 py-1 rounded font-medium z-20 ${status === "speaking" ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]"
+                  : status === "processing" ? "bg-[rgba(156,39,176,0.2)] text-purple-300"
                     : status === "listening" ? "bg-[rgba(255,193,7,0.2)] text-[var(--warning)]"
-                    : "bg-black/60 text-white"
-                }`}>
+                      : "bg-black/60 text-white"
+                  }`}>
                   {status === "speaking" ? "🔊 답변 중..."
                     : status === "processing" ? "⏳ 생각 중..."
-                    : status === "listening" ? "👂 경청 중..."
-                    : "AI 면접관"}
+                      : status === "listening" ? "👂 경청 중..."
+                        : "AI 면접관"}
                 </span>
               </div>
             </div>
@@ -740,11 +720,10 @@ function InterviewPageInner() {
               <div className="flex-1 overflow-y-auto space-y-3 mb-3 min-h-[200px] max-h-[400px] pr-2">
                 {messages.map((m, i) => (
                   <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${
-                      m.role === "user"
-                        ? "bg-gradient-to-r from-[rgba(0,217,255,0.15)] to-[rgba(0,255,136,0.1)] rounded-br-md"
-                        : "bg-[rgba(255,255,255,0.06)] rounded-bl-md"
-                    }`}>
+                    <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${m.role === "user"
+                      ? "bg-gradient-to-r from-[rgba(0,217,255,0.15)] to-[rgba(0,255,136,0.1)] rounded-br-md"
+                      : "bg-[rgba(255,255,255,0.06)] rounded-bl-md"
+                      }`}>
                       {m.text}
                     </div>
                   </div>
@@ -762,14 +741,12 @@ function InterviewPageInner() {
 
               {/* 컨트롤 */}
               <div className="flex items-center justify-center gap-4">
-                <button onClick={toggleMic} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${
-                  micEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
-                }`}>
+                <button onClick={toggleMic} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${micEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
+                  }`}>
                   {micEnabled ? <Mic size={20} /> : <MicOff size={20} />}
                 </button>
-                <button onClick={toggleCam} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${
-                  camEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
-                }`}>
+                <button onClick={toggleCam} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${camEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
+                  }`}>
                   {camEnabled ? <Camera size={20} /> : <CameraOff size={20} />}
                 </button>
                 <button onClick={submitAnswer} disabled={!sttText.trim() || status !== "listening"}
