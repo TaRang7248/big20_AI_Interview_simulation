@@ -216,8 +216,6 @@
 
 ---
 
-## ACTIVE
-
 ### TASK-018 실전/연습 모드 분리 (Interview Mode Policy Split)
 - **Goal**:
   - “공고 기반 실전 면접”과 “AI 면접 연습”의 기능/권한/중단 정책을 분리한다.
@@ -235,7 +233,7 @@
   - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
 
 ---
-## BACKLOG
+## ACTIVE
 
 ### TASK-019 공고(채용) 정책 엔진 (Job Posting Policy Engine)
 - **Goal**:
@@ -258,6 +256,7 @@
   - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정본
 
 ---
+## BACKLOG
 
 ### TASK-020 관리자 지원자 조회/필터 규격 (Admin Applicant Filtering)
 - **Goal**:

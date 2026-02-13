@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from .policy import InterviewMode, get_policy
 
 class SessionConfig(BaseModel):
     """
@@ -11,6 +12,7 @@ class SessionConfig(BaseModel):
     question_timeout_sec: int = Field(default=120, description="Time limit per question in seconds")
     silence_timeout_sec: int = Field(default=15, description="Silence timeout in seconds")
     early_exit_enabled: bool = Field(default=False, description="Whether early exit based on score is enabled")
+    mode: InterviewMode = Field(default=InterviewMode.ACTUAL, description="Session Mode: ACTUAL or PRACTICE")
     
     # Contract: min_question_count must default to 10 as per policy
     

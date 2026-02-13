@@ -70,6 +70,39 @@
   - `HistoryMetadata` 및 `InterviewReport` DTO 직렬화 정상 확인
   - 검증 스크립트는 구현 결과 확인을 위한 보조 도구이며, API Contract에는 영향을 주지 않음
 
+- TASK-017 기준:
+  - `scripts/verify_task_017.py`를  
+    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인  
+  - 세션 상태 전이(APPLIED → IN_PROGRESS → COMPLETED/INTERRUPTED → EVALUATED) 검증 완료  
+  - 최소 질문 수 기본값 10개 보장 및 최소 질문 수 이전 조기 종료 금지 정책 검증 완료  
+  - 평가 계층 반환 신호 기반 조기 종료 처리 검증 완료 (점수 직접 판단 없음)  
+  - 침묵 2케이스 처리 검증 완료  
+    - 무응답 침묵 → `is_no_answer = true`  
+    - 답변 후 침묵 → 정상 답변 처리  
+  - `SILENCE_WARNING` 및 `SILENCE_TIMEOUT` 이벤트 발생 및 로그 기록 확인  
+  - Redis Hot State / PostgreSQL Persistent Record 구분 정책 준수 확인  
+  - 검증 스크립트는 세션 정책 동작 확인을 위한 보조 도구이며, 세션 계약(Plan 문서)에는 영향을 주지 않음  
+
+- TASK-018 기준:
+  - `scripts/verify_task_018.py`를
+    Python 3.10.11 + interview_env 환경에서 실행하여 정상 동작 확인
+  - 실전(Actual) 모드:
+    - `INTERRUPTED → IN_PROGRESS` 전이 금지 검증 완료
+    - 최소 질문 수 미충족 상태에서 조기 종료 금지 검증 완료
+    - 최소 질문 수 충족 이후 조기 종료 허용 로직 검증 완료
+    - 무응답 질문도 수행 질문으로 카운트되는지 확인
+  - 연습(Practice) 모드:
+    - `INTERRUPTED → IN_PROGRESS` 전이 허용 검증 완료
+    - 조기 종료 상시 허용 로직 검증 완료
+    - Resume 정책 분기 동작 정상 확인
+  - `InterviewMode` 기반 Policy 로딩 및 분기 처리 정상 확인
+  - `SessionConfig.mode` 값에 따른 Policy 구현체 주입 정상 확인
+  - `scripts/verify_task_017.py`를 통한 기존 엔진 흐름 회귀 테스트 통과
+  - 상태 ENUM(APPLIED / IN_PROGRESS / COMPLETED / INTERRUPTED / EVALUATED) 변경 없음 확인
+  - 검증 스크립트는 정책 분리 및 엔진 동작 확인을 위한 보조 도구이며,
+    런타임 API 진입점 구현에는 영향을 주지 않음
+
+
 ## 1. 프로젝트 목적 (확정)
 
 - 목적: **AI 모의면접 시스템**
@@ -269,6 +302,11 @@ IMH/IMH_Interview/
     - 침묵 2케이스(Post-Answer / No-Answer) 처리 로직 구현
     - Redis / PostgreSQL 추상화 인터페이스 설계
     - Strict Verification Script(`verify_task_017.py`) Pass
+  - TASK-018: Interview Mode Policy Split 구현 완료
+    - InterviewPolicy 인터페이스 및 모드별(Actual/Practice) 구현체 정의
+    - SessionConfig에 mode 추가 및 Engine 주입 로직 구현
+    - 조기 종료/중단/재진입 정책 분리 검증 완료 (`verify_task_018.py`)
+    - ※ 실전/연습 모드 진입점(API) 구현 시 mode 강제 주입 필요 (Phase 5 통합 단계)
 
 
 

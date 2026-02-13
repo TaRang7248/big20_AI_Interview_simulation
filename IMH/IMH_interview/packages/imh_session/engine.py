@@ -3,6 +3,7 @@ import time
 from typing import Optional
 from .state import SessionStatus, SessionEvent, TerminationReason
 from .dto import SessionConfig, SessionContext
+from .policy import get_policy, InterviewMode
 from .repository import SessionStateRepository, SessionHistoryRepository
 
 # Logger setup
@@ -25,6 +26,9 @@ class InterviewSessionEngine:
         self.config = config
         self.state_repo = state_repo
         self.history_repo = history_repo
+        
+        # Initialize Policy
+        self.policy = get_policy(self.config.mode)
         
         # Initialize or load context
         self.context = self._load_or_initialize_context()
@@ -108,8 +112,13 @@ class InterviewSessionEngine:
             return
 
         # Condition 2: Early Exit
-        # Policy: Only check if min_question_count is met.
-        if current_completed >= config.min_question_count:
+        # Policy Check: Requires Min Questions?
+        can_check_early_exit = True
+        if self.policy.requires_min_questions_for_early_exit():
+            if current_completed < config.min_question_count:
+                can_check_early_exit = False
+                
+        if can_check_early_exit:
             if self._check_early_exit_signal():
                 self.terminate_session(TerminationReason.EARLY_EXIT_SIGNAL)
                 return
@@ -135,11 +144,34 @@ class InterviewSessionEngine:
 
     def interrupt_session(self, reason: TerminationReason):
         """
-        Transition to INTERRUPTED (Actual Mode Only).
+        Transition to INTERRUPTED.
+        Policy dictates if this is final or resumable (handled by resume_session).
         """
         logger.warning(f"Interrupting session {self.session_id}. Reason: {reason}")
+        
+        # Policy Check: If terminate on interruption is required, we might treat it differently?
+        # Actually state is INTERRUPTED in both cases.
+        # But for Actual Mode, it effectively means "Stop", for Practice "Pause".
+        
         self._update_status(SessionStatus.INTERRUPTED)
         self._finalize_persistence()
+
+    def resume_session(self):
+        """
+        Attempt to resume an INTERRUPTED session.
+        Allowed only if Policy permits.
+        """
+        if self.context.status != SessionStatus.INTERRUPTED:
+             logger.warning(f"Cannot resume session {self.session_id} from {self.context.status}")
+             return
+
+        if not self.policy.can_resume_from_interruption():
+            logger.error(f"Policy Violation: Cannot resume session {self.session_id} in {self.policy.mode} mode.")
+            return
+
+        logger.info(f"Resuming session {self.session_id}")
+        self._update_status(SessionStatus.IN_PROGRESS)
+        self._commit_state()
 
     def _update_status(self, new_status: SessionStatus):
         self.context.status = new_status

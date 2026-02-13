@@ -321,3 +321,48 @@ Plan 수립
 - **로그 및 산출물**:
   - `packages/imh_session/` 패키지 사용.
 
+## 2026-02-13: TASK-018 실전/연습 모드 정책 분리 구현 (Interview Mode Policy Split)
+
+- **작업 내용**:
+  - `packages/imh_session/policy.py`: 정책 인터페이스(`InterviewPolicy`) 및 모드 구현체(`ActualModePolicy`, `PracticeModePolicy`) 정의.
+  - `packages/imh_session/dto.py`: `SessionConfig`에 `mode: InterviewMode` 필드 추가 (기본값 ACTUAL).
+  - `packages/imh_session/engine.py`: 
+    - 엔진 초기화 시 정책 주입 로직 추가.
+    - 조기 종료(`_complete_current_step`) 및 중단(`interrupt_session`) 로직에 정책 검사(`policy.requires_min_questions_for_early_exit`) 반영.
+    - `resume_session` 메서드 추가 (정책 허용 시에만 동작).
+  - `scripts/verify_task_018.py`: 실전/연습 모드별 정책 차이(재진입, 조기 종료 시점) 검증 스크립트 작성.
+
+- **검증 결과**:
+  - `python scripts/verify_task_018.py`: **Pass**
+    1. **실전 모드**: 
+       - 중단 시 `INTERRUPTED` 상태로 종료됨을 확인.
+       - 재진입(`resume_session`) 시도 시 정책 위반 로그 발생 및 상태 유지 확인.
+       - 최소 질문 수(5개) 미만에서 조기 종료 신호 무시(IN_PROGRESS 유지) 확인.
+       - 최소 질문 수 충족 후 조기 종료 신호 시 `COMPLETED` 전이 확인.
+    2. **연습 모드**: 
+       - 중단 후 재진입(`resume_session`) 시 `IN_PROGRESS`로 복구됨을 확인.
+       - 최소 질문 수 미만에서도 조기 종료 신호 시 즉시 `COMPLETED` 전이 확인.
+  - `python scripts/verify_task_017.py`: **Pass**
+    - 기존 엔진 로직(기본값 Actual Mode)에 회귀 없음을 확인.
+
+### TASK-018 기술적 제약 및 향후 요구사항 (2026-02-13 보강)
+
+**A. 런타임 진입점 부재 명시**
+- 현재 프로젝트에는 SessionConfig를 생성하고 InterviewSessionEngine을 초기화하는 실제 런타임 경로(API Endpoint / Service Layer)가 아직 존재하지 않는다.
+- TASK-017 및 TASK-018은 엔진 코어 로직과 정책 분리, 그리고 단위 검증 스크립트(scripts/verify_task_*.py) 수준까지만 포함한다.
+- 따라서 Practice 모드(mode=InterviewMode.PRACTICE) 설정은 verify_task_018.py에서 수동으로 Config를 생성하여 주입하는 방식으로만 검증되었다.
+
+**B. Mode 주입은 통합 단계에서 강제해야 함**
+- 향후 Phase 5 후반부(실시간 면접 플로우 통합)에서 "연습 모드 시작" API 또는 "공고 기반 면접 시작" API가 구현될 예정이다.
+- 해당 진입점에서 SessionConfig 생성 시 반드시 mode 값을 명시적으로 강제 주입해야 한다.
+  - 연습 시작 → mode=InterviewMode.PRACTICE
+  - 공고 기반 면접 → mode=InterviewMode.ACTUAL
+- mode 값을 요청에 의존하지 말고, 서버 로직에서 강제 설정하도록 구현해야 한다.
+- 이 항목은 통합 단계 DoD에 포함되어야 한다.
+
+**C. 상태 전이 중앙 검증 관련 기술 부채 기록**
+- `_update_status`는 상태 전이 유효성을 중앙에서 강제 검증하지 않으며, 호출자 책임 구조로 설계되어 있다.
+- 현재 `resume_session`은 (1) status==INTERRUPTED 가드 + (2) policy 가드 이후 `_update_status`를 호출하여 문제없이 동작한다.
+- 향후 엔진 안정화 단계에서 상태 전이 중앙 검증(guard/validator) 도입을 고려할 수 있다.
+- 단, 본 TASK-018 범위에서는 구조 리팩터링이 금지되었으므로 변경하지 않았다.
+
