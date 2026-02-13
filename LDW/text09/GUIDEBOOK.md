@@ -1,86 +1,104 @@
-# AI 면접 시뮬레이션 가이드북 (Guidebook)
+# AI 면접 시뮬레이션 가이드북 (GUIDEBOOK)
 
-## 1. 개요 (Overview)
-본 프로젝트는 **웹 기반 AI 면접 시뮬레이션** 서비스입니다. 사용자는 실제 면접과 유사한 환경에서 AI 면접관과 음성으로 대화하며 면접 연습을 할 수 있습니다. 
-면접이 종료되면 AI가 답변 내용을 분석하여 기술(Tech), 문제해결(Problem Solving), 의사소통(Communication), 태도(Non-verbal) 4가지 항목에 대해 평가하고 피드백을 제공합니다. 관리자는 채용 공고를 등록하고 지원자들의 면접 결과를 조회할 수 있습니다.
+## 1. 시뮬레이션 개요
+본 프로젝트는 **웹 기반 AI 면접 시뮬레이션**으로, 사용자가 실제 면접과 유사한 환경에서 AI 면접관과 대화하며 면접 역량을 키울 수 있도록 돕습니다.
+면접이 종료되면 AI가 지원자의 답변 내용, 태도 등을 종합적으로 분석하여 **루브릭(Rubric)** 기준에 따른 상세한 평가 리포트를 제공합니다.
 
-## 2. 시스템 환경 (Environment)
-*   **OS**: Windows (권장), macOS, Linux
-*   **Language**: Python 3.9+, JavaScript (ES6+)
-*   **Database**: PostgreSQL
-*   **Backend Framework**: FastAPI (Python)
-*   **Frontend**: HTML5, CSS3, Vanilla JavaScript
+### 주요 특징
+- **실시간 대화**: STT(음성 인식)와 TTS(음성 합성) 기술을 활용하여 실제 사람과 대화하듯 면접을 진행합니다.
+- **맞춤형 질문**: 지원한 직무와 자기소개서 내용을 바탕으로 생성형 AI가 심층 질문을 생성합니다.
+- **루브릭 기반 평가**: 기술/직무, 문제해결, 의사소통, 태도/인성 4가지 영역을 5단계 척도로 정밀하게 평가합니다.
+- **웹 인터페이스**: 직관적인 웹 UI를 통해 누구나 쉽게 이용할 수 있습니다.
 
-## 3. 실행 방법 (How to Run)
+---
 
-### 사전 준비
-1.  **PostgreSQL 설치 및 실행**: 로컬에서 PostgreSQL 서버가 실행 중이어야 합니다.
-2.  **데이터베이스 생성**: `interview_db` 데이터베이스가 생성되어 있어야 합니다. (초기 실행 시 `scripts/create_table.py`로 생성 가능)
-3.  **환경 변수 설정**: `.env` 파일에 DB 접속 정보와 OpenAI API Key가 설정되어야 합니다.
+## 2. 시뮬레이션 환경
+본 시뮬레이션은 다음과 같은 환경에서 실행되도록 개발되었습니다.
 
-### 서버 실행
-터미널에서 `server.py`가 있는 디렉토리(`LDW/text09`)로 이동 후 다음 명령어를 실행합니다.
+- **OS**: Windows (권장)
+- **Python 버전**: Python 3.10 이상 권장
+- **브라우저**: Chrome, Edge 등 최신 웹 브라우저
 
+---
+
+## 3. 실행 방법
+### 1단계: 가상환경 설정 및 패키지 설치
+(최초 1회 실행)
+```bash
+# 가상환경 생성 (예시)
+python -m venv venv
+
+# 가상환경 활성화 (Windows)
+venv\Scripts\activate
+
+# 필수 패키지 설치
+pip install -r requirements.txt
+```
+
+### 2단계: 서버 실행
+`server.py` 파일을 실행하면 서버가 구동되고 자동으로 웹 브라우저가 열립니다.
 ```bash
 python server.py
 ```
+- 서버는 기본적으로 `http://localhost:5000` 에서 동작합니다.
+- 브라우저가 자동으로 열리지 않을 경우, 주소창에 위 주소를 직접 입력하세요.
 
-*   서버가 시작되면 자동으로 브라우저가 열리며 `http://localhost:5000`으로 접속됩니다.
-*   수동으로 접속하려면 브라우저 주소창에 `http://localhost:5000`을 입력하세요.
+---
 
-## 4. 사용 모델 및 라이브러리 (Models & Libraries)
+## 4. 사용 모델 및 라이브러리 목록
 
-### 주요 AI 모델
-*   **LLM (Large Language Model)**: OpenAI GPT-4o (면접 질문 생성, 답변 평가, 이력서 요약)
-*   **STT (Speech-to-Text)**: OpenAI Whisper (음성 답변을 텍스트로 변환, 클라이언트 측 Web Speech API도 보조적으로 사용)
-*   **TTS (Text-to-Speech)**: OpenAI TTS (AI 면접관의 음성 생성)
-*   **OCR**: EasyOCR (PDF 이력서 텍스트 추출 보조)
+### 핵심 기술 (AI & Backend)
+- **FastAPI**: 고성능 비동기 웹 프레임워크 (백엔드 서버)
+- **OpenAI GPT-4o**: 면접 질문 생성 및 답변 분석, 평가 (LLM)
+- **LangChain**: LLM 오케스트레이션 및 프롬프트 관리
+- **Uvicorn**: ASGI 웹 서버
 
-### 주요 라이브러리 (Python)
-*   `fastapi`: 웹 서버 프레임워크
-*   `uvicorn`: ASGI 서버
-*   `psycopg2-binary`: PostgreSQL 데이터베이스 연동
-*   `openai`: OpenAI API 클라이언트
-*   `python-multipart`: 파일 업로드 처리
-*   `pydantic`: 데이터 검증
-*   `pdf2image`: PDF를 이미지로 변환 (이력서 이미지화)
-*   `pytesseract` / `easyocr`: 이미지 내 텍스트 추출
+### 음성 및 멀티미디어
+- **Deepgram**: 고성능 음성 인식 (STT)
+- **Edge-TTS**: 자연스러운 음성 합성 (TTS)
+- **PyAudio**: 오디오 입출력 처리
+- **Opencv-python / Deepface**: (선택 사항) 영상 처리 및 감정 분석
 
-## 5. 주요 기능 사용법 (Key Features)
+### 데이터베이스 및 저장소
+- **PostgreSQL / SQLite**: (설정에 따라) 면접 데이터 및 결과 저장
+- **SQLAlchemy**: ORM(Object Relational Mapping) 데이터베이스 연동
 
-### [지원자]
-1.  **회원가입/로그인**: '면접자' 유형으로 가입합니다.
-2.  **공고 조회**: 대시보드에서 지원 가능한 채용 공고를 확인합니다.
-3.  **면접 시작**: 공고의 [지원하기] 버튼을 누르고 이력서(PDF)를 업로드합니다.
-4.  **카메라/마이크 설정**: 웹캠과 마이크 권한을 허용하고 테스트를 통과해야 합니다.
-5.  **실전 면접**:
-    *   AI 면접관이 질문을 하면 답변을 말합니다.
-    *   답변이 끝나면 [답변 제출] 버튼을 누르거나 시간이 종료되면 자동 제출됩니다.
-    *   자기소개, 직무 기술, 인성 질문 등 총 12개의 질문이 이어집니다.
-6.  **결과 확인**: 면접 종료 후 [내 면접 기록]에서 합격/불합격 여부와 상세 평가(점수, 피드백)를 확인할 수 있습니다.
+---
 
-### [관리자]
-1.  **회원가입/로그인**: '관리자' 유형으로 가입합니다.
-2.  **공고 관리**: 새로운 채용 공고를 등록, 수정, 삭제할 수 있습니다.
-3.  **지원자 현황**: 본인이 등록한 공고에 지원한 지원자 목록을 확인하고, 각 지원자의 이력서, 면접 답변 내용, AI 평가 결과를 상세하게 조회할 수 있습니다.
+## 5. 주요 기능 사용법
 
-## 6. 파일 구조 (File Structure)
+### [1] 로그인 및 직무 선택
+1. 회원가입 후 로그인을 진행합니다.
+2. 면접을 진행할 **직무(예: 웹 개발자, 마케팅 등)**를 선택하거나 입력합니다.
+3. 자기소개서 파일을 업로드하거나 텍스트로 입력합니다.
 
+### [2] 면접 진행
+1. '면접 시작' 버튼을 누르면 AI 면접관이 첫 인사를 건넵니다.
+2. 마이크를 통해 답변을 말하면 AI가 이를 인식하고 꼬리물기 질문을 이어갑니다.
+3. 설정된 질문 개수만큼 면접이 진행됩니다.
+
+### [3] 결과 확인
+1. 면접이 종료되면 잠시 후 **분석 결과 페이지**로 이동합니다.
+2. **평가 루브릭**에 따라 4가지 항목(기술, 문제해결, 의사소통, 태도)에 대한 점수와 상세 피드백을 확인합니다.
+3. '합격/불합격' 여부와 개선점을 파악합니다.
+
+---
+
+## 6. 파일 구조 설명
 ```
 C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── app/
-│   ├── routers/       # API 라우터 (admin, auth, interview, job, user)
-│   ├── services/      # 비즈니스 로직 (LLM, PDF, STT, TTS 등)
-│   ├── models.py      # Pydantic 데이터 모델
-│   ├── database.py    # DB 연결 설정
-│   ├── config.py      # 환경 변수 및 설정
-│   └── main.py        # FastAPI 앱 초기화 및 라우터 등록
-├── static/            # 프론트엔드 정적 파일
-│   ├── index.html     # 메인 HTML (SPA 구조)
-│   ├── app.js         # 프론트엔드 로직 (라우팅, API 호출, 상태 관리)
-│   └── styles.css     # 스타일시트
-├── scripts/           # DB 마이그레이션 및 유틸리티 스크립트
-├── uploads/           # 업로드된 파일 저장소 (이력서, 오디오 등)
-├── server.py          # 서버 실행 진입점
-└── requirements.txt   # 의존성 패키지 목록
+│   ├── main.py              # FastAPI 애플리케이션 진입점
+│   ├── config.py            # 환경 변수 및 설정 관리
+│   ├── database.py          # 데이터베이스 연결 설정
+│   ├── models.py            # Pydantic/SQLAlchemy 데이터 모델 정의
+│   └── services/            # 핵심 비즈니스 로직
+│       ├── analysis_service.py  # 면접 결과 분석 및 루브릭 평가 로직 ★
+│       ├── llm_service.py       # LLM 연동 (GPT-4)
+│       ├── stt_service.py       # 음성 인식
+│       └── tts_service.py       # 음성 합성
+├── static/                  # CSS, JS, 이미지 등 정적 파일
+├── templates/               # HTML 템플릿 파일
+├── requirements.txt         # 프로젝트 의존성 패키지 목록
+└── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
 ```
