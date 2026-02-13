@@ -670,17 +670,44 @@ function startQuestionSequence(question) {
         console.log(`[StartQuestion] Attempting to play audio from: ${audioUrl}`);
         playAudio(audioUrl, () => {
             console.log("[StartQuestion] Audio playback finished.");
-            // 2. Start Timer & Recording after TTS
-            $('#btn-submit-answer').disabled = false;
+            
+            // 2. Start Timer & Recording immediately after TTS
             startTimer(120);
             startRecording();
+
+            // 3. Button Logic: Keep disabled for 10 seconds
+            const btnSubmit = $('#btn-submit-answer');
+            btnSubmit.disabled = true;
+            const originalText = "답변 제출 (녹음 종료)";
+            btnSubmit.textContent = "답변 제출 (10초 후 활성화)";
+
+            setTimeout(() => {
+                // Ensure we are still in the same interview state/question
+                // (Simple check: if we are still in progress and button exists)
+                if (AppState.interview.inProgress && btnSubmit) {
+                    btnSubmit.disabled = false;
+                    btnSubmit.textContent = originalText;
+                }
+            }, 10000); // 10 seconds delay
         });
     } else {
         console.warn("[StartQuestion] No Audio URL provided. Skipping playback.");
-        // Fallback or just start if no audio
-        $('#btn-submit-answer').disabled = false;
+        // Fallback: Start immediately
         startTimer(120);
         startRecording();
+        
+        // Apply same 10s delay logic for consistency
+        const btnSubmit = $('#btn-submit-answer');
+        btnSubmit.disabled = true;
+        const originalText = "답변 제출 (녹음 종료)";
+        btnSubmit.textContent = "답변 제출 (10초 후 활성화)";
+
+        setTimeout(() => {
+            if (AppState.interview.inProgress && btnSubmit) {
+                btnSubmit.disabled = false;
+                btnSubmit.textContent = originalText;
+            }
+        }, 10000);
     }
 }
 
