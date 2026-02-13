@@ -62,4 +62,6 @@ deepface
 # --- Dev tools ---
 pytest
 ruff
-black
+
+# --- TTS ---
+edge-tts

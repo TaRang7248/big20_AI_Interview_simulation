@@ -634,6 +634,7 @@ async function handleStartInterview() {
         AppState.interview.inProgress = true;
         AppState.interview.interviewNumber = startResult.interview_number;
         AppState.interview.currentQuestion = startResult.question;
+        AppState.interview.currentAudioUrl = startResult.audio_url; // Store Audio URL
         AppState.interview.currentQuestionIndex = 1;
 
         // Start Interaction
@@ -654,14 +655,33 @@ function startQuestionSequence(question) {
     $('#user-answer').value = '';
     $('#user-answer').placeholder = "답변을 말씀해주세요 (녹음 중...)";
 
-    // 1. TTS
+    // 1. TTS using Server Audio
     $('#btn-submit-answer').disabled = true; // AI가 말하는 동안 버튼 비활성화
-    speakText(question, () => {
-        // 2. Start Timer & Recording after TTS
-        $('#btn-submit-answer').disabled = false; // AI가 말을 마치면 버튼 활성화
-        startTimer(120); // 90 seconds (increased for speech)타이머
+
+    // Check if we have audio_url in AppState (need to update state logic to store it)
+    // Actually startQuestionSequence is called with just 'question'. 
+    // We should pass audio_url too or store it in state.
+    // Let's modify startQuestionSequence signature or use AppState.
+
+    const audioUrl = AppState.interview.currentAudioUrl;
+    console.log(`[StartQuestion] Question: "${question}", AudioURL: ${audioUrl}`);
+
+    if (audioUrl) {
+        console.log(`[StartQuestion] Attempting to play audio from: ${audioUrl}`);
+        playAudio(audioUrl, () => {
+            console.log("[StartQuestion] Audio playback finished.");
+            // 2. Start Timer & Recording after TTS
+            $('#btn-submit-answer').disabled = false;
+            startTimer(120);
+            startRecording();
+        });
+    } else {
+        console.warn("[StartQuestion] No Audio URL provided. Skipping playback.");
+        // Fallback or just start if no audio
+        $('#btn-submit-answer').disabled = false;
+        startTimer(120);
         startRecording();
-    });
+    }
 }
 
 function startTimer(seconds) {
@@ -847,12 +867,19 @@ async function handleSubmitAnswer(forced = false) {
                 finishInterview();
             };
 
-            // 1. Try TTS
-            $('#btn-submit-answer').disabled = true; // 마지막 멘트 동안에도 비활성화 유지
-            speakText(closingRemark, () => {
-                console.log("TTS Finished, calling doFinish");
+            // 1. Try Audio
+            $('#btn-submit-answer').disabled = true;
+
+            // Note: result.audio_url should be available here
+            if (result.audio_url) {
+                playAudio(result.audio_url, () => {
+                    console.log("Audio Finished, calling doFinish");
+                    doFinish();
+                });
+            } else {
+                console.log("No Audio URL, forcing finish");
                 doFinish();
-            });
+            }
 
             // 2. Safety Timeout (3 seconds)
             setTimeout(() => {
@@ -864,6 +891,7 @@ async function handleSubmitAnswer(forced = false) {
 
         } else {
             AppState.interview.currentQuestion = result.next_question;
+            AppState.interview.currentAudioUrl = result.audio_url; // Store Audio URL
             AppState.interview.currentQuestionIndex++;
             updateProgressUI();
             startQuestionSequence(result.next_question);
@@ -964,19 +992,41 @@ function addChatLog(sender, text) {
     $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
 }
 
-// --- TTS Utility ---
-function speakText(text, callback) {
-    if (!window.speechSynthesis) {
+// --- Audio Utility ---
+function playAudio(url, callback) {
+    if (!url) {
+        console.warn("[playAudio] No URL provided");
         if (callback) callback();
         return;
     }
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'ko-KR';
-    utterance.rate = 1.0;
-    utterance.onend = () => {
+
+    console.log(`[playAudio] Playing: ${url}`);
+
+    // Ensure relative path is correct if needed, but server returns /uploads/...
+    const audio = new Audio(url);
+    audio.volume = 1.0;
+
+    audio.onended = () => {
+        console.log(`[playAudio] Ended: ${url}`);
         if (callback) callback();
     };
-    window.speechSynthesis.speak(utterance);
+
+    audio.onerror = (e) => {
+        console.error("Audio Playback Error:", e);
+        console.error(`[playAudio] Failed to load: ${url}`);
+
+        // Detailed error info if available
+        if (audio.error) {
+            console.error(`[playAudio] Error Code: ${audio.error.code}, Message: ${audio.error.message}`);
+        }
+
+        if (callback) callback();
+    };
+
+    audio.play().catch(e => {
+        console.error("Audio Playback Failed (Auto-play policy?):", e);
+        if (callback) callback();
+    });
 }
 
 

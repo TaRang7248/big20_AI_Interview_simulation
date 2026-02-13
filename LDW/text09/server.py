@@ -18,6 +18,8 @@ import fitz  # PyMuPDF
 import easyocr
 import torch
 import numpy as np
+import edge_tts
+import asyncio
 
 # --- CUDA Check & EasyOCR Init ---
 USE_CUDA = torch.cuda.is_available()
@@ -50,6 +52,7 @@ DB_PASS = os.getenv("POSTGRES_PASSWORD", "013579")
 DB_PORT = os.getenv("DB_PORT", "5432")
 UPLOAD_FOLDER = 'uploads/resumes'
 AUDIO_FOLDER = 'uploads/audio'
+TTS_FOLDER = 'uploads/tts_audio'
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Initialize OpenAI Client
@@ -58,6 +61,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 # Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(AUDIO_FOLDER, exist_ok=True)
+os.makedirs(TTS_FOLDER, exist_ok=True)
 
 app = FastAPI()
 
@@ -324,6 +328,28 @@ def summarize_resume(text):
         logger.error(f"Resume Summary Error: {e}")
         return text[:1000] # Fallback to truncation
 
+async def generate_tts_audio(text, voice="ko-KR-HyunsuMultilingualNeural"):
+    """
+    Generates TTS audio using Microsoft Edge TTS and saves it to a file.
+    Returns the relative path to the audio file.
+    """
+    logger.info(f"TTS Request: '{text[:20]}...' using voice: {voice}")
+    try:
+        filename = f"{uuid.uuid4()}.mp3"
+        filepath = os.path.join(TTS_FOLDER, filename)
+        
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(filepath)
+        
+        # Check file size
+        filesize = os.path.getsize(filepath)
+        logger.info(f"TTS Generated: {filepath} (Size: {filesize} bytes)")
+
+        return f"/uploads/tts_audio/{filename}"
+    except Exception as e:
+        logger.error(f"TTS Generation Error: {e}")
+        return None
+
 
 
 class IdCheckRequest(BaseModel):
@@ -560,7 +586,7 @@ async def upload_resume(resume: UploadFile = File(...), id_name: str = Form(...)
 
 # --- Logic: Start Interview ---
 @app.post("/api/interview/start")
-def start_interview(data: StartInterviewRequest):
+async def start_interview(data: StartInterviewRequest):
     """
     1. Load Resume & Job Info.
     2. Prepare Pool (Get or Create).
@@ -611,10 +637,16 @@ def start_interview(data: StartInterviewRequest):
         
         conn.commit()
         
+        # Generate TTS
+        logger.info(f"Generating first question TTS... Text: {first_question[:30]}")
+        audio_url = await generate_tts_audio(first_question)
+        logger.info(f"First Question Audio URL: {audio_url}")
+
         return {
             "success": True,
             "interview_number": interview_number,
             "question": first_question,
+            "audio_url": audio_url,
             "session_name": session_name
         }
         
@@ -827,9 +859,13 @@ async def submit_answer(
         conn.commit()
         conn.close()
         
+        # Generate TTS for next question
+        audio_url = await generate_tts_audio(next_question)
+        
         return {
             "success": True,
             "next_question": next_question,
+            "audio_url": audio_url,
             "transcript": applicant_answer,
             "interview_finished": interview_finished,
             "session_name": session_name
