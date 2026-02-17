@@ -1,0 +1,557 @@
+<!-- <!doctype html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>면접 결과</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            margin: 0;
+            background: #f6f7fb;
+        }
+
+        .wrap {
+            max-width: 980px;
+            margin: 24px auto;
+            padding: 0 16px;
+        }
+
+        .top {
+            display: grid;
+            grid-template-columns: 1.2fr .8fr;
+            gap: 16px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }
+
+        .scoreRow {
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }
+
+        .score {
+            font-size: 44px;
+            font-weight: 900;
+        }
+
+        .badge {
+            display: inline-flex;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-weight: 700;
+        }
+
+        .pass {
+            background: #e9fbef;
+        }
+
+        .fail {
+            background: #ffeceb;
+        }
+
+        .summary {
+            color: #333;
+            line-height: 1.55;
+            margin-top: 10px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        .pill {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+            font-weight: 800;
+        }
+
+        .pill small {
+            font-weight: 700;
+            opacity: .7;
+        }
+
+        .muted {
+            color: #555;
+            line-height: 1.5;
+            margin-top: 8px;
+        }
+
+        .foot {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: .7;
+        }
+
+        @media (max-width: 840px) {
+
+            .top,
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ===== Design polish (add-only) ===== */
+        :root {
+            --bg: #F6F7FB;
+            --card: #FFFFFF;
+            --text: #121826;
+            --muted: #5B6472;
+            --border: rgba(18, 24, 38, .08);
+            --shadow: 0 10px 30px rgba(18, 24, 38, .08);
+        }
+
+        body {
+            background: radial-gradient(1200px 600px at 20% -10%, rgba(99, 102, 241, .12), transparent 60%),
+                radial-gradient(900px 500px at 90% 0%, rgba(16, 185, 129, .10), transparent 55%),
+                var(--bg);
+            color: var(--text);
+        }
+
+        .card {
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            padding: 18px;
+        }
+
+        .title {
+            letter-spacing: -0.02em;
+        }
+
+        .score {
+            letter-spacing: -0.04em;
+        }
+
+        .badge {
+            border: 1px solid var(--border);
+        }
+
+        .pass {
+            background: rgba(16, 185, 129, .12);
+            color: #065f46;
+            border-color: rgba(16, 185, 129, .25);
+        }
+
+        .fail {
+            background: rgba(239, 68, 68, .10);
+            color: #7f1d1d;
+            border-color: rgba(239, 68, 68, .25);
+        }
+
+        .summary {
+            color: var(--muted);
+        }
+
+        .pill {
+            font-size: 15px;
+            letter-spacing: -0.01em;
+        }
+
+        .muted {
+            color: var(--muted);
+        }
+
+        #scoreCard {
+            position: relative;
+            overflow: hidden;
+        }
+
+        #scoreCard::after {
+            content: "";
+            position: absolute;
+            inset: -40px -80px auto auto;
+            width: 180px;
+            height: 180px;
+            background: radial-gradient(circle at 30% 30%, rgba(99, 102, 241, .18), transparent 60%);
+            transform: rotate(18deg);
+            pointer-events: none;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div class="wrap">
+        <div class="top">
+            <div class="card" id="scoreCard">
+                <div class="title">면접 결과</div>
+                <div class="scoreRow">
+                    <div class="score" id="totalScore">-</div>
+                    <div id="resultBadge" class="badge">-</div>
+                </div>
+                <div class="summary" id="summaryText">-</div>
+                <div class="foot" id="createdAt"></div>
+            </div>
+
+            <div class="card">
+                <div class="title">역량 분포</div>
+                <canvas id="radarChart" height="240"></canvas>
+            </div>
+        </div>
+
+        <div class="grid" id="feedbackGrid"></div>
+    </div>
+
+    <script>
+        <script>
+            async function loadReport() {
+    const params = new URLSearchParams(location.search);
+            const sessionId = params.get("session_id");
+            const url = `http://127.0.0.1:8001/report/session/${sessionId}/result`;
+
+            const res = await fetch(url);
+            if (!res.ok) {
+                document.body.innerHTML = `<pre>API 오류: ${res.status}\n${await res.text()}</pre>`;
+            return;
+    }
+
+            const data = await res.json();
+
+            document.getElementById("totalScore").textContent = data.total_score;
+
+            const badge = document.getElementById("resultBadge");
+            badge.textContent = data.final_result;
+            badge.classList.remove("pass", "fail");
+            badge.classList.add(data.final_result === "PASS" ? "pass" : "fail");
+
+            document.getElementById("summaryText").textContent = data.summary || "-";
+            document.getElementById("createdAt").textContent =
+            data.created_at ? `생성 시각: ${data.created_at}` : "";
+
+    // 레이더 차트
+    const labels = data.radar.map(x => x.label);
+    const values = data.radar.map(x => x.score);
+
+            new Chart(document.getElementById("radarChart"), {
+                type: "radar",
+            data: {
+                labels,
+                datasets: [{
+                label: "점수(1~5)",
+            data: values,
+            }],
+        },
+            options: {
+                scales: {
+                r: {
+                suggestedMin: 0,
+            suggestedMax: 5,
+            ticks: {stepSize: 1 },
+                },
+            },
+        },
+    });
+
+    // 피드백
+    const axisToLabel = Object.fromEntries(data.radar.map(x => [x.axis, x.label]));
+            const grid = document.getElementById("feedbackGrid");
+            grid.innerHTML = "";
+
+            for (const [axis, obj] of Object.entries(data.feedback)) {
+        const label = axisToLabel[axis] || axis;
+            const div = document.createElement("div");
+            div.className = "card";
+            div.innerHTML = `
+            <div class="pill">${label} <small>· ${obj.score}점</small></div>
+            <div class="muted"><b>피드백</b><br />${obj.feedback}</div>
+            <div class="muted"><b>근거</b><br />${obj.rationale}</div>
+        `;
+        grid.appendChild(div);
+    }
+}
+
+loadReport();
+    </script>
+    <script src="./result.js"></script>
+</body>
+
+</html> -->
+
+<!doctype html>
+<html lang="ko">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>면접 결과</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* ===============================
+   Design System (Single Source)
+   =============================== */
+        :root {
+            --bg: #f6f7fb;
+            --card: #ffffff;
+            --text: #121826;
+            --muted: #5b6472;
+            --border: rgba(18, 24, 38, .10);
+            --shadow: 0 10px 30px rgba(18, 24, 38, .08);
+
+            --glow1: rgba(99, 102, 241, .14);
+            --glow2: rgba(16, 185, 129, .10);
+        }
+
+        body[data-theme="dark"] {
+            --bg: #070d1a;
+            --card: #0b1630;
+            --text: #f3f6ff;
+            --muted: rgba(243, 246, 255, .82);
+            --border: rgba(243, 246, 255, .18);
+
+            --glow1: rgba(99, 102, 241, .22);
+            --glow2: rgba(16, 185, 129, .14);
+        }
+
+        /* ===============================
+   Base
+   =============================== */
+        * {
+            box-sizing: border-box;
+        }
+
+        html,
+        body {
+            min-height: 100%;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(900px 520px at 12% 0%, var(--glow1), transparent 60%),
+                radial-gradient(900px 520px at 88% 0%, var(--glow2), transparent 60%),
+                var(--bg);
+        }
+
+        /* ===============================
+   Layout
+   =============================== */
+        .wrap {
+            max-width: 980px;
+            margin: 24px auto;
+            padding: 0 16px 64px;
+        }
+
+        .top {
+            display: grid;
+            grid-template-columns: 1.2fr .8fr;
+            gap: 16px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-top: 16px;
+        }
+
+        @media (max-width:840px) {
+
+            .top,
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ===============================
+   Card
+   =============================== */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: var(--shadow);
+        }
+
+        /* score card only */
+        #scoreCard {
+            position: relative;
+            overflow: hidden;
+        }
+
+        #scoreCard::before {
+            content: "";
+            position: absolute;
+            inset: -40% -20% auto auto;
+            width: 240px;
+            height: 240px;
+            background: radial-gradient(circle at 30% 30%, rgba(99, 102, 241, .18), transparent 60%);
+            transform: rotate(18deg);
+            pointer-events: none;
+        }
+
+        /* ===============================
+   Typography
+   =============================== */
+        .title {
+            font-size: 18px;
+            font-weight: 800;
+            margin-bottom: 10px;
+        }
+
+        .scoreRow {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .score {
+            font-size: 56px;
+            font-weight: 900;
+            letter-spacing: -0.04em;
+        }
+
+        .summary {
+            color: var(--muted);
+            line-height: 1.55;
+            margin-top: 10px;
+        }
+
+        .muted {
+            color: var(--muted);
+            line-height: 1.5;
+            margin-top: 8px;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+        }
+
+        .foot {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: .7;
+        }
+
+        /* ===============================
+   Badge
+   =============================== */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            height: 28px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-weight: 800;
+            font-size: 13px;
+            border: 1px solid var(--border);
+        }
+
+        .badge.pass {
+            background: rgba(16, 185, 129, .12);
+            color: rgba(16, 185, 129, .95);
+            border-color: rgba(16, 185, 129, .30);
+        }
+
+        .badge.fail {
+            background: rgba(239, 68, 68, .10);
+            color: rgba(239, 68, 68, .95);
+            border-color: rgba(239, 68, 68, .30);
+        }
+
+        /* ===============================
+   Feedback
+   =============================== */
+        .pill {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            font-weight: 900;
+        }
+
+        .pill small {
+            font-weight: 800;
+            opacity: .7;
+        }
+
+        .toggle-btn {
+            margin-top: 10px;
+            border: 1px solid var(--border);
+            background: var(--card);
+            color: var(--text);
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .toggle-btn:hover {
+            opacity: .9;
+        }
+
+        /* ===============================
+   Chart
+   =============================== */
+        #radarChart {
+            width: 100% !important;
+            height: 240px !important;
+            display: block;
+        }
+
+        /* ===============================
+   Theme Button
+   =============================== */
+        .toggle-theme {
+            border: 1px solid var(--border);
+            background: var(--card);
+            color: var(--text);
+            border-radius: 12px;
+            padding: 8px 12px;
+            font-weight: 900;
+            cursor: pointer;
+        }
+    </style>
+
+</head>
+
+<body>
+    <div class="wrap">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+            <button id="themeToggle" class="toggle-theme" type="button">다크모드</button>
+        </div>
+        <div class="top">
+            <div class="card" id="scoreCard">
+                <div class="title">면접 결과</div>
+                <div class="scoreRow">
+                    <div class="score" id="totalScore">-</div>
+                    <div id="resultBadge" class="badge">-</div>
+                </div>
+                <div class="summary" id="summaryText">-</div>
+                <div class="foot" id="createdAt"></div>
+            </div>
+
+            <div class="card" style="height: 340px;">
+                <div class="title">역량 프로파일</div>
+                <canvas id="radarChart"></canvas>
+            </div>
+        </div>
+
+        <div class="grid" id="feedbackGrid"></div>
+    </div>
+
+    <!-- ✅ JS는 여기서 딱 1번만 로드 -->
+    <script src="./result.js"></script>
+
+</body>
+
+</html>
