@@ -216,6 +216,20 @@ test/
 data/
 storage/
 
+# Logs (all environments)
+**/logs/*
+!**/logs/.gitkeep
+
+# PostgreSQL local data
+pgdata/
+*.sql.gz
+*.dump
+
+# Media files
+*.webp
+*.webm
+
+
 # gitkeep
 !data/.gitkeep
 !modules/.gitkeep
