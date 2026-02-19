@@ -59,6 +59,11 @@ pyannote-audio
 opencv-python
 deepface
 
+tensorflow
+tensorflow-hub
+
+tf-keras
+
 # --- Dev tools ---
 pytest
 ruff

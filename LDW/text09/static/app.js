@@ -25,7 +25,8 @@ const AppState = {
         devicesReady: false,
         recognition: null, // Web Speech API
         currentQuestionIndex: 0, // Added for progress tracking
-        totalQuestions: 12
+        totalQuestions: 12,
+        videoInterval: null // Added for video analysis
     }
 };
 
@@ -752,6 +753,10 @@ async function startRecording() {
         AppState.interview.mediaRecorder.start();
         $('#feed-label').textContent = "녹음 중... (Speaking)";
 
+        // Start Video Analysis Interval (every 1 second)
+        if (AppState.interview.videoInterval) clearInterval(AppState.interview.videoInterval);
+        AppState.interview.videoInterval = setInterval(captureAndAnalyzeFrame, 1000);
+
         // --- Real-time STT (Web Speech API) ---
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -801,12 +806,45 @@ async function startRecording() {
     }
 }
 
+// --- Video Analysis Helper ---
+async function captureAndAnalyzeFrame() {
+    const video = $('#user-video');
+    const canvas = $('#video-capture-canvas');
+    if (!video || !canvas) return;
+    
+    // Check if video is playing
+    if (video.paused || video.ended) return;
+
+    const ctx = canvas.getContext('2d');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(blob => {
+        if (!blob) return;
+        
+        const formData = new FormData();
+        formData.append('interview_number', AppState.interview.interviewNumber);
+        formData.append('frame', blob, 'frame.jpg');
+
+        fetch('/api/video/analyze', {
+            method: 'POST',
+            body: formData
+        }).catch(err => console.error("Video Analysis Error:", err));
+    }, 'image/jpeg', 0.8);
+}
+
 function stopRecording() {
     // Stop Speech Recognition
     if (AppState.interview.recognition) {
         AppState.interview.recognition.onend = null; // Prevent restart
         AppState.interview.recognition.stop();
         AppState.interview.recognition = null;
+    }
+
+    if (AppState.interview.videoInterval) {
+        clearInterval(AppState.interview.videoInterval);
+        AppState.interview.videoInterval = null;
     }
 
     return new Promise(resolve => {
