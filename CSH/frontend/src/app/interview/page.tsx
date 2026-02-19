@@ -288,7 +288,12 @@ function InterviewPageInner() {
 
       // 개입 체크 시작
       startInterventionCheck(sid);
-    } catch { setStatus("ready"); }
+    } catch (err) {
+      // 에러 발생 시에도 "listening" 상태로 복귀 → 사용자가 재시도 가능
+      console.error("다음 질문 요청 실패:", err);
+      setMessages(prev => [...prev, { role: "ai", text: "⚠️ 일시적 오류가 발생했습니다. 잠시 후 다시 답변해 주세요." }]);
+      setStatus("listening");
+    }
   };
 
   // ========== TTS 발화 ==========
@@ -347,18 +352,17 @@ function InterviewPageInner() {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     interventionApi.endTurn(sessionId, answer).catch(() => { });
 
-    // 평가
+    // 평가 — fire-and-forget (백그라운드 실행, 다음 질문 생성을 블로킹하지 않음)
+    // evaluate()는 LLM 호출이므로 60초+ 소요 가능 → await 없이 비동기 실행
     setStatus("processing");
-    try {
-      await interviewApi.evaluate({
-        session_id: sessionId,
-        question: currentQuestion,
-        answer,
-        question_number: questionNum,
-      });
-    } catch { /* ignore */ }
+    interviewApi.evaluate({
+      session_id: sessionId,
+      question: currentQuestion,
+      answer,
+      question_number: questionNum,
+    }).catch((err) => console.warn("평가 백그라운드 오류 (무시):", err));
 
-    // 다음 질문 or 종료
+    // 다음 질문 or 종료 (evaluate 완료를 기다리지 않고 즉시 실행)
     if (questionNum >= totalQuestions) {
       endInterview();
     } else {

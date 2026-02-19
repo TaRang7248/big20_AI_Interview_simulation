@@ -105,7 +105,9 @@ from security import (
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
+# 면접 LLM 호출 타임아웃 (초) — GTX 1660 VRAM 압박 시 무기한 hang 방지
+LLM_TIMEOUT_SEC = int(os.getenv("LLM_TIMEOUT_SEC", "120"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # 소셜 로그인 설정
@@ -138,8 +140,19 @@ async def run_in_executor(executor: ThreadPoolExecutor, func, *args, **kwargs):
 
 
 async def run_llm_async(llm, messages):
-    """LLM invoke를 비동기로 실행 (이벤트 루프 블로킹 방지)"""
-    return await run_in_executor(LLM_EXECUTOR, llm.invoke, messages)
+    """LLM invoke를 비동기로 실행 (이벤트 루프 블로킹 방지 + 타임아웃)
+
+    GTX 1660 등 저사양 GPU에서 VRAM 압박 시 LLM이 무기한 hang할 수 있으므로
+    asyncio.wait_for로 LLM_TIMEOUT_SEC 초 내에 응답을 강제합니다.
+    """
+    try:
+        return await asyncio.wait_for(
+            run_in_executor(LLM_EXECUTOR, llm.invoke, messages),
+            timeout=LLM_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        print(f"⏰ [LLM] 타임아웃 ({LLM_TIMEOUT_SEC}초 초과) — 폴백 응답 반환")
+        raise TimeoutError(f"LLM 응답 시간 초과 ({LLM_TIMEOUT_SEC}초)")
 
 
 async def run_rag_async(retriever, query):
@@ -1477,17 +1490,19 @@ class AIInterviewer:
         # LLM 초기화
         if LLM_AVAILABLE:
             try:
-                # 평가용 LLM (낮은 temperature)
+                # 평가용 LLM (낮은 temperature, think=None으로 thinking mode 비활성화)
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=0.3,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
+                    think=None,  # qwen3 thinking 비활성화 → 속도 2-5배 향상
                 )
-                # 질문 생성용 LLM (높은 temperature)
+                # 질문 생성용 LLM (높은 temperature, think=None으로 thinking mode 비활성화)
                 self.question_llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=DEFAULT_LLM_TEMPERATURE,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
+                    think=None,  # qwen3 thinking 비활성화 → 속도 2-5배 향상
                 )
                 print(f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}")
             except Exception as e:
