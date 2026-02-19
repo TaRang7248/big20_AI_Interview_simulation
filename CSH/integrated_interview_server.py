@@ -6979,6 +6979,30 @@ async def on_startup():
             broadcast_ws=False,
         )
 
+    # ── 코딩 문제 풀(Pool) 사전 생성 ──
+    # Celery worker가 실행 중이면 난이도별로 문제를 미리 생성하여
+    # 사용자가 코딩 테스트 페이지를 열었을 때 즉시 제공할 수 있도록 합니다.
+    if CODING_TEST_AVAILABLE:
+        try:
+            from code_execution_service import (
+                POOL_TARGET_SIZE,
+                problem_pool,
+                trigger_pool_refill,
+            )
+
+            for diff in ("easy", "medium", "hard"):
+                current = problem_pool.count(diff)
+                if current < POOL_TARGET_SIZE:
+                    trigger_pool_refill(diff)
+                    print(
+                        f"  📦 [Pool] {diff} 풀 보충 요청 (현재 {current}/{POOL_TARGET_SIZE})"
+                    )
+                else:
+                    print(f"  ✅ [Pool] {diff} 풀 충분 ({current}/{POOL_TARGET_SIZE})")
+            print("✅ [Startup] 코딩 문제 풀 사전 생성 태스크 발행 완료")
+        except Exception as e:
+            print(f"⚠️ [Startup] 코딩 문제 풀 초기화 실패 (Celery 미실행?): {e}")
+
 
 @app.on_event("shutdown")
 async def on_shutdown():

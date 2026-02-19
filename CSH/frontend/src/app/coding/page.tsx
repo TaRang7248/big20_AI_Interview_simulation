@@ -92,7 +92,13 @@ function CodingTestPage() {
       const tpl = await codingApi.getTemplate(language, p.id);
       setCode(tpl.template || "");
     } catch (e: unknown) {
-      setOutput(`문제 생성 실패: ${e instanceof Error ? e.message : "알 수 없는 오류"}`);
+      const msg = e instanceof Error ? e.message : "알 수 없는 오류";
+      // 타임아웃 에러인 경우 사용자에게 재시도 안내 메시지 표시
+      if (msg.includes("시간이 초과") || msg.includes("timeout")) {
+        setOutput("⏱ AI 문제 생성 시간이 초과되었습니다.\n기본 문제가 제공되었거나, 아래 '새 문제' 버튼을 눌러 다시 시도해주세요.");
+      } else {
+        setOutput(`문제 생성 실패: ${msg}`);
+      }
     } finally {
       setGenerating(false);
     }
@@ -219,9 +225,8 @@ function CodingTestPage() {
           <div className="flex items-center gap-1">
             {DIFFICULTIES.map(d => (
               <button key={d.value} onClick={() => changeDifficulty(d.value)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold transition ${
-                  difficulty === d.value ? d.color + " ring-1 ring-current" : "text-[#858585] hover:text-[#ccc]"
-                }`}>
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition ${difficulty === d.value ? d.color + " ring-1 ring-current" : "text-[#858585] hover:text-[#ccc]"
+                  }`}>
                 {d.label}
               </button>
             ))}
@@ -278,9 +283,8 @@ function CodingTestPage() {
           <div className="flex border-b border-[#3c3c3c]">
             {(["problem", "examples", "hints"] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`flex-1 px-3 py-2 text-xs font-medium transition ${
-                  activeTab === tab ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
-                }`}>
+                className={`flex-1 px-3 py-2 text-xs font-medium transition ${activeTab === tab ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
+                  }`}>
                 {tab === "problem" ? "📋 문제" : tab === "examples" ? "📝 예제" : "💡 힌트"}
               </button>
             ))}
@@ -349,30 +353,26 @@ function CodingTestPage() {
             {/* 탭 헤더 */}
             <div className="flex items-center bg-[#252526] border-b border-[#3c3c3c] shrink-0">
               <button onClick={() => setBottomTab("output")}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition ${
-                  bottomTab === "output" ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
-                }`}>
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition ${bottomTab === "output" ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
+                  }`}>
                 <Terminal size={12} /> 출력
               </button>
               <button onClick={() => setBottomTab("testResults")}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition ${
-                  bottomTab === "testResults" ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
-                }`}>
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition ${bottomTab === "testResults" ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
+                  }`}>
                 <FlaskConical size={12} /> 테스트 결과
                 {testSummary && (
-                  <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                    testSummary.passed === testSummary.total
+                  <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${testSummary.passed === testSummary.total
                       ? "bg-green-500/20 text-green-400"
                       : "bg-red-500/20 text-red-400"
-                  }`}>
+                    }`}>
                     {testSummary.passed}/{testSummary.total}
                   </span>
                 )}
               </button>
               <button onClick={() => setBottomTab("stdin")}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition ${
-                  bottomTab === "stdin" ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
-                }`}>
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium transition ${bottomTab === "stdin" ? "text-white border-b-2 border-[#007acc] bg-[#1e1e1e]" : "text-[#858585] hover:text-[#ccc]"
+                  }`}>
                 <Keyboard size={12} /> 입력(stdin)
               </button>
             </div>
@@ -398,11 +398,10 @@ function CodingTestPage() {
                     <div className="space-y-2">
                       {/* 요약 바 */}
                       {testSummary && (
-                        <div className={`flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium ${
-                          testSummary.passed === testSummary.total
+                        <div className={`flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium ${testSummary.passed === testSummary.total
                             ? "bg-green-500/10 border border-green-500/30 text-green-400"
                             : "bg-red-500/10 border border-red-500/30 text-red-400"
-                        }`}>
+                          }`}>
                           <div className="flex items-center gap-2">
                             {testSummary.passed === testSummary.total
                               ? <CheckCircle2 size={16} />
@@ -428,11 +427,10 @@ function CodingTestPage() {
                       {/* 개별 테스트 케이스 */}
                       {testResults.map(tc => (
                         <div key={tc.test_id}
-                          className={`rounded-lg border transition-all ${
-                            tc.passed
+                          className={`rounded-lg border transition-all ${tc.passed
                               ? "border-green-500/20 bg-green-500/5"
                               : "border-red-500/20 bg-red-500/5"
-                          }`}>
+                            }`}>
                           {/* 테스트 헤더 (클릭으로 펼침) */}
                           <button onClick={() => toggleTestExpand(tc.test_id)}
                             className="w-full flex items-center justify-between px-3 py-2 text-left">
@@ -443,9 +441,8 @@ function CodingTestPage() {
                               <span className={`text-xs font-medium ${tc.passed ? "text-green-400" : "text-red-400"}`}>
                                 테스트 {tc.test_id}
                               </span>
-                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${
-                                tc.passed ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
-                              }`}>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${tc.passed ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                                }`}>
                                 {tc.passed ? "PASS" : "FAIL"}
                               </span>
                             </div>
@@ -516,9 +513,8 @@ function CodingTestPage() {
         </div>
 
         {/* AI 분석 패널 (슬라이드) */}
-        <div className={`w-[420px] border-l border-[#3c3c3c] bg-[#252526] overflow-y-auto transition-all duration-300 ${
-          showAnalysis ? "translate-x-0" : "translate-x-full hidden"
-        }`}>
+        <div className={`w-[420px] border-l border-[#3c3c3c] bg-[#252526] overflow-y-auto transition-all duration-300 ${showAnalysis ? "translate-x-0" : "translate-x-full hidden"
+          }`}>
           <div className="p-4">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-semibold text-white">🤖 AI 코드 분석</h3>
@@ -529,11 +525,10 @@ function CodingTestPage() {
               <div className="space-y-4">
                 {/* 종합 점수 */}
                 <div className="text-center py-4">
-                  <div className={`text-5xl font-bold ${
-                    analysis.overall_score >= 80 ? "text-green-400" :
-                    analysis.overall_score >= 60 ? "text-yellow-400" :
-                    analysis.overall_score >= 40 ? "text-orange-400" : "text-red-400"
-                  }`}>{analysis.overall_score}</div>
+                  <div className={`text-5xl font-bold ${analysis.overall_score >= 80 ? "text-green-400" :
+                      analysis.overall_score >= 60 ? "text-yellow-400" :
+                        analysis.overall_score >= 40 ? "text-orange-400" : "text-red-400"
+                    }`}>{analysis.overall_score}</div>
                   <p className="text-sm text-[#858585] mt-1">종합 점수 / 100</p>
                 </div>
 
