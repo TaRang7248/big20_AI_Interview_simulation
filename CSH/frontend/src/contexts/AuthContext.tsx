@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from "react";
 import { authApi, type UserInfo } from "@/lib/api";
 
 interface AuthCtx {
@@ -10,6 +10,8 @@ interface AuthCtx {
   logout: () => void;
   refresh: () => void;
   refreshUser: () => Promise<void>;
+  /** 면접 진행 중 플래그 — true 설정 시 유휴 타임아웃 자동 로그아웃을 방지 */
+  setActiveSession: (active: boolean) => void;
 }
 
 const AuthContext = createContext<AuthCtx | null>(null);
@@ -26,6 +28,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // 면접 진행 중 플래그 — 유휴 타임아웃에서 자동 로그아웃 방지용
+  // interview 페이지에서 setActiveSession(true)를 호출하면
+  // 면접 진행 중에는 유휴 상태로 판단하지 않음 (음성만 사용하므로 마우스/키보드 이벤트 없음)
+  const activeSessionRef = useRef(false);
+  const setActiveSession = useCallback((active: boolean) => {
+    activeSessionRef.current = active;
+  }, []);
 
   // 초기 로드 – sessionStorage 복원
   useEffect(() => {
@@ -45,7 +55,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let sessionTimer: ReturnType<typeof setTimeout>;
 
     // Toast 시스템에 세션 만료 알림을 전달 (커스텀 이벤트 기반 — AuthContext는 ToastProvider 외부이므로)
-    const doLogout = () => { logout(); window.dispatchEvent(new CustomEvent("toast-event", { detail: { type: "warning", message: "세션이 만료되었습니다. 다시 로그인 해주세요." } })); };
+    // 면접 진행 중(activeSessionRef === true)에는 자동 로그아웃을 건너뜀
+    // → 음성으로만 대답하는 면접 특성상 마우스/키보드 이벤트가 없어
+    //   30분 유휴 타임아웃으로 오인되어 세션이 끊기는 문제 방지
+    const doLogout = () => { if (activeSessionRef.current) return; logout(); window.dispatchEvent(new CustomEvent("toast-event", { detail: { type: "warning", message: "세션이 만료되었습니다. 다시 로그인 해주세요." } })); };
 
     const resetIdle = () => {
       clearTimeout(idleTimer);
@@ -93,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, logout, refresh, refreshUser }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, refresh, refreshUser, setActiveSession }}>
       {children}
     </AuthContext.Provider>
   );

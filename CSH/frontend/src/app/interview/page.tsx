@@ -45,7 +45,7 @@ export default function InterviewPageWrapper() {
 }
 
 function InterviewPageInner() {
-  const { user, token, loading } = useAuth();
+  const { user, token, loading, setActiveSession } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -84,6 +84,10 @@ function InterviewPageInner() {
   const interventionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pushEventRef = useRef<((raw: Record<string, unknown>) => void) | null>(null);
 
+  // WebSocket 재연결 시도 횟수 — connectWebSocket 재귀 호출 시에도 누적되어
+  // 무한 재연결 루프를 방지 (이전: 매 호출마다 0으로 초기화되는 지역 변수 사용)
+  const wsReconnectAttemptsRef = useRef(0);
+
   // SpeechRecognition 콜백에서 최신 상태를 참조하기 위한 Ref
   // (클로저 캡처 시 stale value 문제 방지 — 콜백은 최초 생성 시점의 state 값만 보유)
   const interviewStartedRef = useRef(false);
@@ -96,8 +100,10 @@ function InterviewPageInner() {
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
 
   // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
+  // 면접 진행 중(interviewStartedRef)에는 토큰 만료로 인한 리다이렉트 방지
+  // → AuthContext의 유휴 타임아웃으로 token이 null이 되어도 면접 화면 유지
   useEffect(() => {
-    if (!loading && !token) router.push("/");
+    if (!loading && !token && !interviewStartedRef.current) router.push("/");
   }, [loading, token, router]);
 
   // 리포트 데이터 로드
@@ -156,12 +162,14 @@ function InterviewPageInner() {
   // 클린업 (카메라, WebSocket, 음성인식)
   useEffect(() => {
     return () => {
+      setActiveSession(false); // 페이지 이탈 시 Auth 유휴 타임아웃 복원
       streamRef.current?.getTracks().forEach(t => t.stop());
       wsRef.current?.close();
       recognitionRef.current?.stop();
       if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setActiveSession]);
 
   // ========== 면접 시작 ==========
   const startInterview = async () => {
@@ -222,6 +230,12 @@ function InterviewPageInner() {
         const wsToken = sessionStorage.getItem("access_token");
         const ws = new WebSocket(`${protocol}//${window.location.host}/ws/interview/${targetSid}?token=${encodeURIComponent(wsToken || "")}`);
 
+        // WebSocket 연결 성공 시 재연결 카운터 리셋
+        // — 이전 끊김에서 정상 복구된 것이므로 카운터를 초기화
+        ws.onopen = () => {
+          wsReconnectAttemptsRef.current = 0;
+        };
+
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
@@ -234,21 +248,26 @@ function InterviewPageInner() {
           } catch { /* ignore */ }
         };
 
-        // WebSocket 끊김 시 자동 재연결 (최대 5회, 3초 간격)
-        let reconnectAttempts = 0;
+        // WebSocket 끊김 시 자동 재연결 (최대 5회, 지수 백오프)
+        // wsReconnectAttemptsRef를 사용하여 connectWebSocket 재귀 호출 시에도
+        // 카운터가 누적됨 → 무한 재연결 루프 방지
         const MAX_RECONNECT = 5;
         ws.onclose = (ev) => {
           // 정상 종료(코드 1000)이거나 면접 종료 상태면 재연결하지 않음
           if (ev.code === 1000 || !interviewStartedRef.current) return;
-          console.warn(`[WebSocket] 연결 끊김 (code: ${ev.code}). 재연결 시도 중...`);
-          if (reconnectAttempts < MAX_RECONNECT) {
-            reconnectAttempts++;
+          console.warn(`[WebSocket] 연결 끊김 (code: ${ev.code}). 재연결 시도 ${wsReconnectAttemptsRef.current + 1}/${MAX_RECONNECT}`);
+          if (wsReconnectAttemptsRef.current < MAX_RECONNECT) {
+            wsReconnectAttemptsRef.current++;
+            // 지수 백오프: 재시도 간격을 점진적으로 증가 (3초 → 6초 → 12초 → ...)
+            const delay = 3000 * Math.pow(2, wsReconnectAttemptsRef.current - 1);
             setTimeout(() => {
               if (interviewStartedRef.current) {
                 const newWs = connectWebSocket(targetSid);
                 wsRef.current = newWs;
               }
-            }, 3000);
+            }, Math.min(delay, 30000)); // 최대 30초 대기
+          } else {
+            console.error("[WebSocket] 최대 재연결 횟수 초과. 수동 새로고침이 필요합니다.");
           }
         };
 
@@ -266,6 +285,7 @@ function InterviewPageInner() {
       initSpeechRecognition();
       setPhase("interview");
       setInterviewStarted(true);
+      setActiveSession(true); // 면접 시작 → Auth 유휴 타임아웃 비활성화
       setSessionId(sid);
 
       await getNextQuestion(sid, "[START]");
@@ -457,6 +477,7 @@ function InterviewPageInner() {
   // ========== 면접 종료 ==========
   const endInterview = async () => {
     setInterviewStarted(false);
+    setActiveSession(false); // 면접 종료 → Auth 유휴 타임아웃 재활성화
     recognitionRef.current?.stop();
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
 
