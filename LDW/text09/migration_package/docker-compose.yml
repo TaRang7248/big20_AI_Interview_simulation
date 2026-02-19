@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # 애플리케이션 서비스 (기존과 동일하게 설정)
+  ai-interview-simulation:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: ai-interview-sim
+    ports:
+      - "5000:5000"
+    volumes:
+      - ..:/app
+      - /app/__pycache__
+    env_file:
+      - ../../../.env
+    environment:
+      - PYTHONUNBUFFERED=1
+    depends_on:
+      - db
+    restart: unless-stopped
+
+  # 데이터베이스 서비스 (새로운 컴퓨터에서 실행될 DB)
+  db:
+    image: postgres:13-alpine # 기존 환경에 맞춰 버전 선택 (필요시 조정)
+    container_name: interview_db_new
+    ports:
+      - "5432:5432"
+    env_file:
+      - ../../../.env
+    volumes:
+      - db_data_new:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  db_data_new:

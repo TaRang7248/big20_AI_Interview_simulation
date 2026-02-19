@@ -119,3 +119,56 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── Dockerfile               # 도커 이미지 빌드 설정 파일
 └── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
 ```
+
+---
+
+## 7. 데이터베이스 이관 및 설정 가이드 (Migration Guide)
+
+이 섹션은 현재 실행 중인 데이터베이스 컨테이너(`interview_db_container`)의 데이터와 설정을 다른 컴퓨터로 그대로 옮겨 실행하는 방법을 설명합니다.
+
+### 1단계: 데이터 백업 (기존 컴퓨터)
+기존 컴퓨터에서 다음 스크립트를 실행하여 데이터베이스의 **스키마(구조)**와 **데이터**를 추출합니다.
+
+1. `migration_package` 폴더로 이동합니다.
+   ```bash
+   cd C:\big20\big20_AI_Interview_simulation\LDW\text09\migration_package
+   ```
+2. 스키마 추출 실행:
+   ```bash
+   python export_schema.py
+   ```
+   - 결과물: `../data/schema.sql` 생성됨
+3. 데이터 추출 실행 (기존 `export_db.py` 위치에서 실행 권장):
+   ```bash
+   cd ..
+   python export_db.py
+   ```
+   - 결과물: `data/interview_db_backup.json` 생성됨
+
+### 2단계: 파일 복사 (이관)
+다음 파일 및 폴더를 압축하여 **새로운 컴퓨터**로 복사합니다.
+
+- **전체 프로젝트 폴더**: `C:\big20\big20_AI_Interview_simulation\LDW\text09` (하위 폴더 포함)
+  - 특히 `data/` 폴더 내의 `schema.sql`과 `interview_db_backup.json`이 반드시 포함되어야 합니다.
+  - `.env` 파일 (상위 폴더에 위치)도 함께 복사하거나, 새 컴퓨터에 동일한 내용으로 생성해야 합니다.
+
+### 3단계: 데이터베이스 복원 (새로운 컴퓨터)
+새로운 컴퓨터에서 다음 절차를 따릅니다.
+
+1. **Docker 환경 실행**:
+   `migration_package` 폴더 내의 `docker-compose.yml`을 사용하여 DB와 앱을 실행합니다.
+   ```bash
+   cd migration_package
+   docker-compose up -d --build
+   ```
+   - `-d`: 백그라운드 실행
+2. **데이터 복원 실행**:
+   데이터베이스가 실행된 상태에서 복원 스크립트를 실행합니다.
+   ```bash
+   # (필요시 가상환경 활성화 후)
+   python import_data.py
+   ```
+   - 이 스크립트는 `data/schema.sql`로 테이블을 생성하고, `data/interview_db_backup.json`의 데이터를 입력합니다.
+
+3. **확인**:
+   웹 브라우저에서 `http://localhost:5000`에 접속하여 데이터가 정상적으로 조회되는지 확인합니다.
