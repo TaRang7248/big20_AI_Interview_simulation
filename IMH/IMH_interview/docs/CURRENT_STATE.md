@@ -13,7 +13,7 @@
   반드시 `interview_env` 활성화 상태에서 수행한다.
 - 글로벌(시스템) Python 환경에 패키지 설치는 금지한다.
 
-# 검증 상태 요약 (Phase 1 ~ Phase 7, TASK-004 ~ TASK-025)
+# 검증 상태 요약 (Phase 1 ~ Phase 10, TASK-004 ~ TASK-028)
 
 # Phase 1 ~ Phase 4. Core Processing & Report Layer
 
@@ -54,45 +54,31 @@
 - Snapshot 기반 질문/평가/조회 흐름 정합성 확인
 - Phase 5 핵심 계약(Freeze / Snapshot / State Contract) 보호 상태 확인
 
----
-
-## 4. Admin Query Layer (TASK-020)
-
-- Active + History 통합 조회(Federated Search) 정상 동작 확인
-- 필수 필터(job_id, status, result, date) 계약 준수 확인
-- `result` 필터는 EVALUATED 상태에만 적용됨 검증 완료
-- `is_interrupted` alias 합집합 처리 확인
-- `search_keyword` 계약(2자 이상, email exact, name partial) 준수 확인
-- `weakness` 필터는 Phase 7 이후로 Deferred
-- Snapshot 기반 Read-Only 조회 경계 준수 확인
-- Scope Lock 위반 없음 확인
-
-📌 **Phase 5 종료 상태**
+📌 **Phase 5 기준선**
 - 상태 전이 계약 고정
 - Snapshot 불변성 고정
 - Freeze at Publish 계약 고정
-- Admin Query Read-Only 경계 확정
+- Engine이 유일한 상태 변경 권한 보유
 
 ---
 
 # Phase 6. Service Layer & API Boundary 확정 (TASK-022 ~ TASK-023)
 
-## 5. Service Layer (TASK-022)
+## 4. Service Layer (TASK-022)
 
-- API → Service → Engine 단일 Command 경로 강제 확인
-- 상태 변경은 반드시 Engine 메서드를 통해서만 수행됨 검증 완료
-- DTO ↔ Domain 완전 분리 (명시적 Mapper 적용) 확정
+- API → Service → Engine 단일 Command 경로 강제
+- 상태 변경은 반드시 Engine 메서드를 통해서만 수행됨
+- DTO ↔ Domain 완전 분리 (명시적 Mapper 적용)
 - Command / Query 분리(CQRS) 구조 고정
-- session_id 단위 Fail-Fast 동시성 정책 적용 완료
+- session_id 단위 Fail-Fast 동시성 정책 적용
 - Admin Query는 Read-Only Query Service 경로로 분리
 
-## 6. API Layer & Runtime Entry (TASK-023)
+## 5. API Layer & Runtime Entry (TASK-023)
 
 - API Layer는 Service Layer의 Entry Adapter로만 동작
 - Engine/Repository 직접 접근 없음 (AST Guardrail 검증 완료)
 - 상태 전이 / Lock 정의 / Freeze 해석을 API에서 수행하지 않음
 - 병렬 요청 경쟁 시 1건 423 즉시 반환 검증 완료
-- 구조 계약 위반 방지 Guardrail 확보
 
 📌 **Phase 6 기준선**
 - API ↔ Service ↔ Engine 경계 고정
@@ -103,74 +89,111 @@
 
 # Phase 7. Question Bank & RAG Fallback Integration
 
-## 7. Question Bank Layer (TASK-024)
+## 6. Question Bank Layer (TASK-024)
 
 - `packages/imh_qbank` 구조 확정 (Domain / Repository / Service)
 - Source 계층 정의 (STATIC / GENERATED ORIGIN)
 - Soft Delete 정책 도입 (status=DELETED → 신규 세션 자동 제외)
 - Snapshot과 완전 독립(Value Object) 구조 검증 완료
 - Hard Delete 경로 없음 확인
-- Engine/Service 경계 침범 없음 검증 완료
 
-## 8. RAG Fallback Engine 통합 (TASK-025)
+## 7. RAG Fallback Engine 통합 (TASK-025)
 
 - SessionEngine 단일 판단 주체(Fallback Authority) 고정
 - 3-Tier 전략 검증 완료:
-  1) RAG 생성 시도
+  1) RAG 생성
   2) Static QBank Fallback
   3) Emergency Safe Fallback
-- Fallback은 상태 전이를 유발하지 않음 검증 완료
 - Generated 질문은 Snapshot에 Value로 고정
 - Snapshot Independence 검증 완료
 - Freeze / Snapshot / State Contract 침해 없음 확인
-- Contract Stability 재검증 완료
 
 📌 **Phase 7 기준선**
 - Question Source 이중 구조 안정화
 - Engine 권한 단일화 유지
 - Snapshot 오염 없음
-- 핵심 계약(Freeze / Snapshot / State Contract) 보호 유지
 
 ---
 
 # Phase 8. PostgreSQL 영속화 전환 완료 (TASK-026)
 
-- Primary Data Store: PostgreSQL (Read / Write)
-- Dual Write 전략 유지 (Postgres Primary + Memory Secondary)
+- Primary Data Store: PostgreSQL
+- Memory는 Secondary / Rollback Safety 용도로만 유지
+- Write Path: PostgreSQL → Secondary 구조 유지
 - Restart Replay / Rollback Safety 검증 완료
 - Snapshot 영속화 전략 확정
-- 기존 파일 기반 구조 완전 전환 완료
 
 📌 **Phase 8 기준선**
 - PostgreSQL 단일 권위 저장소 확정
-- Memory는 Secondary / Rollback Safety 용도로만 유지
-- Write Path Switch 완료
-- 계약 불변 유지
+- Authority 구조 명확화 완료
 
 ---
 
-# Phase 9. Redis Introduction (Runtime & Control)
+# Phase 9. Redis Runtime & Control Layer 고정 (TASK-027)
 
-## 9. Redis Baseline (TASK-027 CP0)
+## 8. Redis Baseline (TASK-027 CP0 ~ CP4)
 
-- **Status**: ✅ VERIFIED / LOCKED
-- **Scope**:
-  - Runtime Mirror (PG → Redis 단순 복제)
-  - Distributed Lock (interview_id 단위)
-  - Idempotency Guard (request_id 기반)
-- **Immutable Contracts**:
-  - PostgreSQL Only Source of Truth
-  - Write Order: PG Commit → Redis Mirror
-  - No Write-Back (Redis → PG 금지)
-  - Redis Down 시 Fail-Fast Reject
-  - Hydration = Mirror 복원 (상태 변경 아님)
-  - Pause는 Operational Flag (State Transition 아님)
+- Runtime Mirror (PG → Redis 복제)
+- Distributed Lock (interview_id 단위)
+- Idempotency Guard (request_id 기반)
+- Write Order: PG Commit → Redis Mirror
+- No Write-Back 계약 유지
+- Redis Down 시 Fail-Fast Reject
+- Hydration = Mirror 복원 (상태 변경 아님)
+- Pause는 Operational Flag (State Transition 아님)
 
-📌 **Phase 9 현재 기준선**
+📌 **Phase 9 기준선**
 - Redis는 Authority가 아니다.
-- Redis는 Control + Runtime Layer에만 한정된다.
+- Redis는 Control + Runtime Layer 전용이다.
 - Snapshot / Freeze / State Contract 침해 없음.
-- Restart Replay 안전성 유지.
+
+---
+
+# Phase 10. Operational Statistics & Observability Layer (TASK-028)
+
+## 9. Business Statistics Layer (CP0) — LOCKED
+
+- Track A: PostgreSQL Snapshot 기반 통계
+- Type 1: Real-Time Status
+- Type 2: 기간 집계 / 평균 점수
+- Redis는 Result Cache Only
+- TTL / as_of 일관성 검증 완료
+- PostgreSQL Authority 유지
+
+## 10. Operational Observability Layer (CP1) — LOCKED
+
+- Track B: Informational Only (비즈니스 지표와 혼합 금지)
+- Reason / Span / Layer 3축 메타 모델 확정
+- Log 기반 Latency / Failure Rate / Cache Hit 관측 구현
+- 상태 전이 실패율: 기존 로그/PG 실패 이벤트 기반 집계
+- Type 3: MView 격리 전략 + 쿼리 레벨 증명 완료
+- Type 4: DISABLED (실시간 실행 금지, 영속 저장 없음)
+- Track A / Track B 물리적 분리 검증 완료
+- 신규 Write Path 없음
+- Engine/Command 수정 없음
+
+📌 **Phase 10 기준선**
+- 통계와 관측 계층 분리 완료
+- Authority 구조 유지
+- Heavy Query 격리 전략 확정
+- 운영 관측 계층 안정화
+
+---
+
+# 📌 현재 시스템 상태 (Phase 1 ~ Phase 10 완료)
+
+- 상태 전이 / Snapshot / Freeze 계약 고정
+- PostgreSQL 단일 권위 저장소 확정
+- Redis는 Runtime/Cache 전용
+- Business Stats와 Observability 완전 분리
+- Heavy Query 격리 전략 확정
+- 신규 영속 Write Path 없음
+- 핵심 계약 침해 없음
+
+---
+
+> 시스템은 실행 엔진 + 영속화 + 런타임 제어 + 통계 + 관측까지 완성된 상태이다.
+> 운영 가능한 아키텍처로 안정화되었다.
 
 ---
 
@@ -187,7 +210,7 @@
 ---
 ## 2. 현재 개발 단계
 
-- 상태: **Phase 9 COMPLETE → Phase 10 (TASK-028) 준비 단계**
+- 상태: Phase 10 COMPLETE → Phase 11 정의 대기
 
 ---
 
@@ -345,18 +368,6 @@
 
 ---
 
-# Phase 10 (NEXT)
-
-## TASK-028 관리자 통계 및 운영 관측 계층 (NOT STARTED)
-
-- 운영 통계 Query Layer 설계
-- 공고별 / 직무별 / 평가축별 통계
-- 평균 점수 / 합격률 / 약점 분포
-- Cache / Model / Latency 관측 확장 가능 구조 설계
-- 멀티모달 품질 지표 수용 가능한 구조 확보
-
----
-
 # Phase 9의 목적 (완료)
 
 - Redis Control Layer 안정화
@@ -365,71 +376,178 @@
 - Dual Write 제거 준비 완료
 - Phase 10 확장을 위한 안정적 아키텍처 기반 확보
 
+---
+# Phase 10
+
+## TASK-028 관리자 통계 및 운영 관측 계층 (Phase 10) — ✅ DONE / LOCKED
+
+> Phase 10 (Operational Statistics & Observability Layer) 완료.  
+> CP0 (Track A) 및 CP1 (Track B) 모두 LOCKED 상태로 전환되었다.
+
+### TASK-028 / CP0 (Business Statistics MVP) — 🔒 LOCKED
+- **Status**: 🔒 LOCKED
+  - Authority / Caching / Isolation (verify_task_028_cp0.py): PASS
+  - TTL 만료/복귀 및 as_of 일관성 (verify_task_028_cp0_ttl.py): PASS
+- **Scope**:
+  - Track A (Business Stats) Only
+  - Query Type 1 (Real-time) & Type 2 (Period Aggregated)
+  - `packages/imh_stats` Package
+- **Contracts** (불변):
+  - PostgreSQL Authority (Source of Truth)
+  - Redis Read-Through Cache Only (No Authority)
+  - Read-Only Query Layer (No Side-effects)
+
+---
+
+### TASK-028 / CP1 (Operational Observability & Heavy Query Isolation) — 🔒 LOCKED
+- **Status**: 🔒 LOCKED
+  - Code Level Separation (Track A/B): PASS
+  - Type 4 DISABLED Guard: PASS
+  - informational_only=True enforced: PASS
+  - Log-based Latency/FailureRate/CacheHitRate: PASS
+  - Redis as_of preservation (Miss→Hit): PASS
+  - PG State Transition Failures (No Engine Mod): PASS
+  - Type 3 MView Isolation (query-level: TYPE3_MVIEW_NAME, SQL template, banned table check): PASS
+  - TTS_SYNTHESIS excluded from active Spans: PASS
+- **Scope**:
+  - Track B (Operational Observability) — Informational Only
+  - `obs_enums.py`, `obs_dtos.py`, `obs_repository.py`, `obs_service.py`
+  - Type 3 MView strategy (DB-level, repo routes to MView if exists)
+  - Type 4 DISABLED (no endpoint, no storage)
+- **Contracts** (불변):
+  - Track B NEVER called by Track A Services/Repos
+  - Redis = Result Cache Only (setex, TTL, as_of preserved)
+  - No Engine/Command modification
+  - No Write-Back, No new persistent paths
+  - TTS_SYNTHESIS = Reserved (excluded from CP1)
+
+---
+
+### TASK-028 최종 계약 재확인 (Immutable)
+
+다음 계약은 TASK-028 완료 이후에도 절대 변경되지 않는다:
+
+| 계약 | 상태 |
+|---|---|
+| PostgreSQL Authority는 유지된다 | ✅ 확인 |
+| Redis는 Result Cache Only이다 | ✅ 확인 |
+| Observability는 Informational Only이다 | ✅ 확인 |
+| Business Stats(Track A)와 Observability(Track B)는 물리적으로 분리되어 있다 | ✅ 확인 |
+| Engine / Command / State Contract는 변경되지 않았다 | ✅ 확인 |
+| 신규 영속 Write Path는 생성되지 않았다 | ✅ 확인 |
+| Snapshot / Freeze 계약은 유지된다 | ✅ 확인 |
+
+---
 
 ## 3. 확정된 핵심 방향 (변경 금지)
 
 ### 3.1 기능 우선순위 (Phase 9 완료 기준)
 
-1. **Phase 2 Playground 기반 정적 파일 분석은 유지 (독립 테스트 하네스)**  
-   - 오디오/영상 업로드 → STT / 감정 / 시선 / 음성 분석 검증  
-   - 문서(PDF) 업로드 → Text 추출(PDF→Text)  
-   - 목적: 개발/검증/Regression 테스트 환경 유지  
-   - Session Engine / Snapshot 구조와 완전히 분리 유지  
-   - Redis / Runtime / Cache 계층과도 독립  
-   - Engine 상태 전이(State Contract)와 무관  
+1. **Phase 2 Playground 기반 정적 파일 분석은 유지 (독립 테스트 하네스)**
+
+- 오디오/영상 업로드 → STT / 감정 / 시선 / 음성 분석 검증
+- 문서(PDF) 업로드 → Text 추출(PDF → Text)
+- 목적: 개발/검증/Regression 테스트 환경 유지
+- Session Engine / Snapshot 구조와 완전히 분리 유지
+- Redis / Runtime / Cache 계층과도 독립
+- Engine 상태 전이(State Contract)와 무관
+- Business Statistics / Observability 계층과도 독립
+
+> Playground는 운영 흐름이 아닌 실험/검증 전용 영역이다.
 
 ---
 
-2. **Phase 7 완료: 질문은행 + RAG Fallback 통합 구조 확정 (LOCKED 구조)**  
-   - Session Engine 단일 정책 판단 구조 유지  
-   - Question Source 분리 구조 확정:
-     - STATIC (Question Bank)
-     - GENERATED (RAG/LLM)
-   - RAG 실패 시 3-Tier 전략 고정:
-     1) RAG 생성 시도
-     2) Static QBank Fallback
-     3) Emergency Safe Fallback
-   - Fallback은 상태 전이를 유발하지 않음 (State Contract 불변)  
-   - Generated 질문은 Snapshot에 Value Object로 고정  
-   - Freeze / Snapshot / State Contract 계약 침범 금지  
-   - Engine 외부에서 Question Source 변경 경로 금지  
-   - Redis Cache 계층은 Read Optimization Only  
-   - Snapshot Immutable 계약 유지  
+2. **Phase 7 완료: 질문은행 + RAG Fallback 통합 구조 (LOCKED)**
+
+- Session Engine 단일 정책 판단 구조 유지
+- Question Source 분리 구조 확정:
+  - STATIC (Question Bank)
+  - GENERATED (RAG/LLM)
+- RAG 실패 시 3-Tier 전략 고정:
+  1) RAG 생성 시도
+  2) Static QBank Fallback
+  3) Emergency Safe Fallback
+- Fallback은 상태 전이를 유발하지 않음 (State Contract 불변)
+- Generated 질문은 Snapshot에 Value Object로 고정
+- Freeze / Snapshot / State Contract 계약 침범 금지
+- Engine 외부에서 Question Source 변경 경로 금지
+- Redis Cache 계층은 Read Optimization Only
+- Snapshot Immutable 계약 유지
+- Business Statistics / Observability 계층은 Question Source에 영향 없음
+
+> Engine이 유일한 질문 정책 결정 권한을 가진다.
 
 ---
 
-3. **TTS (Text → Speech)**  
-   - 실시간 면접 단계의 구성요소  
-   - 현재 HOLD 유지  
-   - Prompt Cache / Snapshot 안정화 이후 재개  
-   - Provider 패턴 기반 통합 예정  
-   - Engine 경계 침범 금지  
-   - Redis Authority와 무관  
+3. **TTS (Text → Speech)**
+
+- 실시간 면접 단계의 구성요소
+- 현재 HOLD 유지
+- Prompt Cache / Snapshot 안정화 이후 재개 예정
+- Provider 패턴 기반 통합 예정
+- Engine 경계 침범 금지
+- Redis Authority와 무관
+- Observability Span은 Reserved 처리 (현재 구현 범위 제외)
+
+> TTS는 현재 시스템 계약에 영향을 주지 않는 보류 기능이다.
 
 ---
 
-4. **RAG / 질문은행 / 임베딩 (Phase 7~9 기준 안정화 완료)**  
-   - 온프레미스 저성능 모델 보정 목적  
-   - 질문 품질 안정화 및 직무/공고 기반 보강  
-   - Fallback 구조 LOCKED  
-   - 향후 확장 가능성:
-     - PGVector 도입
-     - 외부 RAG 엔진 교체
-   - Engine 경계 불변 유지  
-   - Snapshot 계약과 충돌 금지  
-   - metadata는 최소 집합 유지 (Snapshot 오염 방지)  
-   - Redis RAG Cache는 Derived Data이며 Authority가 아님  
+4. **RAG / 질문은행 / 임베딩 (Phase 7~9 안정화 완료)**
+
+- 온프레미스 저성능 모델 보정 목적
+- 질문 품질 안정화 및 직무/공고 기반 보강
+- Fallback 구조 LOCKED
+- 향후 확장 가능성:
+  - PGVector 도입
+  - 외부 RAG 엔진 교체
+- Engine 경계 불변 유지
+- Snapshot 계약과 충돌 금지
+- metadata 최소 집합 유지 (Snapshot 오염 방지)
+- Redis RAG Cache는 Derived Data이며 Authority가 아님
+- Business Stats 및 Observability는 RAG 내부 상태에 의존하지 않음
+
+> RAG는 품질 보강 계층이며 상태 권한을 가지지 않는다.
 
 ---
 
-5. **UI / 프론트 연동 (Phase 10 이후 확장)**  
-   - API → Service → Engine 단일 Command 경로 유지  
-   - Command / Query 분리 원칙 유지  
-   - 상태 전이(State Contract) API 우회 금지  
-   - 질문 Source 조작 API 금지  
-   - Redis Cache를 직접 접근하는 API 금지  
-   - Snapshot Freeze 이후 수정 경로 금지  
+5. **Business Statistics & Observability (Phase 10 완료 — LOCKED)**
 
+### Track A: Business Statistics
+- PostgreSQL Snapshot 기반 통계
+- Type 1: Real-Time Status
+- Type 2: 기간 집계 / 평균 점수
+- Redis는 Result Cache Only
+- TTL / as_of 계약 유지
+- PostgreSQL Authority 유지
+
+### Track B: Operational Observability
+- Informational Only (비즈니스 지표와 혼합 금지)
+- Reason / Span / Layer 3축 메타 모델 확정
+- Log 기반 Latency / Failure Rate / Cache Hit 관측
+- 상태 전이 실패율은 기존 로그/PG 실패 이벤트 기반
+- Track A / Track B 물리적 분리 유지
+- 신규 Write Path 없음
+- Type 3: MView 격리 전략 확정
+- Type 4: DISABLED 유지
+
+> 통계는 권위 데이터 기반, 관측은 참고용이다.
+> 두 계층은 절대 혼합되지 않는다.
+
+---
+
+6. **UI / 프론트 연동 (Phase 11 이후 확장 예정)**
+
+- API → Service → Engine 단일 Command 경로 유지
+- Command / Query 분리 원칙 유지
+- 상태 전이(State Contract) API 우회 금지
+- 질문 Source 조작 API 금지
+- Redis Cache 직접 접근 API 금지
+- Snapshot Freeze 이후 수정 경로 금지
+- Track A / Track B 분리 구조 유지
+- Observability는 UI에 노출 가능하나 Informational임을 명시
+
+> UI는 계약을 소비하는 계층이며 계약을 변경할 수 없다.
 ---
 
 ## 세션 상태 (변경 금지)
@@ -587,7 +705,6 @@ IMH/IMH_Interview/
 
 - packages/는 팀원과 공유 가능한 단위로 설계한다.
 - IMH/는 실행 진입점만 담당하며 비즈니스 로직을 가지지 않는다.
-
 ### 진행 상태
 
 - `packages/imh_core/`: ✅ DONE  
@@ -642,11 +759,8 @@ IMH/IMH_Interview/
   - TASK-021: End-to-End 인터뷰 실행 아키텍처 통합 구현 완료
     - Job Policy Freeze at Publish 계약 적용
     - Snapshot Double Lock 구조 구현
-      - Job Policy Snapshot (Template)
-      - Session Config Snapshot (Instance Deep Copy)
     - Session Engine ↔ Job Policy Engine ↔ Evaluation ↔ Admin Query 통합 흐름 구현
     - 상태 전이(State Contract) 기반 실행 흐름 검증 완료
-    - Actual / Practice 모드별 중단/재진입 정책 통합 적용 검증 완료
     - Snapshot 기반 Evaluation 및 Admin Query 정합성 검증 완료 (`verify_task_021.py`)
 
   - TASK-022: Service Layer 및 외부 경계 통합 구현 완료
@@ -654,63 +768,57 @@ IMH/IMH_Interview/
     - `AdminQueryService` 구현 (Read-Only Query 경로 분리)
     - API ↔ Domain 완전 격리 (DTO / 명시적 Mapper 적용)
     - Command(Lock) / Query(Bypass) 구조 분리 확정
-    - session_id 단위 File/Memory Lock 기반 Fail-Fast 동시성 제어 적용
-    - Engine 상태 변경은 반드시 엔진 메서드를 통해서만 수행됨 확인
-    - Phase 5 계약(Freeze / Snapshot / State Contract) 훼손 없음 검증 완료 (`verify_task_022.py`)
+    - Fail-Fast 동시성 제어 적용
+    - Phase 5 계약 훼손 없음 검증 완료 (`verify_task_022.py`)
 
 - `packages/imh_qbank/`: ✅ DONE
   - TASK-024: 질문은행 구조 정비 완료
-    - 질문 자산 관리(SourceType 분리) 및 Soft Delete 정책 구현
-    - Candidate Provider 인터페이스(Service Layer 연동 준비) 구현
-    - Session Immutability(Edit/Delete Tolerant) 검증 완료 (`verify_task_024.py`)
-    - Engine/Service 경계 준수(단방향 의존) 확인
-
   - TASK-025: RAG Fallback 엔진 통합 완료
-    - Session Engine 내 RAG -> Fallback -> Emergency 전략 구현
-    - `QuestionGenerator` (Mock) 및 `QBankService` 통합
-    - `SessionQuestion` Value Object 기반 Snapshot 불변성 보장
-    - `verify_task_025.py` 검증 PASS (Success/Fallback/Critical/Snapshot 시나리오)
+    - Snapshot 불변성 보장
+    - Engine 단일 판단 주체 유지
+    - Contract Stability 재검증 완료 (`verify_task_025.py`)
+
+- `packages/imh_stats/`: ✅ DONE
+  - TASK-028 CP0: Business Statistics Layer 구현 완료
+    - Type1 (Real-Time Status)
+    - Type2 (기간 집계 / 평균 점수)
+    - Redis Result Cache Only 적용
+    - TTL / as_of 일관성 검증 완료
+
+  - TASK-028 CP1: Operational Observability Layer 구현 완료
+    - Track B Informational Only 분리
+    - Reason / Span / Layer 메타 모델 확정
+    - Log 기반 Latency / Failure Rate / Cache Hit 관측 구현
+    - 상태 전이 실패율 집계 (Engine 수정 없음)
+    - Type3 MView 격리 전략 확정 및 쿼리 레벨 검증 완료
+    - Type4 DISABLED 유지 (영속 저장 없음)
+    - Track A/B 물리적 분리 검증 완료
+    - 신규 Write Path 없음
 
 - `IMH/api/`: ✅ DONE
   - TASK-014: 리포트 조회 API 노출
-    - 리포트 목록(List) / 상세(Detail) 조회 API 구현
-    - 저장된 리포트(JSON)를 외부 소비 계층에서 조회 가능하도록 노출
-    - List / Detail 데이터 노출 정책 분리
-    - Read-only API 동작 검증 완료
-
   - TASK-023: API Layer 및 Runtime Entry 경계 확정 완료
-    - API Interface Layer 구현 (Session / Admin 진입점 분리)
-    - Application Bootstrap 및 Composition Root 단일 진입 경계 확정
-    - API → Service → Engine 단일 Command 경로 강제 구조 유지
-    - DTO ↔ Domain 완전 격리 및 명시적 Response Mapping 적용
-    - API Layer에서 Engine/Repository 직접 접근 없음(AST 기반 정적 분석 검증 완료)
-    - 상태 전이 판단 / Lock 정의 / Freeze 해석을 API Layer에서 수행하지 않음 검증 완료
-    - 실제 병렬 API 요청 2건 경쟁 기반 Fail-Fast 동시성 정책 검증 완료 (`verify_task_023.py`)
-    - AST 기반 Guardrail 적용으로 구조 계약 위반 방지 체계 확보
-    - Phase 5 계약(Freeze / Snapshot / State Contract) 침범 없음 재확인
+    - API → Service → Engine 단일 Command 경로 유지
+    - AST 기반 Guardrail 확보
+    - 병렬 요청 Fail-Fast 검증 완료 (`verify_task_023.py`)
 
 - `IMH/IMH_Interview/_refs/`: ✅ DONE
   - TASK-015: UI / Client 리포트 소비 규격 정의
-    - `TASK-015_CONTRACT.md` 문서를 통해
-      리포트 해석, 표현, Null 처리, 책임 경계 규칙 확정
+  - 인터뷰 정책 스펙 확정 및 Phase 5 계약 고정
 
-  - 인터뷰 정책 스펙(INTERVIEW_POLICY_SPEC) 확정
-    - 최소 질문 10개 보장
-    - 침묵 2케이스 처리 정책
-    - 세션 상태 ENUM(APPLIED / IN_PROGRESS / COMPLETED / INTERRUPTED / EVALUATED)
-    - 결과 공개 정책(2주 내 합/불합 자동 통지 보장)
-    - 실전 / 연습 모드 정책 분리
-    - Phase 5 계약은 변경 불가 기준선으로 고정
+---
 
 📌 현재 상태 요약:
-- Phase 1 ~ Phase 9 완료 (TASK-027 CP0~CP4 🔒 LOCKED)
+
+- Phase 1 ~ Phase 10 완료 (TASK-028 🔒 LOCKED)
 - PostgreSQL = Single Source of Truth
-- Redis = Read Optimization Only (Projection / RAG / Candidate / Prompt Cache 포함)
+- Redis = Read Optimization Only (Authority 아님)
 - API / Service / Engine 경계 고정
 - Snapshot / Freeze / State Contract 보호 상태 유지
-- Dual Write 제거 조건 충족
-- Phase 10 (TASK-028) 준비 상태
-
+- Business Stats / Observability 완전 분리
+- Heavy Query 격리 전략 확정
+- 신규 영속 Write Path 없음
+- 운영 가능한 아키텍처 완성
 
 
 ## 7. 로깅 / 기록 규칙 (중요)
@@ -761,7 +869,7 @@ IMH/IMH_Interview/
 ---
 ## 9. 지금 당장 하면 안 되는 것 (중요)
 
-아래 항목은 현재 단계(Phase 9 완료 → Phase 10 진입 준비 단계)에서 **명시적으로 금지**한다.
+아래 항목은 현재 단계(Phase 10 완료 이후 안정화 단계)에서 **명시적으로 금지**한다.
 
 - PostgreSQL Authority 변경 또는 우회
   → PostgreSQL = Single Source of Truth 계약 유지
@@ -786,16 +894,18 @@ IMH/IMH_Interview/
 - Fallback 3-Tier 전략 변경
 - Redis Cache를 직접 조작하는 API 노출
 - Snapshot 외부 수정 경로 추가
-> 현재는 “Redis 아키텍처 LOCKED 상태에서
-> 통계/관측 확장(Phase 10)으로 진입하는 단계”이며,
+- Business Statistics(Track A)와 Observability(Track B) 혼합 집계
+
+> 현재는 “Redis 아키텍처 LOCKED + 통계/관측 계층 LOCKED 상태”이며,
 > 핵심 정책/상태/스냅샷/엔진/Authority 계약은 절대 변경하지 않는다.
 
 ---
-## 10. 현재 최우선 목표
+
+## 10. 현재 기준 상태
 
 ## Phase 9 (COMPLETE)
 
-- TASK-027 (CP0~CP4) 🔒 LOCKED
+- TASK-027 (CP0~CP4) LOCKED
 - Redis = Read Optimization Only
 - PostgreSQL = Single Source of Truth
 - Write Order = PG → Redis
@@ -804,9 +914,23 @@ IMH/IMH_Interview/
 
 ---
 
+## Phase 10 (COMPLETE)
+
+### TASK-028 관리자 통계 및 운영 관측 계층
+
+- CP0: Business Statistics LOCKED
+- CP1: Operational Observability LOCKED
+- Track A / Track B 완전 분리
+- Type 3 MView 격리 전략 확정
+- Type 4 DISABLED 유지
+- 신규 영속 Write Path 없음
+- Engine / Snapshot / State 계약 침해 없음
+
+---
+
 ## ACTIVE
 
-### Phase 10 – TASK-028 관리자 통계 및 운영 관측 계층
+- 없음 (다음 Phase 정의 대기 상태)
 
 ---
 
@@ -814,13 +938,12 @@ IMH/IMH_Interview/
 
 ### TASK-016 TTS Provider (Text → Speech)
 
-- **Goal**:
+- Goal:
   - AI 면접 질문을 음성(TTS)으로 출력하기 위한 Provider 계층 준비
-- **보류 사유**:
-  - Phase 10 통계/관측 계층 설계 우선
+- 보류 사유:
   - Engine 경계 및 Snapshot 계약 안정성 유지 필요
-  - 실시간/Streaming 전략 별도 승인 필요
-- **재개 조건**:
-  - Phase 10 완료
-  - 운영 통계 기반 안정성 데이터 확보
-  - Streaming 아키텍처 별도 계약 수립 후 진행
+  - Streaming 아키텍처 별도 승인 필요
+- 재개 조건:
+  - 별도 Phase로 분리 승인
+  - Streaming 계약 수립
+  - Engine 경계 불변 유지 조건 명시

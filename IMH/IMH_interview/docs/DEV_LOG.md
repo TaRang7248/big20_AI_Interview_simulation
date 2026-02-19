@@ -913,6 +913,15 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
     - Redis는 단순 최적화 계층이며, 장애 시 언제든 우회 가능.
     - Write-Back 없음.
 
+- [2026-02-19] TASK-028 CP0: Business Statistics MVP Implementation
+  - `packages/imh_stats` 패키지 신규 생성 (Track A / Query Type 1 & 2)
+  - `StatisticsRepository`: PostgreSQL `sessions` 및 `reports` 테이블 기반 Read-Only 구현
+  - `RedisStatsRepository`: Read-Through Caching 구현 (TTL: 1h~24h)
+  - `verify_task_028_cp0.py`: Authority, Caching, Isolation 검증 완료 (Pass)
+  - `verify_task_028_cp0_ttl.py`: TTL 만료/복귀 및 as_of 일관성 검증 완료 (Pass)
+    - Test TTL: 2s (via Subclass override)
+    - Scenario: Miss -> Hit (Immediate) -> Expiry -> Miss (Renewal) verified
+  - Config fix: `Optional[str]` 타입 힌트 수정 및 `Optional` 임포트 추가
 
 ### TASK-027 / CP4 Prompt Composition Cache Implemented (Verified)
 - **일자**: 2026-02-19
@@ -949,6 +958,7 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
         - Test 5: Max Size 초과 프롬프트 저장 건너뜀 확인.
         - Test 6: Lock Busy 상태에서 저장 건너뜀(Follower 동작) 확인.
 
+
 ### TASK-027 / CP4 LOCKED (Prompt Composition Cache)
 - **일자**: 2026-02-19
 - **상태**: **LOCKED**
@@ -960,4 +970,102 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
 - **검증**: `scripts/verify_task_027_cp4.py` **PASS** (6 tests)
 - **감사**: `docs/TASK-027_CP4_AUDIT_REPORT.md` (Authority & Safety Verified)
 
+---
 
+## [2026-02-19] TASK-028 / CP1: Operational Observability & Heavy Query Isolation
+
+### 구현
+- **Track B 독립 패키지 확장** (`packages/imh_stats`):
+    - `obs_enums.py`: `ObsReason`, `ObsSpan`, `ObsLayer` — 물리적 분리. TTS_SYNTHESIS는 Reserved(주석 처리).
+    - `obs_dtos.py`: `ObsMetaDTO` (항상 `informational_only=True`), `ObsResponseDTO`, Metric DTOs.
+    - `obs_repository.py`: `ObservabilityRepository` (PG Failure Events 기반), `LogObservabilityRepository` (로그 파일 기반). `DISABLED_TYPE4 = True` 상수 포함.
+    - `obs_service.py`: `ObservabilityService` — Track A와 완전 분리(import 없음), Type 4 guard, Redis setex/TTL 캐시.
+    - `__init__.py`: Track A/B export 공존.
+
+### 핵심 계약 준수 사항
+- **Code Level Separation**: `obs_service.py` / `obs_repository.py`는 `StatisticsRepository` / `StatisticsService` import 없음 확인.
+- **Type 4 DISABLED**: `DISABLED_TYPE4 = True` 상수, `execute_type4()` 호출 시 `RuntimeError` 발생.
+- **informational_only**: 모든 `ObsMetaDTO` 기본값 `True`.
+- **Type 3 MView 격리**: `get_type3_aggregation()`은 `stats_mv_session_aggregate` MView 존재 여부를 선확인 후 조회, 없으면 안전 Fallback. Real-time 직접 Scan 금지.
+- **Engine/Command 수정 없음**: `SessionEngine`, Command 측 코드 변경 없음.
+- **Redis = Result Cache Only**: `setex` / TTL 기반, as_of 보존 (Cache hit 시 as_of 변경 없음).
+- **Write-Back 없음**: 영속 저장 경로 신규 생성 없음.
+- **Span Scope 제한**: TTS_SYNTHESIS 활성 Span에서 제외 (Reserved).
+
+### 검증 결과
+- `scripts/verify_task_028_cp1.py`: **ALL 10 PASS**
+    1. Code Level Separation (import-level scan): Pass
+    2. Type 4 DISABLED Guard (RuntimeError confirmed): Pass
+    3. informational_only=True in ObsMetaDTO: Pass
+    4. Log-based Latency Stats (ObsResponseDTO): Pass
+    5. Log-based Failure Rate (ObsResponseDTO): Pass
+    6. Cache Hit Rate (Log-based, NOT Redis Authority): Pass
+    7. Redis Cache Miss→Hit→as_of preserved: Pass
+    8. State Transition Failures from PG (no Engine mod): Pass
+    9. Type 3 MView Isolation (fallback path verified): Pass
+    10. TTS_SYNTHESIS excluded from active Span list: Pass
+- **CP1 Status**: ✅ VERIFIED
+
+### TASK-028 / CP1 — Type 3 MView Isolation Strengthened
+- **일자**: 2026-02-19
+- **목적**: Type 3 격리 검증을 "결과 목록 확인" 수준에서 "쿼리 레벨 증거" 수준으로 상향.
+- **변경 사항**:
+    - `packages/imh_stats/obs_repository.py`:
+        - `TYPE3_MVIEW_NAME = "stats_mv_session_aggregate"` — 검증 가능한 상수로 노출.
+        - `TYPE3_BASE_TABLES_BANNED = ("interviews", "evaluations")` — 금지 테이블 명시.
+        - `TYPE3_SQL_MVIEW` / `TYPE3_SQL_FALLBACK` — SQL 템플릿을 클래스 속성으로 공개.
+        - 로그에 실제 사용 View 이름 1줄 출력 (`SQL target: stats_mv_session_aggregate`).
+    - `scripts/verify_task_028_cp1.py` — Test 9 완전 교체 (5개 서브 assertion):
+        - **9A**: `TYPE3_MVIEW_NAME`이 기대 View 이름과 일치하는지 확인.
+        - **9B**: `TYPE3_SQL_MVIEW` SQL이 MView 이름을 포함하는지 확인.
+        - **9C**: `TYPE3_SQL_MVIEW` SQL에 금지 테이블(`interviews`, `evaluations`)이 없는지 확인.
+        - **9D**: 폴백 SQL도 금지 테이블 없이 `sessions` 만 사용함을 확인.
+        - **9E**: 런타임 결과가 `ObsResponseDTO`이며 `informational_only=True`임을 확인.
+- **검증 결과**: `verify_task_028_cp1.py` **ALL 10 PASS** (Test 9 강화 포함)
+- **격리 증명 로그 예시**:
+  ```
+  [ObsRepo] Type3: MView 'stats_mv_session_aggregate' not found.
+  Using fallback. SQL target: sessions (status-count only, no full scan).
+  Test 9 Passed: Type 3 query isolation PROVED at query level.
+    → Target view: 'stats_mv_session_aggregate'
+    → Banned tables not in primary SQL: ('interviews', 'evaluations')
+  ```
+
+---
+
+## [2026-02-19] TASK-028 — 최종 LOCK 전환 (Phase 10 완료)
+
+### TASK-028 / CP0 LOCKED (Business Statistics MVP)
+- **상태**: 🔒 LOCKED
+- **핵심 계약 요약**:
+    - PostgreSQL Authority (Source of Truth)
+    - Redis = Read-Through Cache Only (No Authority)
+    - Read-Only Query Layer (No Side-effects)
+- **검증**: `verify_task_028_cp0.py` + `verify_task_028_cp0_ttl.py` **PASS**
+
+### TASK-028 / CP1 LOCKED (Operational Observability & Heavy Query Isolation)
+- **상태**: 🔒 LOCKED
+- **핵심 계약 요약**:
+    - Track B (Observability) = Informational Only
+    - Track A / Track B 물리적 분리 (import 수준 확인)
+    - Type 4 = DISABLED (DISABLED_TYPE4=True, RuntimeError guard)
+    - Type 3 = MView-first 격리 전략 확정 (쿼리 레벨 증명 완료)
+    - Redis = Result Cache Only (setex, TTL, as_of 보존)
+    - Engine/Command/State Contract 변경 없음
+    - 신규 영속 Write Path 없음
+    - Snapshot/Freeze 계약 유지
+- **검증**: `verify_task_028_cp1.py` **ALL 10 PASS** (Type3 쿼리 레벨 증명 포함)
+
+### TASK-028 최종 계약 재확인 (Immutable)
+
+| 계약 | 상태 |
+|---|---|
+| PostgreSQL Authority는 유지된다 | ✅ LOCKED |
+| Redis는 Result Cache Only이다 | ✅ LOCKED |
+| Observability는 Informational Only이다 | ✅ LOCKED |
+| Business Stats(Track A)와 Observability(Track B)는 물리적으로 분리되어 있다 | ✅ LOCKED |
+| Engine / Command / State Contract는 변경되지 않았다 | ✅ LOCKED |
+| 신규 영속 Write Path는 생성되지 않았다 | ✅ LOCKED |
+| Snapshot / Freeze 계약은 유지된다 | ✅ LOCKED |
+
+> TASK-028은 이것으로 종료된다. 다음 TASK는 별도 대화에서 시작한다.

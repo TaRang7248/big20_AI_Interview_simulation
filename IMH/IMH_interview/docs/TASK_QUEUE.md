@@ -430,29 +430,34 @@
 
 ---
 
-## ACTIVE
-
-### TASK-028 관리자 통계 대시보드
-
+### TASK-028 관리자 통계 및 운영 관측 계층 설계 — ✅ DONE (Phase 10)
+- **Status**: 🔒 DONE / LOCKED (CP0 LOCKED / CP1 LOCKED)
 - **Goal**:
   - 공고별 / 직무별 / 평가축별 통계 시각화
-  - 운영 관측(Observability) 강화를 통해
-    시스템 품질 및 멀티모달 확장 기반을 마련한다.
+  - 운영 관측(Observability) 강화를 통해 시스템 품질 및 멀티모달 확장 기반을 마련한다.
+- **Scope (CP0: Business Statistics MVP)**: 🔒 LOCKED
+  - Track A (Business Stats) Only
+  - Query Type 1 (Real-time) & Type 2 (Period Aggregation) Only
+  - PostgreSQL Authority & Single Source of Truth
+  - Read-Only Query Layer (No Command/Engine Side-effects)
+- **Scope (CP1: Operational Observability)**: 🔒 LOCKED
+  - Track B (Operational Observability) Implementation
+  - Query Type 3 (Heavy Query Isolation via MView) — query-level isolation proved
+  - Query Type 4 DISABLED (CP1 scope, no execution path)
+  - Log & Failure Event Source Integration (Informational Only)
+  - Contracts: Read-Only, No Engine Mods, Physical Track A/B Separation
+- **Final Contracts** (불변):
+  - PostgreSQL Authority 유지
+  - Redis = Result Cache Only
+  - Observability = Informational Only
+  - Track A/B 물리적 분리
+  - Engine/Command/State Contract 변경 없음
+  - 신규 영속 Write Path 없음
+  - Snapshot/Freeze 계약 유지
 
-- **Scope (초기 정의)**:
-  - 평균 점수
-  - 합격률
-  - 평가축별 약점 분포
-  - Query 전용 확장 계층 설계
-  - 세션/모델/캐시 관련 운영 지표 확장 가능 구조
 
-- **Out of Scope**:
-  - 외부 BI 연동
-  - UI 디자인 고도화
-
-- **Dependencies**:
-  - TASK-026 완료
-  - TASK-027 완료
+---
+## ACTIVE
 
 ---
 ## HOLD
