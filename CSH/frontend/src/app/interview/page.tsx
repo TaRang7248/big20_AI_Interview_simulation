@@ -59,7 +59,7 @@ function InterviewPageInner() {
   const [messages, setMessages] = useState<{ role: "ai" | "user"; text: string }[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [questionNum, setQuestionNum] = useState(0);
-  const totalQuestions = 9;
+  const totalQuestions = 5;
   const [sttText, setSttText] = useState("");
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
@@ -511,91 +511,67 @@ function InterviewPageInner() {
             ))}
           </div>
 
-          {/* 2열 레이아웃 */}
+          {/* 2열 레이아웃: 사용자 영상 + 대화창 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
-            {/* AI 면접관 아바타 */}
+            {/* ══ 왼쪽: 사용자 카메라 영상 (크게) ══ */}
             <div className="glass-card flex flex-col">
               <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Volume2 size={16} className="text-[var(--cyan)]" /> AI 면접관
+                <Camera size={16} className="text-[var(--cyan)]" /> 내 화면
               </h3>
-              <div className="flex-1 rounded-xl bg-gradient-to-br from-[#1e3a5f] to-[#0d2137] flex items-center justify-center min-h-[200px] relative overflow-hidden">
-
-                {/* ══ CSS 아바타 ══ */}
-                <>
-                  {/* 발화 상태 배경 파동 효과 */}
-                  {status === "speaking" && (
-                    <>
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-64 h-64 rounded-full bg-[rgba(0,255,136,0.06)] animate-ping" style={{ animationDuration: "2s" }} />
-                      </div>
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-52 h-52 rounded-full bg-[rgba(0,217,255,0.08)] animate-ping" style={{ animationDuration: "2.5s" }} />
-                      </div>
-                    </>
-                  )}
-                  {/* 처리 중 배경 효과 */}
-                  {status === "processing" && (
-                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                      <div className="w-56 h-56 rounded-full border-2 border-dashed border-[rgba(156,39,176,0.3)] animate-spin" style={{ animationDuration: "4s" }} />
-                    </div>
-                  )}
-                  {/* 아바타 원형 */}
-                  <div className={`relative w-48 h-48 rounded-full border-4 transition-all duration-500 ${status === "speaking"
-                    ? "border-[var(--green)] shadow-[0_0_40px_rgba(0,255,136,0.5)] scale-105"
-                    : status === "processing"
-                      ? "border-purple-400 shadow-[0_0_20px_rgba(156,39,176,0.3)]"
-                      : status === "listening"
-                        ? "border-[var(--warning)] shadow-[0_0_20px_rgba(255,193,7,0.3)]"
-                        : "border-[var(--cyan)]"
-                    } bg-gradient-to-br from-[#2a4a6b] to-[#1a3050] flex items-center justify-center`}>
-                    {/* 발화 중 이퀄라이저 바 */}
-                    {status === "speaking" ? (
-                      <div className="flex items-end gap-1.5 h-16">
-                        {[0, 1, 2, 3, 4].map(i => (
-                          <div
-                            key={i}
-                            className="w-2.5 bg-gradient-to-t from-[var(--cyan)] to-[var(--green)] rounded-full"
-                            style={{
-                              animation: `equalizer 0.8s ease-in-out ${i * 0.15}s infinite alternate`,
-                              height: `${20 + Math.random() * 30}px`,
-                            }}
-                          />
-                        ))}
-                      </div>
-                    ) : status === "processing" ? (
-                      <Loader2 size={48} className="text-purple-300 animate-spin" />
-                    ) : (
-                      <span className="text-6xl">🤖</span>
-                    )}
+              <div className="flex-1 rounded-xl overflow-hidden bg-black relative min-h-[300px]">
+                {/* 사용자 웹캠 비디오 — 영역 전체를 채움 */}
+                <video ref={interviewVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                {/* 카메라 OFF 오버레이 */}
+                {!camEnabled && (
+                  <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
+                    <CameraOff size={48} className="text-[var(--text-secondary)]" />
                   </div>
-                </>
-
-                {/* 상태 라벨 */}
-                <span className={`absolute bottom-3 left-3 text-xs px-2 py-1 rounded font-medium z-20 ${status === "speaking" ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]"
-                  : status === "processing" ? "bg-[rgba(156,39,176,0.2)] text-purple-300"
-                    : status === "listening" ? "bg-[rgba(255,193,7,0.2)] text-[var(--warning)]"
+                )}
+                {/* 좌하단: 카메라 상태 뱃지 */}
+                <span className="absolute bottom-3 left-3 text-xs bg-black/60 px-2 py-1 rounded text-white">
+                  {camEnabled ? "📷 카메라 ON" : "카메라 OFF"}
+                </span>
+                {/* 우하단: AI 상태 뱃지 — 면접관이 말하거나 처리 중일 때 표시 */}
+                <span className={`absolute bottom-3 right-3 text-xs px-2 py-1 rounded font-medium ${status === "speaking" ? "bg-[rgba(0,255,136,0.25)] text-[var(--green)]"
+                  : status === "processing" ? "bg-[rgba(156,39,176,0.25)] text-purple-300"
+                    : status === "listening" ? "bg-[rgba(255,193,7,0.25)] text-[var(--warning)]"
                       : "bg-black/60 text-white"
                   }`}>
-                  {status === "speaking" ? "🔊 답변 중..."
-                    : status === "processing" ? "⏳ 생각 중..."
-                      : status === "listening" ? "👂 경청 중..."
-                        : "AI 면접관"}
+                  {status === "speaking" ? "🔊 AI 답변 중..."
+                    : status === "processing" ? "⏳ AI 생각 중..."
+                      : status === "listening" ? "🎤 듣는 중..."
+                        : "대기"}
                 </span>
+              </div>
+
+              {/* 하단 컨트롤 버튼 */}
+              <div className="flex items-center justify-center gap-4 mt-4">
+                <button onClick={toggleMic} title={micEnabled ? "마이크 끄기" : "마이크 켜기"} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${micEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
+                  }`}>
+                  {micEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+                </button>
+                <button onClick={toggleCam} title={camEnabled ? "카메라 끄기" : "카메라 켜기"} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${camEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
+                  }`}>
+                  {camEnabled ? <Camera size={20} /> : <CameraOff size={20} />}
+                </button>
+                <button onClick={submitAnswer} disabled={!sttText.trim() || status !== "listening"} title="답변 제출"
+                  className="btn-gradient !rounded-full w-12 h-12 flex items-center justify-center disabled:opacity-40">
+                  <SkipForward size={20} />
+                </button>
+                <button onClick={endInterview} title="면접 종료" className="w-12 h-12 rounded-full bg-[rgba(244,67,54,0.8)] text-white flex items-center justify-center hover:bg-[rgba(244,67,54,1)] transition">
+                  <PhoneOff size={20} />
+                </button>
               </div>
             </div>
 
-            {/* 채팅/비디오 */}
+            {/* ══ 오른쪽: 대화창 ══ */}
             <div className="glass-card flex flex-col">
-              {/* 사용자 비디오 (작게) */}
-              <div className="rounded-xl overflow-hidden bg-black h-32 mb-3 relative">
-                <video ref={interviewVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-                <span className="absolute bottom-2 right-2 text-xs bg-black/60 px-2 py-0.5 rounded text-white">
-                  {camEnabled ? "카메라 ON" : "카메라 OFF"}
-                </span>
-              </div>
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Volume2 size={16} className="text-[var(--cyan)]" /> AI 면접관 대화
+              </h3>
 
               {/* 채팅 로그 */}
-              <div className="flex-1 overflow-y-auto space-y-3 mb-3 min-h-[200px] max-h-[400px] pr-2">
+              <div className="flex-1 overflow-y-auto space-y-3 mb-3 min-h-[300px] max-h-[520px] pr-2">
                 {messages.map((m, i) => (
                   <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${m.role === "user"
@@ -611,30 +587,11 @@ function InterviewPageInner() {
 
               {/* STT 인식 텍스트 */}
               {status === "listening" && (
-                <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3 mb-3">
+                <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3">
                   <p className="text-xs text-[var(--warning)] mb-1">🎤 음성 인식 중...</p>
                   <p className="text-sm">{sttText || "말씀해주세요..."}</p>
                 </div>
               )}
-
-              {/* 컨트롤 */}
-              <div className="flex items-center justify-center gap-4">
-                <button onClick={toggleMic} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${micEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
-                  }`}>
-                  {micEnabled ? <Mic size={20} /> : <MicOff size={20} />}
-                </button>
-                <button onClick={toggleCam} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${camEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
-                  }`}>
-                  {camEnabled ? <Camera size={20} /> : <CameraOff size={20} />}
-                </button>
-                <button onClick={submitAnswer} disabled={!sttText.trim() || status !== "listening"}
-                  className="btn-gradient !rounded-full w-12 h-12 flex items-center justify-center disabled:opacity-40">
-                  <SkipForward size={20} />
-                </button>
-                <button onClick={endInterview} className="w-12 h-12 rounded-full bg-[rgba(244,67,54,0.8)] text-white flex items-center justify-center hover:bg-[rgba(244,67,54,1)] transition">
-                  <PhoneOff size={20} />
-                </button>
-              </div>
             </div>
           </div>
         </main>
