@@ -21,37 +21,37 @@
 5. LLM 자동 코딩 문제 생성 (1회 1문제)
 """
 
-import os
-import sys
-import subprocess
-import tempfile
-import time
-import re
-import json
 import asyncio
-import uuid
+import json
+import os
+import re
 import shutil
+import subprocess
+import sys
+import tempfile
 import threading
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
-from datetime import datetime
+import time
+import uuid
+from dataclasses import dataclass
 from enum import Enum
+from typing import Dict, List, Optional, Tuple
 
 # .env 파일에서 환경변수 로드
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # JSON Resilience 유틸리티
-from json_utils import parse_code_analysis_json
-
 # FastAPI
 from fastapi import APIRouter, HTTPException
+from json_utils import parse_code_analysis_json
 from pydantic import BaseModel
 
 # LLM for code analysis
 try:
-    from langchain_ollama import ChatOllama
     from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_ollama import ChatOllama
+
     LLM_AVAILABLE = True
 except ImportError:
     LLM_AVAILABLE = False
@@ -59,7 +59,7 @@ except ImportError:
 
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
-DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
 MAX_EXECUTION_TIME = 10  # 초
 MAX_OUTPUT_SIZE = 10000  # 문자
 SUPPORTED_LANGUAGES = ["python", "javascript", "java", "c", "cpp"]
@@ -78,16 +78,13 @@ def _check_docker_available():
     """Docker 데몬 및 샌드박스 이미지 사용 가능 여부 확인 (서버 시작 시 1회 실행)"""
     global DOCKER_AVAILABLE
     try:
-        result = subprocess.run(
-            ["docker", "info"], capture_output=True, timeout=5
-        )
+        result = subprocess.run(["docker", "info"], capture_output=True, timeout=5)
         if result.returncode != 0:
             raise RuntimeError("Docker daemon not running")
 
         # 샌드박스 이미지 존재 확인
         img_check = subprocess.run(
-            ["docker", "image", "inspect", DOCKER_IMAGE],
-            capture_output=True, timeout=5
+            ["docker", "image", "inspect", DOCKER_IMAGE], capture_output=True, timeout=5
         )
         if img_check.returncode != 0:
             # 이미지 자동 빌드 시도
@@ -98,10 +95,12 @@ def _check_docker_available():
                 print(f"[Sandbox] Docker 이미지 '{DOCKER_IMAGE}' 빌드 중...")
                 build = subprocess.run(
                     ["docker", "build", "-t", DOCKER_IMAGE, dockerfile_dir],
-                    capture_output=True, text=True, timeout=300
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
                 )
                 if build.returncode == 0:
-                    print(f"[Sandbox] 이미지 빌드 완료 ✅")
+                    print("[Sandbox] 이미지 빌드 완료 ✅")
                     DOCKER_AVAILABLE = True
                 else:
                     print(f"[Sandbox] 이미지 빌드 실패 ❌: {build.stderr[:300]}")
@@ -112,7 +111,11 @@ def _check_docker_available():
     except Exception:
         pass
 
-    status = "✅ Docker 격리 모드" if DOCKER_AVAILABLE else "⚠️ 서브프로세스 모드 (보안 제한적)"
+    status = (
+        "✅ Docker 격리 모드"
+        if DOCKER_AVAILABLE
+        else "⚠️ 서브프로세스 모드 (보안 제한적)"
+    )
     print(f"[Sandbox] {status}")
 
 
@@ -125,58 +128,88 @@ class CodeSanitizer:
 
     DANGEROUS_PATTERNS: Dict[str, List[Tuple[str, str]]] = {
         "python": [
-            (r'\b(subprocess|shutil|socket|requests|urllib|http\.client|ftplib)\b',
-             "시스템/네트워크 모듈 사용 금지"),
-            (r'\b(exec|eval|compile|__import__|globals|locals)\s*\(',
-             "동적 코드 실행 금지"),
-            (r'\b(ctypes|cffi|_thread|multiprocessing|signal)\b',
-             "저수준 시스템 접근 금지"),
-            (r'open\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)',
-             "시스템 경로 접근 금지"),
-            (r'\bos\s*\.\s*(system|popen|exec|spawn|remove|unlink|rmdir|chmod|chown|kill|fork)',
-             "OS 명령 실행 금지"),
+            (
+                r"\b(subprocess|shutil|socket|requests|urllib|http\.client|ftplib)\b",
+                "시스템/네트워크 모듈 사용 금지",
+            ),
+            (
+                r"\b(exec|eval|compile|__import__|globals|locals)\s*\(",
+                "동적 코드 실행 금지",
+            ),
+            (
+                r"\b(ctypes|cffi|_thread|multiprocessing|signal)\b",
+                "저수준 시스템 접근 금지",
+            ),
+            (
+                r"open\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)",
+                "시스템 경로 접근 금지",
+            ),
+            (
+                r"\bos\s*\.\s*(system|popen|exec|spawn|remove|unlink|rmdir|chmod|chown|kill|fork)",
+                "OS 명령 실행 금지",
+            ),
         ],
         "javascript": [
-            (r'require\s*\(\s*[\"\'](?:child_process|fs|net|http|https|dgram|cluster|worker_threads|os|vm)[\"\']',
-             "시스템/네트워크 모듈 사용 금지"),
-            (r'\beval\s*\(', "eval 사용 금지"),
-            (r'\bprocess\s*\.\s*(exit|env|cwd|chdir|kill)',
-             "프로세스 제어 금지"),
-            (r'\bFunction\s*\(', "동적 함수 생성 금지"),
+            (
+                r"require\s*\(\s*[\"\'](?:child_process|fs|net|http|https|dgram|cluster|worker_threads|os|vm)[\"\']",
+                "시스템/네트워크 모듈 사용 금지",
+            ),
+            (r"\beval\s*\(", "eval 사용 금지"),
+            (r"\bprocess\s*\.\s*(exit|env|cwd|chdir|kill)", "프로세스 제어 금지"),
+            (r"\bFunction\s*\(", "동적 함수 생성 금지"),
         ],
         "java": [
-            (r'\b(Runtime|ProcessBuilder)\b.*\b(exec|start)\b',
-             "프로세스 실행 금지"),
-            (r'\b(Socket|ServerSocket|URL|URLConnection|HttpClient|HttpURLConnection)\b',
-             "네트워크 접근 금지"),
-            (r'\bSystem\s*\.\s*(exit|getenv)',
-             "시스템 제어 금지"),
-            (r'\b(ClassLoader|\.class\.getMethod|Method\s*\.\s*invoke)\b',
-             "리플렉션 금지"),
-            (r'\bnew\s+(File|FileReader|FileWriter|FileInputStream|FileOutputStream|RandomAccessFile|PrintWriter)\s*\(',
-             "파일 I/O 금지 (Scanner/System.in 사용)"),
+            (r"\b(Runtime|ProcessBuilder)\b.*\b(exec|start)\b", "프로세스 실행 금지"),
+            (
+                r"\b(Socket|ServerSocket|URL|URLConnection|HttpClient|HttpURLConnection)\b",
+                "네트워크 접근 금지",
+            ),
+            (r"\bSystem\s*\.\s*(exit|getenv)", "시스템 제어 금지"),
+            (
+                r"\b(ClassLoader|\.class\.getMethod|Method\s*\.\s*invoke)\b",
+                "리플렉션 금지",
+            ),
+            (
+                r"\bnew\s+(File|FileReader|FileWriter|FileInputStream|FileOutputStream|RandomAccessFile|PrintWriter)\s*\(",
+                "파일 I/O 금지 (Scanner/System.in 사용)",
+            ),
         ],
         "c": [
-            (r'\b(system|popen|execl|execlp|execle|execv|execvp|execvpe|fork|vfork)\s*\(',
-             "시스템 명령/프로세스 실행 금지"),
-            (r'\b(socket|connect|bind|listen|accept|send|recv|sendto|recvfrom)\s*\(',
-             "네트워크 함수 사용 금지"),
-            (r'#\s*include\s*<\s*(sys/socket|netinet|arpa|netdb|unistd)',
-             "시스템/네트워크 헤더 사용 금지"),
-            (r'fopen\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)',
-             "시스템 경로 접근 금지"),
+            (
+                r"\b(system|popen|execl|execlp|execle|execv|execvp|execvpe|fork|vfork)\s*\(",
+                "시스템 명령/프로세스 실행 금지",
+            ),
+            (
+                r"\b(socket|connect|bind|listen|accept|send|recv|sendto|recvfrom)\s*\(",
+                "네트워크 함수 사용 금지",
+            ),
+            (
+                r"#\s*include\s*<\s*(sys/socket|netinet|arpa|netdb|unistd)",
+                "시스템/네트워크 헤더 사용 금지",
+            ),
+            (
+                r"fopen\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)",
+                "시스템 경로 접근 금지",
+            ),
         ],
         "cpp": [
-            (r'\b(system|popen|execl|execlp|execle|execv|execvp|fork|vfork)\s*\(',
-             "시스템 명령/프로세스 실행 금지"),
-            (r'\b(socket|connect|bind|listen|accept|send|recv)\s*\(',
-             "네트워크 함수 사용 금지"),
-            (r'#\s*include\s*<\s*(sys/socket|netinet|arpa|netdb|unistd)',
-             "시스템/네트워크 헤더 사용 금지"),
-            (r'\bstd::filesystem\b',
-             "파일시스템 접근 금지"),
-            (r'fopen\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)',
-             "시스템 경로 접근 금지"),
+            (
+                r"\b(system|popen|execl|execlp|execle|execv|execvp|fork|vfork)\s*\(",
+                "시스템 명령/프로세스 실행 금지",
+            ),
+            (
+                r"\b(socket|connect|bind|listen|accept|send|recv)\s*\(",
+                "네트워크 함수 사용 금지",
+            ),
+            (
+                r"#\s*include\s*<\s*(sys/socket|netinet|arpa|netdb|unistd)",
+                "시스템/네트워크 헤더 사용 금지",
+            ),
+            (r"\bstd::filesystem\b", "파일시스템 접근 금지"),
+            (
+                r"fopen\s*\([^)]*[\"\']/(etc|proc|sys|dev|home|root|var)",
+                "시스템 경로 접근 금지",
+            ),
         ],
     }
 
@@ -189,7 +222,7 @@ class CodeSanitizer:
         language = language.lower()
 
         # 크기 제한
-        if len(code.encode('utf-8')) > cls.MAX_CODE_SIZE:
+        if len(code.encode("utf-8")) > cls.MAX_CODE_SIZE:
             return False, "🔒 보안 위반: 코드 크기가 100KB를 초과합니다."
 
         # 언어별 위험 패턴 검사
@@ -206,6 +239,7 @@ class CodeSanitizer:
 @dataclass
 class _RunResult:
     """subprocess 실행 결과 (리소스 모니터링 포함)"""
+
     returncode: int
     stdout: str
     stderr: str
@@ -302,8 +336,126 @@ PROBLEM_GENERATION_PROMPT = """당신은 코딩 면접 출제 전문가입니다
 _generated_problems: Dict[str, CodingProblem] = {}
 
 
+# ========== Redis 기반 문제 풀 (Problem Pool) ==========
+# 서버 시작 시 Celery로 난이도별 문제를 미리 생성하여 Redis에 저장합니다.
+# API 요청 시 풀에서 즉시 꺼내 반환 → 사용자 체감 지연 거의 0초.
+# 풀이 부족해지면 Celery 태스크로 자동 보충합니다.
+
+# 난이도별 풀에 유지할 문제 개수 (기본값)
+POOL_TARGET_SIZE = int(os.getenv("CODING_POOL_SIZE", "3"))
+# 풀이 이 수치 이하로 떨어지면 보충 태스크를 발행
+POOL_REFILL_THRESHOLD = 1
+
+
+class ProblemPool:
+    """
+    Redis List 기반 코딩 문제 풀.
+
+    각 난이도(easy/medium/hard)별로 Redis 리스트에 JSON 문제를 저장합니다.
+    - pop(difficulty): 풀에서 문제 1개를 꺼냄 (RPOP)
+    - push(difficulty, problem): 풀에 문제 1개를 추가 (LPUSH)
+    - count(difficulty): 현재 풀 크기 조회
+    - needs_refill(difficulty): 보충이 필요한지 확인
+
+    Redis 연결 실패 시 모든 메서드는 graceful하게 None/0/True를 반환합니다.
+    """
+
+    REDIS_KEY_PREFIX = "coding_pool"
+
+    def __init__(self):
+        """Redis 클라이언트 초기화 (Lazy — 첫 호출 시 연결)"""
+        self._redis = None
+        self._redis_url = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
+
+    def _get_redis(self):
+        """Redis 연결을 반환합니다. 연결 실패 시 None."""
+        if self._redis is None:
+            try:
+                import redis as redis_lib
+
+                self._redis = redis_lib.from_url(self._redis_url, decode_responses=True)
+                self._redis.ping()
+            except Exception as e:
+                print(f"[ProblemPool] Redis 연결 실패: {e}")
+                self._redis = None
+        return self._redis
+
+    def _key(self, difficulty: str) -> str:
+        """Redis 키 생성: coding_pool:easy, coding_pool:medium 등"""
+        return f"{self.REDIS_KEY_PREFIX}:{difficulty}"
+
+    def push(self, difficulty: str, problem: CodingProblem) -> bool:
+        """문제를 풀에 추가합니다. 성공 시 True."""
+        r = self._get_redis()
+        if not r:
+            return False
+        try:
+            data = json.dumps(problem.dict(), ensure_ascii=False)
+            r.lpush(self._key(difficulty), data)
+            return True
+        except Exception as e:
+            print(f"[ProblemPool] push 실패 ({difficulty}): {e}")
+            return False
+
+    def pop(self, difficulty: str) -> Optional[CodingProblem]:
+        """풀에서 문제 1개를 꺼냅니다. 없으면 None."""
+        r = self._get_redis()
+        if not r:
+            return None
+        try:
+            data = r.rpop(self._key(difficulty))
+            if not data:
+                return None
+            parsed = json.loads(data)
+            problem = CodingProblem(**parsed)
+            # 꺼낸 문제를 글로벌 캐시에도 등록 (submission/analysis에서 참조)
+            _generated_problems[problem.id] = problem
+            return problem
+        except Exception as e:
+            print(f"[ProblemPool] pop 실패 ({difficulty}): {e}")
+            return None
+
+    def count(self, difficulty: str) -> int:
+        """현재 풀에 남은 문제 수를 반환합니다."""
+        r = self._get_redis()
+        if not r:
+            return 0
+        try:
+            return r.llen(self._key(difficulty))
+        except Exception:
+            return 0
+
+    def needs_refill(self, difficulty: str) -> bool:
+        """풀 보충이 필요한지 확인합니다."""
+        return self.count(difficulty) <= POOL_REFILL_THRESHOLD
+
+
+# 전역 문제 풀 인스턴스
+problem_pool = ProblemPool()
+
+
+def trigger_pool_refill(difficulty: str):
+    """
+    Celery 태스크를 발행하여 풀을 보충합니다.
+    Celery가 사용 불가능하면 무시합니다 (다음 요청 시 LLM 직접 호출로 대체).
+    """
+    try:
+        from celery_tasks import pre_generate_coding_problem_task
+
+        needed = POOL_TARGET_SIZE - problem_pool.count(difficulty)
+        for _ in range(max(needed, 1)):
+            pre_generate_coding_problem_task.delay(difficulty)
+        print(f"[ProblemPool] 보충 태스크 {needed}개 발행 ({difficulty})")
+    except Exception as e:
+        print(f"[ProblemPool] 보충 태스크 발행 실패: {e}")
+
+
 class CodingProblemGenerator:
     """LLM 기반 코딩 문제 자동 생성기"""
+
+    # LLM 호출 타임아웃 (초) — 이 시간 내에 응답이 없으면 fallback 문제 반환
+    # GTX 1660 (6GB VRAM) 기준, 코딩 문제 생성 프롬프트는 약 60~90초 소요
+    LLM_TIMEOUT_SEC = 120
 
     def __init__(self):
         if LLM_AVAILABLE:
@@ -311,38 +463,49 @@ class CodingProblemGenerator:
                 model=DEFAULT_LLM_MODEL,
                 temperature=0.8,  # 다양한 문제 생성을 위해 높은 temperature
                 num_ctx=DEFAULT_LLM_NUM_CTX,
+                think=None,  # thinking 모드 비활성화 — 응답 지연 방지
             )
         else:
             self.llm = None
 
     async def generate(self, difficulty: str = "medium") -> CodingProblem:
-        """LLM을 사용하여 코딩 문제 1개를 생성합니다."""
+        """LLM을 사용하여 코딩 문제 1개를 생성합니다.
+
+        LLM_TIMEOUT_SEC(기본 60초) 이내에 응답이 없으면
+        asyncio.TimeoutError가 발생하여 _fallback_problem()을 반환합니다.
+        """
         if not self.llm:
             return self._fallback_problem(difficulty)
 
         try:
             prompt = PROBLEM_GENERATION_PROMPT.format(difficulty=difficulty)
-            response = await asyncio.to_thread(
-                self.llm.invoke,
-                [
-                    SystemMessage(content="당신은 코딩 면접 문제 출제 전문가입니다. JSON 형식으로만 응답하세요."),
-                    HumanMessage(content=prompt),
-                ]
+            # asyncio.wait_for()로 타임아웃을 감싸서 LLM 무한 대기 방지
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self.llm.invoke,
+                    [
+                        SystemMessage(
+                            content="당신은 코딩 면접 문제 출제 전문가입니다. JSON 형식으로만 응답하세요."
+                        ),
+                        HumanMessage(content=prompt),
+                    ],
+                ),
+                timeout=self.LLM_TIMEOUT_SEC,
             )
             raw = response.content.strip()
 
             # <think> 태그 제거 (Qwen 모델)
-            raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 
             # JSON 파싱 (json_utils 활용)
             parsed = parse_code_analysis_json(raw)
             if not parsed:
                 # 직접 JSON 추출 시도
-                json_match = re.search(r'\{[\s\S]*\}', raw)
+                json_match = re.search(r"\{[\s\S]*\}", raw)
                 if json_match:
                     parsed = json.loads(json_match.group())
                 else:
-                    print(f"[CodingProblemGenerator] JSON 파싱 실패, fallback 사용")
+                    print("[CodingProblemGenerator] JSON 파싱 실패, fallback 사용")
                     return self._fallback_problem(difficulty)
 
             problem_id = str(uuid.uuid4())[:8]
@@ -358,12 +521,75 @@ class CodingProblemGenerator:
 
             # 캐시에 저장
             _generated_problems[problem_id] = problem
-            print(f"[CodingProblemGenerator] 문제 생성 완료: {problem.title} (ID: {problem_id})")
+            print(
+                f"[CodingProblemGenerator] 문제 생성 완료: {problem.title} (ID: {problem_id})"
+            )
             return problem
+
+        except asyncio.TimeoutError:
+            # LLM 응답이 타임아웃 내에 오지 않은 경우 fallback 문제 반환
+            print(
+                f"[CodingProblemGenerator] LLM 타임아웃 ({self.LLM_TIMEOUT_SEC}초 초과) — fallback 문제 사용"
+            )
+            return self._fallback_problem(difficulty)
 
         except Exception as e:
             print(f"[CodingProblemGenerator] 문제 생성 실패: {e}")
             return self._fallback_problem(difficulty)
+
+    def generate_sync(self, difficulty: str = "medium") -> Optional[CodingProblem]:
+        """
+        동기(Synchronous) 버전 문제 생성 — Celery worker에서 호출합니다.
+
+        asyncio 이벤트 루프가 없는 Celery worker 환경에서 사용하며,
+        생성된 문제를 반환합니다. 실패 시 None을 반환합니다.
+        """
+        if not self.llm:
+            return None
+
+        try:
+            prompt = PROBLEM_GENERATION_PROMPT.format(difficulty=difficulty)
+            response = self.llm.invoke(
+                [
+                    SystemMessage(
+                        content="당신은 코딩 면접 문제 출제 전문가입니다. JSON 형식으로만 응답하세요."
+                    ),
+                    HumanMessage(content=prompt),
+                ]
+            )
+            raw = response.content.strip()
+
+            # <think> 태그 제거 (Qwen 모델)
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+
+            # JSON 파싱
+            parsed = parse_code_analysis_json(raw)
+            if not parsed:
+                json_match = re.search(r"\{[\s\S]*\}", raw)
+                if json_match:
+                    parsed = json.loads(json_match.group())
+                else:
+                    print("[CodingProblemGenerator] generate_sync: JSON 파싱 실패")
+                    return None
+
+            problem_id = str(uuid.uuid4())[:8]
+            problem = CodingProblem(
+                id=problem_id,
+                title=parsed.get("title", "코딩 문제"),
+                difficulty=parsed.get("difficulty", difficulty),
+                description=parsed.get("description", ""),
+                examples=parsed.get("examples", []),
+                test_cases=parsed.get("test_cases", []),
+                hints=parsed.get("hints", []),
+            )
+            print(
+                f"[CodingProblemGenerator] 동기 생성 완료: {problem.title} (ID: {problem_id})"
+            )
+            return problem
+
+        except Exception as e:
+            print(f"[CodingProblemGenerator] generate_sync 실패: {e}")
+            return None
 
     def _fallback_problem(self, difficulty: str = "easy") -> CodingProblem:
         """LLM 사용 불가 시 기본 문제 반환"""
@@ -385,8 +611,16 @@ nums에서 두 수를 선택하여 더한 값이 target이 되는 두 수의 인
 **출력 형식:**
 - 두 인덱스를 공백으로 구분하여 출력""",
             examples=[
-                {"input": "4\n2 7 11 15\n9", "output": "0 1", "explanation": "nums[0] + nums[1] = 2 + 7 = 9"},
-                {"input": "3\n3 2 4\n6", "output": "1 2", "explanation": "nums[1] + nums[2] = 2 + 4 = 6"},
+                {
+                    "input": "4\n2 7 11 15\n9",
+                    "output": "0 1",
+                    "explanation": "nums[0] + nums[1] = 2 + 7 = 9",
+                },
+                {
+                    "input": "3\n3 2 4\n6",
+                    "output": "1 2",
+                    "explanation": "nums[1] + nums[2] = 2 + 4 = 6",
+                },
             ],
             test_cases=[
                 {"input": "4\n2 7 11 15\n9", "expected": "0 1"},
@@ -416,9 +650,10 @@ class CodeExecutor:
 
         if language not in SUPPORTED_LANGUAGES:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error=f"지원하지 않는 언어입니다: {language}",
-                execution_time=0
+                execution_time=0,
             )
 
         # 1단계: 코드 보안 정적 검사 (모든 모드에서 실행)
@@ -444,7 +679,9 @@ class CodeExecutor:
 
     # ───── Docker 컨테이너 격리 실행 ─────
 
-    def _execute_in_docker(self, code: str, language: str, stdin: str) -> CodeExecutionResult:
+    def _execute_in_docker(
+        self, code: str, language: str, stdin: str
+    ) -> CodeExecutionResult:
         """
         Docker 컨테이너에서 완전 격리 실행.
         보안: --network none, --memory, --read-only, --cap-drop ALL,
@@ -452,21 +689,36 @@ class CodeExecutor:
         """
         # 언어별 파일명/컴파일/실행 설정
         lang_config = {
-            "python":     {"file": "solution.py",   "compile": None,
-                           "run": "python3 solution.py"},
-            "javascript": {"file": "solution.js",   "compile": None,
-                           "run": "node solution.js"},
-            "java":       {"file": "Solution.java", "compile": "javac Solution.java",
-                           "run": "java Solution"},
-            "c":          {"file": "solution.c",    "compile": "gcc solution.c -o solution -lm -O2",
-                           "run": "./solution"},
-            "cpp":        {"file": "solution.cpp",  "compile": "g++ solution.cpp -o solution -std=c++17 -O2",
-                           "run": "./solution"},
+            "python": {
+                "file": "solution.py",
+                "compile": None,
+                "run": "python3 solution.py",
+            },
+            "javascript": {
+                "file": "solution.js",
+                "compile": None,
+                "run": "node solution.js",
+            },
+            "java": {
+                "file": "Solution.java",
+                "compile": "javac Solution.java",
+                "run": "java Solution",
+            },
+            "c": {
+                "file": "solution.c",
+                "compile": "gcc solution.c -o solution -lm -O2",
+                "run": "./solution",
+            },
+            "cpp": {
+                "file": "solution.cpp",
+                "compile": "g++ solution.cpp -o solution -std=c++17 -O2",
+                "run": "./solution",
+            },
         }
 
         # Java: 클래스 이름에 따라 파일명 조정
         if language == "java":
-            class_match = re.search(r'public\s+class\s+(\w+)', code)
+            class_match = re.search(r"public\s+class\s+(\w+)", code)
             class_name = class_match.group(1) if class_match else "Solution"
             lang_config["java"]["file"] = f"{class_name}.java"
             lang_config["java"]["compile"] = f"javac {class_name}.java"
@@ -488,26 +740,39 @@ class CodeExecutor:
             code_path = os.path.join(code_dir, cfg["file"])
             input_path = os.path.join(code_dir, "input.txt")
 
-            with open(code_path, 'w', encoding='utf-8') as f:
+            with open(code_path, "w", encoding="utf-8") as f:
                 f.write(code)
-            with open(input_path, 'w', encoding='utf-8') as f:
+            with open(input_path, "w", encoding="utf-8") as f:
                 f.write(stdin)
 
             # Docker 명령 구성
             docker_cmd = [
-                "docker", "run", "--rm",
-                "--network", "none",                      # 네트워크 격리
-                "--memory", SANDBOX_MEMORY_LIMIT,          # 메모리 제한
-                "--memory-swap", SANDBOX_MEMORY_LIMIT,     # 스왑 제한 (= 메모리만 사용)
-                "--pids-limit", SANDBOX_PID_LIMIT,         # 프로세스 수 제한
-                "--cpus", SANDBOX_CPU_LIMIT,               # CPU 제한
-                "--read-only",                             # 루트 파일시스템 읽기 전용
-                "--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",  # 임시 작업 공간
-                "--security-opt", "no-new-privileges",     # 권한 상승 방지
-                "--cap-drop", "ALL",                       # 모든 커널 권한 박탈
-                "--user", "sandbox",                       # non-root 실행
-                "-v", f"{code_dir}:/sandbox:ro",           # 코드 마운트 (읽기 전용)
-                "-w", "/tmp",
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",  # 네트워크 격리
+                "--memory",
+                SANDBOX_MEMORY_LIMIT,  # 메모리 제한
+                "--memory-swap",
+                SANDBOX_MEMORY_LIMIT,  # 스왑 제한 (= 메모리만 사용)
+                "--pids-limit",
+                SANDBOX_PID_LIMIT,  # 프로세스 수 제한
+                "--cpus",
+                SANDBOX_CPU_LIMIT,  # CPU 제한
+                "--read-only",  # 루트 파일시스템 읽기 전용
+                "--tmpfs",
+                "/tmp:rw,noexec,nosuid,size=64m",  # 임시 작업 공간
+                "--security-opt",
+                "no-new-privileges",  # 권한 상승 방지
+                "--cap-drop",
+                "ALL",  # 모든 커널 권한 박탈
+                "--user",
+                "sandbox",  # non-root 실행
+                "-v",
+                f"{code_dir}:/sandbox:ro",  # 코드 마운트 (읽기 전용)
+                "-w",
+                "/tmp",
                 DOCKER_IMAGE,
             ]
 
@@ -533,44 +798,52 @@ class CodeExecutor:
             # Docker/Linux 종료 코드 해석
             if result.returncode == 137:  # OOM Killed
                 return CodeExecutionResult(
-                    success=False, output="",
+                    success=False,
+                    output="",
                     error=f"💾 메모리 초과: {SANDBOX_MEMORY_MB}MB 제한을 초과했습니다.",
-                    execution_time=round(execution_time, 2)
+                    execution_time=round(execution_time, 2),
                 )
             if result.returncode == 124:  # timeout
                 return CodeExecutionResult(
-                    success=False, output="",
+                    success=False,
+                    output="",
                     error=f"⏱ 시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
-                    execution_time=round(execution_time, 2)
+                    execution_time=round(execution_time, 2),
                 )
 
             return CodeExecutionResult(
                 success=result.returncode == 0,
                 output=result.stdout.strip()[:MAX_OUTPUT_SIZE],
                 error=result.stderr[:MAX_OUTPUT_SIZE] if result.stderr else None,
-                execution_time=round(execution_time, 2)
+                execution_time=round(execution_time, 2),
             )
 
         except subprocess.TimeoutExpired:
             return CodeExecutionResult(
-                success=False, output="",
-                error=f"⏱ 시간 초과: Docker 실행 제한 시간을 초과했습니다.",
-                execution_time=MAX_EXECUTION_TIME * 1000
+                success=False,
+                output="",
+                error="⏱ 시간 초과: Docker 실행 제한 시간을 초과했습니다.",
+                execution_time=MAX_EXECUTION_TIME * 1000,
             )
         except Exception as e:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error=f"Docker 실행 오류: {str(e)}",
-                execution_time=0
+                execution_time=0,
             )
         finally:
             shutil.rmtree(code_dir, ignore_errors=True)
 
     # ───── 리소스 모니터링 서브프로세스 실행 ─────
 
-    def _monitored_run(self, cmd: list, input: str = "",
-                       timeout: int = MAX_EXECUTION_TIME,
-                       cwd: Optional[str] = None) -> _RunResult:
+    def _monitored_run(
+        self,
+        cmd: list,
+        input: str = "",
+        timeout: int = MAX_EXECUTION_TIME,
+        cwd: Optional[str] = None,
+    ) -> _RunResult:
         """
         리소스 모니터링이 적용된 서브프로세스 실행.
         - psutil 기반 메모리 모니터링 (설치 시)
@@ -580,7 +853,7 @@ class CodeExecutor:
         start_time = time.time()
 
         creation_flags = 0
-        if os.name == 'nt':
+        if os.name == "nt":
             creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
 
         proc = subprocess.Popen(
@@ -600,6 +873,7 @@ class CodeExecutor:
             """백그라운드 메모리 모니터링 스레드"""
             try:
                 import psutil
+
                 ps_proc = psutil.Process(proc.pid)
                 while proc.poll() is None and not memory_exceeded.is_set():
                     try:
@@ -634,10 +908,13 @@ class CodeExecutor:
             except Exception:
                 stdout, stderr = "", ""
             return _RunResult(
-                returncode=-1, stdout="", stderr="",
+                returncode=-1,
+                stdout="",
+                stderr="",
                 execution_time_ms=(time.time() - start_time) * 1000,
                 memory_mb=max_memory[0],
-                timed_out=True, memory_exceeded=False
+                timed_out=True,
+                memory_exceeded=False,
             )
 
         monitor_thread.join(timeout=1)
@@ -645,10 +922,13 @@ class CodeExecutor:
 
         if memory_exceeded.is_set():
             return _RunResult(
-                returncode=-1, stdout="", stderr="",
+                returncode=-1,
+                stdout="",
+                stderr="",
                 execution_time_ms=execution_time_ms,
                 memory_mb=max_memory[0],
-                timed_out=False, memory_exceeded=True
+                timed_out=False,
+                memory_exceeded=True,
             )
 
         return _RunResult(
@@ -657,31 +937,34 @@ class CodeExecutor:
             stderr=stderr or "",
             execution_time_ms=execution_time_ms,
             memory_mb=max_memory[0],
-            timed_out=False, memory_exceeded=False
+            timed_out=False,
+            memory_exceeded=False,
         )
 
     def _result_from_run(self, run: _RunResult) -> CodeExecutionResult:
         """_RunResult → CodeExecutionResult 변환"""
         if run.timed_out:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error=f"⏱ 시간 초과: {MAX_EXECUTION_TIME}초 제한을 초과했습니다.",
                 execution_time=round(run.execution_time_ms, 2),
-                memory_usage=run.memory_mb if run.memory_mb > 0 else None
+                memory_usage=run.memory_mb if run.memory_mb > 0 else None,
             )
         if run.memory_exceeded:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error=f"💾 메모리 초과: {SANDBOX_MEMORY_MB}MB 제한 초과 (사용: {run.memory_mb:.1f}MB)",
                 execution_time=round(run.execution_time_ms, 2),
-                memory_usage=run.memory_mb
+                memory_usage=run.memory_mb,
             )
         return CodeExecutionResult(
             success=run.returncode == 0,
             output=run.stdout.strip()[:MAX_OUTPUT_SIZE],
             error=run.stderr[:MAX_OUTPUT_SIZE] if run.stderr else None,
             execution_time=round(run.execution_time_ms, 2),
-            memory_usage=run.memory_mb if run.memory_mb > 0 else None
+            memory_usage=run.memory_mb if run.memory_mb > 0 else None,
         )
 
     # ───── 코드 보안 래핑 헬퍼 ─────
@@ -689,7 +972,7 @@ class CodeExecutor:
     @staticmethod
     def _wrap_python_safe(code: str) -> str:
         """Python 런타임 SafeImporter 래핑 (defense in depth)"""
-        return f'''
+        return f"""
 import sys
 
 # 위험한 모듈, 서브모듈 런타임 차단
@@ -709,12 +992,12 @@ class _Guard:
 sys.meta_path.insert(0, _Guard())
 
 {code}
-'''
+"""
 
     @staticmethod
     def _wrap_js_stdin(code: str) -> str:
         """JavaScript stdin 파이프 래핑 (코드 인젝션 방지)"""
-        return f'''
+        return f"""
 "use strict";
 const _rl = require('readline');
 const _iface = _rl.createInterface({{ input: process.stdin, terminal: false }});
@@ -725,7 +1008,7 @@ _iface.on('close', () => {{
     globalThis.input = () => _lines[_idx++] || '';
     {code}
 }});
-'''
+"""
 
     # ───── 서브프로세스 Fallback: 언어별 실행 ─────
 
@@ -734,14 +1017,16 @@ _iface.on('close', () => {{
         file_path = os.path.join(self.temp_dir, "solution.py")
         safe_code = self._wrap_python_safe(code)
 
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(safe_code)
 
         try:
             run = self._monitored_run([sys.executable, file_path], input=stdin)
             return self._result_from_run(run)
         except Exception as e:
-            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
+            return CodeExecutionResult(
+                success=False, output="", error=str(e), execution_time=0
+            )
         finally:
             if os.path.exists(file_path):
                 os.remove(file_path)
@@ -751,63 +1036,73 @@ _iface.on('close', () => {{
         file_path = os.path.join(self.temp_dir, "solution.js")
         wrapped_code = self._wrap_js_stdin(code)
 
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(wrapped_code)
 
         try:
-            run = self._monitored_run(['node', file_path], input=stdin)
+            run = self._monitored_run(["node", file_path], input=stdin)
             return self._result_from_run(run)
         except FileNotFoundError:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error="Node.js가 설치되어 있지 않습니다.",
-                execution_time=0
+                execution_time=0,
             )
         except Exception as e:
-            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
+            return CodeExecutionResult(
+                success=False, output="", error=str(e), execution_time=0
+            )
         finally:
             if os.path.exists(file_path):
                 os.remove(file_path)
 
     def _execute_java(self, code: str, stdin: str = "") -> CodeExecutionResult:
         """Java 실행 (Xmx 메모리 제한 + 메모리 모니터링)"""
-        class_match = re.search(r'public\s+class\s+(\w+)', code)
+        class_match = re.search(r"public\s+class\s+(\w+)", code)
         class_name = class_match.group(1) if class_match else "Solution"
         file_path = os.path.join(self.temp_dir, f"{class_name}.java")
 
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             f.write(code)
 
         try:
             # 컴파일
             compile_result = subprocess.run(
-                ['javac', file_path],
-                capture_output=True, text=True, timeout=30, cwd=self.temp_dir
+                ["javac", file_path],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=self.temp_dir,
             )
             if compile_result.returncode != 0:
                 return CodeExecutionResult(
-                    success=False, output="",
+                    success=False,
+                    output="",
                     error=f"컴파일 오류:\n{compile_result.stderr}",
-                    execution_time=0
+                    execution_time=0,
                 )
 
             # 실행 (Xmx로 JVM 메모리 제한 + 모니터링)
             run = self._monitored_run(
-                ['java', f'-Xmx{SANDBOX_MEMORY_MB}m', '-cp', self.temp_dir, class_name],
-                input=stdin
+                ["java", f"-Xmx{SANDBOX_MEMORY_MB}m", "-cp", self.temp_dir, class_name],
+                input=stdin,
             )
             return self._result_from_run(run)
 
         except FileNotFoundError:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error="Java가 설치되어 있지 않습니다.",
-                execution_time=0
+                execution_time=0,
             )
         except Exception as e:
-            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
+            return CodeExecutionResult(
+                success=False, output="", error=str(e), execution_time=0
+            )
         finally:
-            for ext in ['.java', '.class']:
+            for ext in [".java", ".class"]:
                 path = os.path.join(self.temp_dir, f"{class_name}{ext}")
                 if os.path.exists(path):
                     os.remove(path)
@@ -815,21 +1110,27 @@ _iface.on('close', () => {{
     def _execute_c(self, code: str, stdin: str = "") -> CodeExecutionResult:
         """C 실행 (gcc 컴파일 + 메모리 모니터링)"""
         source_path = os.path.join(self.temp_dir, "solution.c")
-        exe_path = os.path.join(self.temp_dir, "solution.exe" if os.name == 'nt' else "solution")
+        exe_path = os.path.join(
+            self.temp_dir, "solution.exe" if os.name == "nt" else "solution"
+        )
 
-        with open(source_path, 'w', encoding='utf-8') as f:
+        with open(source_path, "w", encoding="utf-8") as f:
             f.write(code)
 
         try:
             compile_result = subprocess.run(
-                ['gcc', source_path, '-o', exe_path, '-lm', '-O2'],
-                capture_output=True, text=True, timeout=30, cwd=self.temp_dir
+                ["gcc", source_path, "-o", exe_path, "-lm", "-O2"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=self.temp_dir,
             )
             if compile_result.returncode != 0:
                 return CodeExecutionResult(
-                    success=False, output="",
+                    success=False,
+                    output="",
                     error=f"컴파일 오류:\n{compile_result.stderr}",
-                    execution_time=0
+                    execution_time=0,
                 )
 
             run = self._monitored_run([exe_path], input=stdin)
@@ -837,12 +1138,15 @@ _iface.on('close', () => {{
 
         except FileNotFoundError:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error="GCC가 설치되어 있지 않습니다. MinGW 또는 GCC를 설치해주세요.",
-                execution_time=0
+                execution_time=0,
             )
         except Exception as e:
-            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
+            return CodeExecutionResult(
+                success=False, output="", error=str(e), execution_time=0
+            )
         finally:
             for p in (source_path, exe_path):
                 if os.path.exists(p):
@@ -851,21 +1155,27 @@ _iface.on('close', () => {{
     def _execute_cpp(self, code: str, stdin: str = "") -> CodeExecutionResult:
         """C++ 실행 (g++ 컴파일 + 메모리 모니터링)"""
         source_path = os.path.join(self.temp_dir, "solution.cpp")
-        exe_path = os.path.join(self.temp_dir, "solution.exe" if os.name == 'nt' else "solution")
+        exe_path = os.path.join(
+            self.temp_dir, "solution.exe" if os.name == "nt" else "solution"
+        )
 
-        with open(source_path, 'w', encoding='utf-8') as f:
+        with open(source_path, "w", encoding="utf-8") as f:
             f.write(code)
 
         try:
             compile_result = subprocess.run(
-                ['g++', source_path, '-o', exe_path, '-std=c++17', '-O2'],
-                capture_output=True, text=True, timeout=30, cwd=self.temp_dir
+                ["g++", source_path, "-o", exe_path, "-std=c++17", "-O2"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=self.temp_dir,
             )
             if compile_result.returncode != 0:
                 return CodeExecutionResult(
-                    success=False, output="",
+                    success=False,
+                    output="",
                     error=f"컴파일 오류:\n{compile_result.stderr}",
-                    execution_time=0
+                    execution_time=0,
                 )
 
             run = self._monitored_run([exe_path], input=stdin)
@@ -873,12 +1183,15 @@ _iface.on('close', () => {{
 
         except FileNotFoundError:
             return CodeExecutionResult(
-                success=False, output="",
+                success=False,
+                output="",
                 error="G++가 설치되어 있지 않습니다. MinGW 또는 G++를 설치해주세요.",
-                execution_time=0
+                execution_time=0,
             )
         except Exception as e:
-            return CodeExecutionResult(success=False, output="", error=str(e), execution_time=0)
+            return CodeExecutionResult(
+                success=False, output="", error=str(e), execution_time=0
+            )
         finally:
             for p in (source_path, exe_path):
                 if os.path.exists(p):
@@ -948,7 +1261,7 @@ class CodeAnalyzer:
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=0.3,
-                    num_ctx=DEFAULT_LLM_NUM_CTX
+                    num_ctx=DEFAULT_LLM_NUM_CTX,
                 )
             except Exception as e:
                 print(f"⚠️ CodeAnalyzer LLM 초기화 실패: {e}")
@@ -958,18 +1271,20 @@ class CodeAnalyzer:
         code: str,
         language: str,
         problem: Optional[CodingProblem],
-        execution_results: List[Dict]
+        execution_results: List[Dict],
     ) -> CodeAnalysisResult:
         """코드 종합 분석"""
 
         # 테스트 결과 요약
-        passed = sum(1 for r in execution_results if r.get('passed', False))
+        passed = sum(1 for r in execution_results if r.get("passed", False))
         total = len(execution_results)
 
         # LLM 분석
         if self.llm:
             try:
-                analysis = await self._llm_analyze(code, language, problem, execution_results)
+                analysis = await self._llm_analyze(
+                    code, language, problem, execution_results
+                )
                 return analysis
             except Exception as e:
                 print(f"LLM 분석 오류: {e}")
@@ -982,7 +1297,7 @@ class CodeAnalyzer:
         code: str,
         language: str,
         problem: Optional[CodingProblem],
-        execution_results: List[Dict]
+        execution_results: List[Dict],
     ) -> CodeAnalysisResult:
         """LLM 기반 상세 분석"""
 
@@ -997,15 +1312,18 @@ class CodeAnalyzer:
 """
 
         # 테스트 결과 구성
-        test_results = "\n".join([
-            f"- 테스트 {i+1}: {'통과 ✓' if r.get('passed') else '실패 ✗'} "
-            f"(실행시간: {r.get('execution_time', 0):.2f}ms)"
-            for i, r in enumerate(execution_results)
-        ])
+        test_results = "\n".join(
+            [
+                f"- 테스트 {i + 1}: {'통과 ✓' if r.get('passed') else '실패 ✗'} "
+                f"(실행시간: {r.get('execution_time', 0):.2f}ms)"
+                for i, r in enumerate(execution_results)
+            ]
+        )
 
         messages = [
             SystemMessage(content=self.CODE_ANALYSIS_PROMPT),
-            HumanMessage(content=f"""
+            HumanMessage(
+                content=f"""
 {problem_info}
 
 [제출된 코드 - {language}]
@@ -1017,33 +1335,32 @@ class CodeAnalyzer:
 {test_results}
 
 위 코드를 종합적으로 분석하고 JSON 형식으로 평가해주세요.
-""")
+"""
+            ),
         ]
 
         response = self.llm.invoke(messages)
         response_text = response.content
 
         # JSON Resilience 파싱
-        analysis = parse_code_analysis_json(response_text, context="CodeAnalyzer.analyze_code")
+        analysis = parse_code_analysis_json(
+            response_text, context="CodeAnalyzer.analyze_code"
+        )
 
         return CodeAnalysisResult(
-            overall_score=analysis.get('overall_score', 0),
-            correctness=analysis.get('correctness', {}),
-            time_complexity=analysis.get('time_complexity', {}),
-            space_complexity=analysis.get('space_complexity', {}),
-            code_style=analysis.get('code_style', {}),
-            comments=analysis.get('comments', {}),
-            best_practices=analysis.get('best_practices', {}),
-            feedback=analysis.get('feedback', []),
-            detailed_analysis=analysis.get('detailed_analysis', '')
+            overall_score=analysis.get("overall_score", 0),
+            correctness=analysis.get("correctness", {}),
+            time_complexity=analysis.get("time_complexity", {}),
+            space_complexity=analysis.get("space_complexity", {}),
+            code_style=analysis.get("code_style", {}),
+            comments=analysis.get("comments", {}),
+            best_practices=analysis.get("best_practices", {}),
+            feedback=analysis.get("feedback", []),
+            detailed_analysis=analysis.get("detailed_analysis", ""),
         )
 
     def _basic_analyze(
-        self,
-        code: str,
-        language: str,
-        passed: int,
-        total: int
+        self, code: str, language: str, passed: int, total: int
     ) -> CodeAnalysisResult:
         """기본 코드 분석 (LLM 없이)"""
 
@@ -1051,8 +1368,10 @@ class CodeAnalyzer:
         correctness_score = int((passed / total) * 25) if total > 0 else 0
 
         # 코드 스타일 분석
-        lines = code.split('\n')
-        has_comments = any('#' in line or '//' in line or '/*' in line for line in lines)
+        lines = code.split("\n")
+        has_comments = any(
+            "#" in line or "//" in line or "/*" in line for line in lines
+        )
         avg_line_length = sum(len(line) for line in lines) / len(lines) if lines else 0
 
         style_score = 15
@@ -1077,41 +1396,49 @@ class CodeAnalyzer:
                 "score": correctness_score,
                 "passed_tests": passed,
                 "total_tests": total,
-                "feedback": f"{passed}/{total} 테스트 케이스 통과"
+                "feedback": f"{passed}/{total} 테스트 케이스 통과",
             },
             time_complexity={
                 "score": 15,
                 "estimated": "분석 필요",
                 "optimal": "문제에 따라 다름",
-                "feedback": "LLM을 활성화하면 상세 분석이 제공됩니다."
+                "feedback": "LLM을 활성화하면 상세 분석이 제공됩니다.",
             },
             space_complexity={
                 "score": 10,
                 "estimated": "분석 필요",
-                "feedback": "LLM을 활성화하면 상세 분석이 제공됩니다."
+                "feedback": "LLM을 활성화하면 상세 분석이 제공됩니다.",
             },
             code_style={
                 "score": style_score,
                 "issues": style_issues,
-                "feedback": "코드 스타일이 양호합니다." if not style_issues else "개선이 필요합니다."
+                "feedback": "코드 스타일이 양호합니다."
+                if not style_issues
+                else "개선이 필요합니다.",
             },
             comments={
                 "score": comment_score,
                 "has_comments": has_comments,
                 "quality": "fair" if has_comments else "poor",
-                "feedback": "주석이 있습니다." if has_comments else "주석을 추가하세요."
+                "feedback": "주석이 있습니다."
+                if has_comments
+                else "주석을 추가하세요.",
             },
             best_practices={
                 "score": 7,
                 "followed": [],
                 "missing": [],
-                "feedback": "LLM을 활성화하면 상세 분석이 제공됩니다."
+                "feedback": "LLM을 활성화하면 상세 분석이 제공됩니다.",
             },
             feedback=[
-                "테스트 케이스를 모두 통과하도록 코드를 수정하세요." if passed < total else "모든 테스트를 통과했습니다!",
-                "주석을 추가하여 코드 가독성을 높이세요." if not has_comments else "주석이 잘 작성되어 있습니다."
+                "테스트 케이스를 모두 통과하도록 코드를 수정하세요."
+                if passed < total
+                else "모든 테스트를 통과했습니다!",
+                "주석을 추가하여 코드 가독성을 높이세요."
+                if not has_comments
+                else "주석이 잘 작성되어 있습니다.",
             ],
-            detailed_analysis="기본 분석이 완료되었습니다. LLM을 활성화하면 더 상세한 분석을 받을 수 있습니다."
+            detailed_analysis="기본 분석이 완료되었습니다. LLM을 활성화하면 더 상세한 분석을 받을 수 있습니다.",
         )
 
 
@@ -1187,7 +1514,7 @@ class CodeExecutionService:
         code: str,
         language: str,
         problem_id: Optional[str] = None,
-        custom_test_cases: Optional[List[Dict]] = None
+        custom_test_cases: Optional[List[Dict]] = None,
     ) -> Dict:
         """코드 실행 및 분석"""
 
@@ -1200,30 +1527,29 @@ class CodeExecutionService:
         if not test_cases:
             # 테스트 케이스 없으면 단순 실행
             result = self.executor.execute(code, language, "")
-            return {
-                "execution": result.dict(),
-                "analysis": None,
-                "test_results": []
-            }
+            return {"execution": result.dict(), "analysis": None, "test_results": []}
 
         # 각 테스트 케이스 실행
         test_results = []
         for i, tc in enumerate(test_cases):
-            result = self.executor.execute(code, language, tc.get('input', ''))
+            result = self.executor.execute(code, language, tc.get("input", ""))
 
-            expected = tc.get('expected', '').strip()
+            expected = tc.get("expected", "").strip()
             actual = result.output.strip()
             passed = _smart_compare(actual, expected)
 
-            test_results.append({
-                "test_id": i + 1,
-                "input": tc.get('input', '')[:100] + ('...' if len(tc.get('input', '')) > 100 else ''),
-                "expected": expected[:100],
-                "actual": actual[:100],
-                "passed": passed,
-                "execution_time": result.execution_time,
-                "error": result.error
-            })
+            test_results.append(
+                {
+                    "test_id": i + 1,
+                    "input": tc.get("input", "")[:100]
+                    + ("..." if len(tc.get("input", "")) > 100 else ""),
+                    "expected": expected[:100],
+                    "actual": actual[:100],
+                    "passed": passed,
+                    "execution_time": result.execution_time,
+                    "error": result.error,
+                }
+            )
 
         # AI 분석
         analysis = await self.analyzer.analyze(code, language, problem, test_results)
@@ -1233,11 +1559,14 @@ class CodeExecutionService:
             "test_results": test_results,
             "analysis": analysis.dict(),
             "summary": {
-                "passed": sum(1 for r in test_results if r['passed']),
+                "passed": sum(1 for r in test_results if r["passed"]),
                 "total": len(test_results),
                 "overall_score": analysis.overall_score,
-                "avg_execution_time": sum(r['execution_time'] for r in test_results) / len(test_results) if test_results else 0
-            }
+                "avg_execution_time": sum(r["execution_time"] for r in test_results)
+                / len(test_results)
+                if test_results
+                else 0,
+            },
         }
 
 
@@ -1251,13 +1580,41 @@ def create_coding_router():
 
     @router.get("/generate")
     async def generate_problem(difficulty: str = "medium"):
-        """LLM으로 코딩 문제 1개 생성"""
+        """
+        코딩 문제 1개를 반환합니다.
+
+        1순위: Redis 문제 풀(pool)에서 즉시 꺼냄 (체감 0초)
+        2순위: 풀이 비었으면 LLM 직접 호출 (50~90초)
+        3순위: LLM도 실패하면 fallback 기본 문제
+
+        풀에서 꺼낸 후 남은 수가 부족하면 Celery로 자동 보충합니다.
+        """
         if difficulty not in ("easy", "medium", "hard"):
             difficulty = "medium"
+
+        # 1순위: Redis 풀에서 즉시 반환
+        pooled = problem_pool.pop(difficulty)
+        if pooled:
+            print(
+                f"[CodingRouter] 풀에서 즉시 반환: {pooled.title} (남은 수: {problem_pool.count(difficulty)})"
+            )
+            # 풀 부족 시 백그라운드 보충
+            if problem_pool.needs_refill(difficulty):
+                trigger_pool_refill(difficulty)
+            public_problem = pooled.dict()
+            public_problem["test_cases"] = pooled.test_cases[:2]
+            return public_problem
+
+        # 2순위: 풀이 비었으므로 LLM 직접 호출
+        print(f"[CodingRouter] 풀 비어있음 — LLM 직접 생성 ({difficulty})")
         problem = await generator.generate(difficulty)
+
+        # 백그라운드 보충도 함께 발행
+        trigger_pool_refill(difficulty)
+
         # 테스트 케이스는 일부만 공개
         public_problem = problem.dict()
-        public_problem['test_cases'] = problem.test_cases[:2]
+        public_problem["test_cases"] = problem.test_cases[:2]
         return public_problem
 
     @router.get("/problems/{problem_id}")
@@ -1265,11 +1622,14 @@ def create_coding_router():
         """캐시된 문제 상세 조회"""
         problem = _generated_problems.get(problem_id)
         if not problem:
-            raise HTTPException(status_code=404, detail="문제를 찾을 수 없습니다. 새 문제를 생성해주세요.")
+            raise HTTPException(
+                status_code=404,
+                detail="문제를 찾을 수 없습니다. 새 문제를 생성해주세요.",
+            )
 
         # 테스트 케이스는 일부만 공개
         public_problem = problem.dict()
-        public_problem['test_cases'] = problem.test_cases[:2]
+        public_problem["test_cases"] = problem.test_cases[:2]
         return public_problem
 
     @router.post("/execute")
@@ -1278,14 +1638,14 @@ def create_coding_router():
         if request.language.lower() not in SUPPORTED_LANGUAGES:
             raise HTTPException(
                 status_code=400,
-                detail=f"지원하지 않는 언어입니다. 지원 언어: {SUPPORTED_LANGUAGES}"
+                detail=f"지원하지 않는 언어입니다. 지원 언어: {SUPPORTED_LANGUAGES}",
             )
 
         result = await service.run_and_analyze(
             code=request.code,
             language=request.language,
             problem_id=request.problem_id,
-            custom_test_cases=request.test_cases
+            custom_test_cases=request.test_cases,
         )
 
         return result
@@ -1303,13 +1663,13 @@ def create_coding_router():
         if request.language.lower() not in SUPPORTED_LANGUAGES:
             raise HTTPException(
                 status_code=400,
-                detail=f"지원하지 않는 언어입니다. 지원 언어: {SUPPORTED_LANGUAGES}"
+                detail=f"지원하지 않는 언어입니다. 지원 언어: {SUPPORTED_LANGUAGES}",
             )
         result = await service.run_and_analyze(
             code=request.code,
             language=request.language,
             problem_id=request.problem_id,
-            custom_test_cases=request.test_cases
+            custom_test_cases=request.test_cases,
         )
         return result
 
@@ -1317,7 +1677,7 @@ def create_coding_router():
     async def get_template(language: str, problem_id: Optional[str] = None):
         """언어별 코드 템플릿"""
         templates = {
-            "python": '''# Python 솔루션
+            "python": """# Python 솔루션
 # 입력 받기
 n = int(input())
 nums = list(map(int, input().split()))
@@ -1331,8 +1691,8 @@ def solution(nums, target):
 # 결과 출력
 result = solution(nums, target)
 print(result)
-''',
-            "javascript": '''// JavaScript 솔루션
+""",
+            "javascript": """// JavaScript 솔루션
 // 입력 받기
 const n = parseInt(input());
 const nums = input().split(' ').map(Number);
@@ -1346,8 +1706,8 @@ function solution(nums, target) {
 // 결과 출력
 const result = solution(nums, target);
 console.log(result);
-''',
-            "java": '''import java.util.*;
+""",
+            "java": """import java.util.*;
 
 public class Solution {
     public static void main(String[] args) {
@@ -1373,8 +1733,8 @@ public class Solution {
         return new int[]{0, 1};
     }
 }
-''',
-            "c": '''#include <stdio.h>
+""",
+            "c": """#include <stdio.h>
 #include <stdlib.h>
 
 // C 솔루션
@@ -1398,8 +1758,8 @@ int main() {
     free(nums);
     return 0;
 }
-''',
-            "cpp": '''#include <iostream>
+""",
+            "cpp": """#include <iostream>
 #include <vector>
 #include <unordered_map>
 using namespace std;
@@ -1427,12 +1787,12 @@ int main() {
     
     return 0;
 }
-'''
+""",
         }
 
         return {
             "language": language,
-            "template": templates.get(language.lower(), "// 템플릿 없음")
+            "template": templates.get(language.lower(), "// 템플릿 없음"),
         }
 
     return router
@@ -1451,7 +1811,7 @@ if __name__ == "__main__":
 
         # 코드 실행 테스트
         service = CodeExecutionService()
-        code = '''
+        code = """
 n = int(input())
 nums = list(map(int, input().split()))
 target = int(input())
@@ -1467,7 +1827,7 @@ def two_sum(nums, target):
 
 result = two_sum(nums, target)
 print(result[0], result[1])
-'''
+"""
 
         result = await service.run_and_analyze(code, "python", problem.id)
         print("\n=== 실행 결과 ===")

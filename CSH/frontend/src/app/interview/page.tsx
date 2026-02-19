@@ -84,6 +84,17 @@ function InterviewPageInner() {
   const interventionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pushEventRef = useRef<((raw: Record<string, unknown>) => void) | null>(null);
 
+  // SpeechRecognition 콜백에서 최신 상태를 참조하기 위한 Ref
+  // (클로저 캡처 시 stale value 문제 방지 — 콜백은 최초 생성 시점의 state 값만 보유)
+  const interviewStartedRef = useRef(false);
+  const micEnabledRef = useRef(true);
+  const sessionIdRef = useRef("");
+
+  // state 변경 시 ref도 동기화 — 콜백에서 항상 최신 값 참조 가능
+  useEffect(() => { interviewStartedRef.current = interviewStarted; }, [interviewStarted]);
+  useEffect(() => { micEnabledRef.current = micEnabled; }, [micEnabled]);
+  useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+
   // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   useEffect(() => {
     if (!loading && !token) router.push("/");
@@ -128,6 +139,19 @@ function InterviewPageInner() {
     };
     requestAnimationFrame(assignStream);
   }, [phase]);
+
+  // 면접 중 우발적 페이지 이탈 방지 (뒤로가기, 새로고침 등)
+  // beforeunload 이벤트로 사용자에게 확인 대화상자를 표시
+  useEffect(() => {
+    if (!interviewStarted) return;
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // 최신 브라우저에서는 returnValue 설정만으로 확인 대화상자 표시
+      e.returnValue = "면접이 진행 중입니다. 페이지를 떠나시겠습니까?";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [interviewStarted]);
 
   // 클린업 (카메라, WebSocket, 음성인식)
   useEffect(() => {
@@ -190,21 +214,53 @@ function InterviewPageInner() {
         streamRef.current = stream;
       }
 
-      // WebSocket 연결
-      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsToken = sessionStorage.getItem("access_token");
-      const ws = new WebSocket(`${protocol}//${window.location.host}/ws/interview/${sid}?token=${encodeURIComponent(wsToken || "")}`);
-      ws.onmessage = (e) => {
-        try {
-          const data = JSON.parse(e.data);
-          if (data.type === "stt_result" && data.is_final) {
-            setSttText(prev => prev + " " + data.transcript);
+      // WebSocket 연결 + 자동 재연결 로직
+      // 백엔드(uvicorn --reload) 재시작 시 WebSocket 끊김이 발생할 수 있으므로
+      // onclose/onerror 핸들러에서 자동 재연결을 시도하여 세션 안정성 보장
+      const connectWebSocket = (targetSid: string) => {
+        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        const wsToken = sessionStorage.getItem("access_token");
+        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/interview/${targetSid}?token=${encodeURIComponent(wsToken || "")}`);
+
+        ws.onmessage = (e) => {
+          try {
+            const data = JSON.parse(e.data);
+            if (data.type === "stt_result" && data.is_final) {
+              setSttText(prev => prev + " " + data.transcript);
+            }
+            if (data.type === "event" && pushEventRef.current) {
+              pushEventRef.current(data);
+            }
+          } catch { /* ignore */ }
+        };
+
+        // WebSocket 끊김 시 자동 재연결 (최대 5회, 3초 간격)
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT = 5;
+        ws.onclose = (ev) => {
+          // 정상 종료(코드 1000)이거나 면접 종료 상태면 재연결하지 않음
+          if (ev.code === 1000 || !interviewStartedRef.current) return;
+          console.warn(`[WebSocket] 연결 끊김 (code: ${ev.code}). 재연결 시도 중...`);
+          if (reconnectAttempts < MAX_RECONNECT) {
+            reconnectAttempts++;
+            setTimeout(() => {
+              if (interviewStartedRef.current) {
+                const newWs = connectWebSocket(targetSid);
+                wsRef.current = newWs;
+              }
+            }, 3000);
           }
-          if (data.type === "event" && pushEventRef.current) {
-            pushEventRef.current(data);
-          }
-        } catch { /* ignore */ }
+        };
+
+        ws.onerror = () => {
+          console.warn("[WebSocket] 연결 오류 발생");
+          // onclose가 자동으로 호출되므로 여기서는 로그만 출력
+        };
+
+        return ws;
       };
+
+      const ws = connectWebSocket(sid);
       wsRef.current = ws;
 
       initSpeechRecognition();
@@ -261,6 +317,7 @@ function InterviewPageInner() {
     recognition.continuous = true;
     recognition.interimResults = true;
 
+    // 음성 인식 결과 핸들러 — 최종(final) 결과만 STT 텍스트에 추가
     recognition.onresult = (e: SpeechRecognitionEvent) => {
       let final = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -269,9 +326,41 @@ function InterviewPageInner() {
       if (final) setSttText(prev => prev + " " + final);
     };
 
-    recognition.onend = () => { if (interviewStarted && micEnabled) recognition.start(); };
+    // 음성 인식 에러 핸들러 — 에러 발생 시에도 시스템이 안정적으로 유지되도록 처리
+    // 에러 유형: network(네트워크), not-allowed(권한), aborted(중단), no-speech(무음) 등
+    recognition.onerror = ((ev: Event) => {
+      const error = ev as Event & { error?: string };
+      const errorType = error.error || "unknown";
+      // no-speech는 정상 동작 (사용자가 말하지 않은 경우) → 무시
+      if (errorType === "no-speech") return;
+      console.warn(`[SpeechRecognition] 에러: ${errorType}`);
+      // aborted는 의도적 중단 → 재시작 불필요
+      if (errorType === "aborted") return;
+    }) as ((ev: Event) => void);
+
+    // 음성 인식 종료 핸들러 — Ref를 통해 최신 state 참조 (stale closure 방지)
+    // Chrome에서 continuous 모드라도 네트워크 타임아웃 등으로 인식이 끊길 수 있음
+    recognition.onend = () => {
+      // Ref에서 최신 interviewStarted/micEnabled 값을 읽어 재시작 여부 결정
+      if (interviewStartedRef.current && micEnabledRef.current) {
+        // 디바운스: 빠른 재시작 루프 방지 (300ms 대기 후 재시작)
+        setTimeout(() => {
+          try {
+            recognition.start();
+          } catch (e) {
+            // 이미 시작된 상태에서 start() 호출 시 DOMException 발생 가능 → 무시
+            console.warn("[SpeechRecognition] 재시작 실패 (이미 활성):", e);
+          }
+        }, 300);
+      }
+    };
+
     recognitionRef.current = recognition;
-    recognition.start();
+    try {
+      recognition.start();
+    } catch (e) {
+      console.warn("[SpeechRecognition] 초기 시작 실패:", e);
+    }
   };
 
   // ========== 질문 요청 ==========
@@ -288,7 +377,12 @@ function InterviewPageInner() {
 
       // 개입 체크 시작
       startInterventionCheck(sid);
-    } catch { setStatus("ready"); }
+    } catch (err) {
+      // 에러 발생 시에도 "listening" 상태로 복귀 → 사용자가 재시도 가능
+      console.error("다음 질문 요청 실패:", err);
+      setMessages(prev => [...prev, { role: "ai", text: "⚠️ 일시적 오류가 발생했습니다. 잠시 후 다시 답변해 주세요." }]);
+      setStatus("listening");
+    }
   };
 
   // ========== TTS 발화 ==========
@@ -347,18 +441,17 @@ function InterviewPageInner() {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     interventionApi.endTurn(sessionId, answer).catch(() => { });
 
-    // 평가
+    // 평가 — fire-and-forget (백그라운드 실행, 다음 질문 생성을 블로킹하지 않음)
+    // evaluate()는 LLM 호출이므로 60초+ 소요 가능 → await 없이 비동기 실행
     setStatus("processing");
-    try {
-      await interviewApi.evaluate({
-        session_id: sessionId,
-        question: currentQuestion,
-        answer,
-        question_number: questionNum,
-      });
-    } catch { /* ignore */ }
+    interviewApi.evaluate({
+      session_id: sessionId,
+      question: currentQuestion,
+      answer,
+      question_number: questionNum,
+    }).catch((err) => console.warn("평가 백그라운드 오류 (무시):", err));
 
-    // 다음 질문 or 종료
+    // 다음 질문 or 종료 (evaluate 완료를 기다리지 않고 즉시 실행)
     if (questionNum >= totalQuestions) {
       endInterview();
     } else {

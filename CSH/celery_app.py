@@ -7,18 +7,19 @@ AI 면접 시스템의 비동기 작업을 처리합니다.
 실행 방법:
     # Worker 시작 (Windows)
     celery -A celery_app worker --pool=solo --loglevel=info
-    
+
     # Worker 시작 (Linux/Mac - 여러 프로세스)
     celery -A celery_app worker --concurrency=4 --loglevel=info
-    
+
     # Flower 모니터링 (선택사항)
     celery -A celery_app flower --port=5555
 """
 
 import os
+
 from celery import Celery
 from dotenv import load_dotenv
-from kombu import Queue, Exchange
+from kombu import Exchange, Queue
 
 load_dotenv()
 
@@ -32,7 +33,7 @@ celery_app = Celery(
     "ai_interview",
     broker=CELERY_BROKER_URL,
     backend=CELERY_RESULT_BACKEND,
-    include=["celery_tasks"]  # 태스크 모듈
+    include=["celery_tasks"],  # 태스크 모듈
 )
 
 # Celery 설정
@@ -41,30 +42,24 @@ celery_app.conf.update(
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
-    
     # 시간대 설정
     timezone="Asia/Seoul",
     enable_utc=True,
-    
     # 작업 설정
     task_track_started=True,
     task_time_limit=300,  # 5분 타임아웃
     task_soft_time_limit=240,  # 4분 소프트 타임아웃
-    
     # 재시도 설정
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     task_default_retry_delay=10,  # 10초 후 재시도
     task_max_retries=3,
-    
     # 결과 설정
     result_expires=3600,  # 1시간 후 결과 만료
     result_extended=True,
-    
     # Worker 설정
     worker_prefetch_multiplier=1,  # 한 번에 하나의 작업만 가져옴
     worker_concurrency=4,  # 기본 동시 작업 수
-    
     # 큐 설정
     task_default_queue="default",
     task_queues=(
@@ -77,7 +72,6 @@ celery_app.conf.update(
         Queue("question_generation", Exchange("question"), routing_key="question.#"),
         Queue("media_processing", Exchange("media"), routing_key="media.#"),
     ),
-    
     # 라우팅 설정
     task_routes={
         "celery_tasks.evaluate_answer_task": {"queue": "llm_evaluation"},
@@ -93,8 +87,8 @@ celery_app.conf.update(
         "celery_tasks.complete_interview_workflow_task": {"queue": "report_generation"},
         "celery_tasks.transcode_recording_task": {"queue": "media_processing"},
         "celery_tasks.cleanup_recording_task": {"queue": "media_processing"},
+        "celery_tasks.pre_generate_coding_problem_task": {"queue": "llm_evaluation"},
     },
-    
     # 로깅 설정
     worker_hijack_root_logger=False,
 )
@@ -112,6 +106,7 @@ celery_app.conf.beat_schedule = {
         "schedule": 3600.0,  # 1시간
     },
 }
+
 
 # Celery 상태 확인 함수
 def check_celery_status():

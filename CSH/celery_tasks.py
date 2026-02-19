@@ -1340,6 +1340,82 @@ def cleanup_recording_task(
     }
 
 
+# ========== 코딩 문제 사전 생성 (Problem Pool) ==========
+
+
+@celery_app.task(
+    name="celery_tasks.pre_generate_coding_problem_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    soft_time_limit=180,  # 3분 소프트 타임아웃
+    time_limit=210,  # 3분 30초 하드 타임아웃
+)
+def pre_generate_coding_problem_task(self, difficulty: str = "medium"):
+    """
+    Celery 백그라운드 태스크: LLM으로 코딩 문제를 사전 생성하여 Redis 풀에 저장합니다.
+
+    서버 시작 시 난이도별로 여러 개 발행되며, 풀이 부족할 때 자동 보충용으로도 사용됩니다.
+    생성된 문제는 Redis List(coding_pool:{difficulty})에 push됩니다.
+    사용자가 코딩 테스트 페이지를 열면 풀에서 즉시 pop하여 0초 지연으로 제공합니다.
+    """
+    print(f"[PreGenerate] 코딩 문제 사전 생성 시작 (난이도: {difficulty})")
+
+    try:
+        from code_execution_service import (
+            CodingProblemGenerator,
+            problem_pool,
+        )
+
+        generator = CodingProblemGenerator()
+        problem = generator.generate_sync(difficulty)
+
+        if problem:
+            success = problem_pool.push(difficulty, problem)
+            pool_count = problem_pool.count(difficulty)
+            if success:
+                print(
+                    f"[PreGenerate] 문제 생성 완료: '{problem.title}' "
+                    f"(풀 크기: {pool_count})"
+                )
+                _publish_event(
+                    "CODING_PROBLEM_POOL_UPDATED",
+                    data={
+                        "difficulty": difficulty,
+                        "title": problem.title,
+                        "pool_size": pool_count,
+                    },
+                    source="celery_worker",
+                )
+                return {
+                    "status": "success",
+                    "difficulty": difficulty,
+                    "title": problem.title,
+                    "pool_size": pool_count,
+                }
+            else:
+                print("[PreGenerate] Redis push 실패")
+                return {"status": "redis_error", "difficulty": difficulty}
+        else:
+            print("[PreGenerate] LLM 문제 생성 실패 — 재시도")
+            raise self.retry(exc=Exception("LLM 문제 생성 실패"))
+
+    except SoftTimeLimitExceeded:
+        print(f"[PreGenerate] 소프트 타임아웃 ({difficulty})")
+        return {"status": "timeout", "difficulty": difficulty}
+
+    except self.MaxRetriesExceededError:
+        print(f"[PreGenerate] 최대 재시도 초과 ({difficulty})")
+        return {"status": "max_retries", "difficulty": difficulty}
+
+    except Exception as exc:
+        print(f"[PreGenerate] 에러: {exc}")
+        try:
+            raise self.retry(exc=exc)
+        except self.MaxRetriesExceededError:
+            return {"status": "failed", "difficulty": difficulty, "error": str(exc)}
+
+
 # ========== 헬퍼 함수 ==========
 
 
