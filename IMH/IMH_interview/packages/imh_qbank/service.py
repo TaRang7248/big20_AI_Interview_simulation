@@ -1,6 +1,6 @@
 from typing import List, Optional
 from .domain import Question, QuestionStatus, SourceType, SourceMetadata
-from .repository import JsonFileQuestionRepository
+from .repository_interface import QuestionRepository
 from packages.imh_core.logging import get_logger
 
 logger = get_logger("imh_qbank.service")
@@ -12,7 +12,7 @@ class QuestionBankService:
     Enforces Soft Delete policy (Active-only filtering).
     """
 
-    def __init__(self, repository: JsonFileQuestionRepository):
+    def __init__(self, repository: QuestionRepository):
         self.repository = repository
 
     def add_static_question(self, content: str, tags: List[str], difficulty: str = "MEDIUM", job_role: Optional[str] = None) -> Question:
@@ -40,7 +40,7 @@ class QuestionBankService:
         
         filtered = []
         for q in candidates:
-            # 1. Active Check (Redundant but safe)
+            # 1. Active Check (Redundant but safe - CP3 Contract: Read-Time Filtering)
             if not q.is_active():
                 continue
             

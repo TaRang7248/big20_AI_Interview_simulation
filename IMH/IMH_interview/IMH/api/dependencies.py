@@ -16,6 +16,9 @@ from packages.imh_service.admin_query import AdminQueryService
 # --- Providers (External Adapters) ---
 
 from packages.imh_qbank.repository import JsonFileQuestionRepository
+from packages.imh_qbank.redis_repository import RedisCandidateRepository
+from packages.imh_qbank.cached_repository import CachedQuestionRepository
+from packages.imh_qbank.repository_interface import QuestionRepository
 from packages.imh_qbank.service import QuestionBankService
 from packages.imh_providers.question import QuestionGenerator
 from packages.imh_providers.mock_question import MockQuestionGenerator
@@ -82,14 +85,21 @@ def get_session_history_repository() -> SessionHistoryRepository:
     return FileHistoryRepository()
 
 @lru_cache
-def get_question_repository() -> JsonFileQuestionRepository:
+def get_question_repository() -> QuestionRepository:
     """
     Singleton Question Bank Repository (File-based).
     """
     # Hardcoded path for now, should be in config
     base_dir = os.path.join(os.getcwd(), "data", "qbank")
     file_path = os.path.join(base_dir, "questions.json")
-    return JsonFileQuestionRepository(file_path=file_path)
+    
+    # CP3: Cached Repository Pattern
+    # Source: File (JSON)
+    # Cache: Redis (Candidate Pool)
+    source_repo = JsonFileQuestionRepository(file_path=file_path)
+    redis_repo = RedisCandidateRepository()
+    
+    return CachedQuestionRepository(source_repository=source_repo, redis_repository=redis_repo)
 
 # --- Domain Services (Application Logic) ---
 

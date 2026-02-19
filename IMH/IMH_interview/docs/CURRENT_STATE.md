@@ -693,14 +693,30 @@ IMH/IMH_Interview/
 
 ---
 
+### TASK-027 / CP3: Candidate Pool Cache (LOCKED)
+- **Goal**: 질문 생성 후보군(Candidates) 캐싱
+- **Status**: ✅ LOCKED (Verified & Frozen)
+- **Outcome**: 
+  - `RedisCandidateRepository` 구현 (Resilience 적용)
+  - `CachedQuestionRepository` (Read-Through Proxy) 적용
+  - `get_candidates` 최적화 및 List Cache 적용
+  - Soft Delete (`is_active=false`) 노출 방지 검증 완료
+  - Redis Down 시 Graceful Fallback (Service Continuity) 보장
+  - **Audit**: `docs/TASK-027_CP3_VERIFICATION_REPORT.md` Pass
+  - **Immutable Contracts**:
+    - **PG Authority**: Source Repository is Truth
+    - **No Write-Back**: Redis -> Source 금지
+    - **Resilience**: Redis 장애는 기능 장애가 아님
+
+---
+
 ## Next Approval Target (Phase 9 확장 단계)
 
-### TASK-027 / CP3: Candidate Pool Cache (Planned)
-- **Goal**: 질문 생성 후보군(Candidates) 캐싱
-- **Scope**: 
-  - `get_candidates` 최적화
-  - QBank Soft Delete 반영 전략
+### TASK-027 / CP4: Prompt Composition Cache (Planned)
+- **Goal**: 프롬프트 구성 결과 캐싱 (Read Optimization)
+- **Scope**: TBD in CP4 Plan
 - **Status**: Not Started
+
 
 
 

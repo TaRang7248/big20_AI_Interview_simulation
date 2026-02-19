@@ -390,8 +390,16 @@
   - `verify_cp2.py` Pass
   - `TASK-027_CP2_AUDIT_REPORT.md` Pass
 
+- **Scope (CP3: Candidate Pool Cache)**: ✅ LOCKED
+  - Candidate Entity Cache + Candidate List Cache (Read Optimization)
+  - Read-Through Strategy
+  - Invalidate-on Save/Delete (PG 성공 이후 무효화)
+  - Stale Data Protection (`is_active=true` 보장, Read-Time Filtering + Silent Drop)
+  - Redis Down Soft Fallback (서비스 연속성 보장)
+  - `scripts/verify_task_027_cp3.py` Pass
+  - `TASK-027_CP3_VERIFICATION_REPORT.md` VERIFIED
+
 - **Future CP (Not Started)**:
-  - CP3: Candidate Cache
   - CP4: Prompt Composition Cache
 
 - **Dual Write Removal Condition**:

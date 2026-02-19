@@ -892,3 +892,24 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
 - **검증**: `scripts/verify_cp2.py` **PASS** (7 tests including Dynamic TTL)
 - **감사**: `docs/TASK-027_CP2_AUDIT_REPORT.md` (Authority & Layering Compliance Verified)
 
+### TASK-027 / CP3 Candidate Pool Cache Implemented (Verified)
+- **일자**: 2026-02-19
+- **상태**: **VERIFIED**
+- **요약**: Redis Candidate Pool Cache (CP3) 구현 및 검증 완료. PostgreSQL Authority 유지, Read-Through Caching, Redis Resilience 확보.
+- **주요 구현**:
+    - `packages/imh_qbank/redis_repository.py`: `RedisCandidateRepository` (Entity & List Cache, Serialization).
+    - `packages/imh_qbank/cached_repository.py`: `CachedQuestionRepository` (Read-Through Proxy).
+    - `packages/imh_qbank/service.py`: `QuestionBankService` Dependency Wiring.
+    - **Resilience**: Redis Connection Failure 시 `self._redis = None` 처리 및 Graceful Fallback (No Crash).
+- **검증 결과**:
+    - `scripts/verify_task_027_cp3.py`: **Pass (5 tests)**
+        1. **Read-Through**: Cache Miss 시 Source Load -> Cache Save 확인.
+        2. **Invalidation**: Update/Delete 시 Cache 즉시 제거 확인.
+        3. **List Cache**: 질문 추가/삭제 시 List Cache(`all_active`) 무효화 확인.
+        4. **Stale Data**: Soft Deleted 질문의 노출 방지 확인.
+        5. **Redis Down**: Connection Error 시 Service 정상 동작(Fallback to DB) 확인.
+- **Authority Contract 준수**:
+    - Source Repository(PG/File)가 유일한 진실 공급원(Source of Truth).
+    - Redis는 단순 최적화 계층이며, 장애 시 언제든 우회 가능.
+    - Write-Back 없음.
+
