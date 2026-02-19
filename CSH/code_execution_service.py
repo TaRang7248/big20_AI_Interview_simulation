@@ -24,6 +24,7 @@
 import asyncio
 import json
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -60,6 +61,16 @@ except ImportError:
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
+
+# 코딩 테스트 전용 경량 LLM 설정 (이원화 전략)
+# [사용자 요청 시 — API 직접 호출용] qwen3:1.7b (VRAM ~2GB, 빠른 응답)
+# [백그라운드 사전 생성 — Celery용] qwen3:4b (고품질, 시간 여유)
+# 환경변수로 별도 설정 가능
+CODING_LLM_MODEL = os.getenv("CODING_LLM_MODEL", "qwen3:1.7b")
+CODING_LLM_NUM_CTX = int(os.getenv("CODING_LLM_NUM_CTX", "4096"))
+CODING_CELERY_LLM_MODEL = os.getenv("CODING_CELERY_LLM_MODEL", "qwen3:4b")
+CODING_CELERY_LLM_NUM_CTX = int(os.getenv("CODING_CELERY_LLM_NUM_CTX", "4096"))
+
 MAX_EXECUTION_TIME = 10  # 초
 MAX_OUTPUT_SIZE = 10000  # 문자
 SUPPORTED_LANGUAGES = ["python", "javascript", "java", "c", "cpp"]
@@ -454,15 +465,16 @@ class CodingProblemGenerator:
     """LLM 기반 코딩 문제 자동 생성기"""
 
     # LLM 호출 타임아웃 (초) — 이 시간 내에 응답이 없으면 fallback 문제 반환
-    # GTX 1660 (6GB VRAM) 기준, 코딩 문제 생성 프롬프트는 약 60~90초 소요
-    LLM_TIMEOUT_SEC = 120
+    # qwen3:1.7b + num_ctx 4096 기준, 코딩 문제 생성 약 15~30초 소요 예상
+    LLM_TIMEOUT_SEC = 60
 
     def __init__(self):
         if LLM_AVAILABLE:
             self.llm = ChatOllama(
-                model=DEFAULT_LLM_MODEL,
+                model=CODING_LLM_MODEL,  # 코딩 테스트 전용 경량 모델 (qwen3:1.7b)
                 temperature=0.8,  # 다양한 문제 생성을 위해 높은 temperature
-                num_ctx=DEFAULT_LLM_NUM_CTX,
+                num_ctx=CODING_LLM_NUM_CTX,  # 코딩 문제는 4096 컨텍스트면 충분
+                num_predict=2048,  # 최대 생성 토큰 수 제한 (문제 JSON ~1000토큰)
                 think=None,  # thinking 모드 비활성화 — 응답 지연 방지
             )
         else:
@@ -479,6 +491,7 @@ class CodingProblemGenerator:
 
         try:
             prompt = PROBLEM_GENERATION_PROMPT.format(difficulty=difficulty)
+            # /no_think 지시어로 Qwen3 모델의 thinking 모드를 명시적으로 비활성화
             # asyncio.wait_for()로 타임아웃을 감싸서 LLM 무한 대기 방지
             response = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -487,15 +500,16 @@ class CodingProblemGenerator:
                         SystemMessage(
                             content="당신은 코딩 면접 문제 출제 전문가입니다. JSON 형식으로만 응답하세요."
                         ),
-                        HumanMessage(content=prompt),
+                        HumanMessage(content=prompt + "\n/no_think"),
                     ],
                 ),
                 timeout=self.LLM_TIMEOUT_SEC,
             )
             raw = response.content.strip()
 
-            # <think> 태그 제거 (Qwen 모델)
+            # <think> 태그 제거 (Qwen 모델 — 열림/닫힘 쌍 및 단독 닫힘 태그 모두 제거)
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"</think>", "", raw).strip()
 
             # JSON 파싱 (json_utils 활용)
             parsed = parse_code_analysis_json(raw)
@@ -542,25 +556,37 @@ class CodingProblemGenerator:
         동기(Synchronous) 버전 문제 생성 — Celery worker에서 호출합니다.
 
         asyncio 이벤트 루프가 없는 Celery worker 환경에서 사용하며,
-        생성된 문제를 반환합니다. 실패 시 None을 반환합니다.
+        고품질 모델(qwen3:4b)로 생성하여 Redis 풀에 저장합니다.
+        실패 시 None을 반환합니다.
         """
-        if not self.llm:
+        if not LLM_AVAILABLE:
             return None
 
         try:
+            # Celery 전용 고품질 LLM 인스턴스 (백그라운드 사전 생성용, 시간 여유)
+            celery_llm = ChatOllama(
+                model=CODING_CELERY_LLM_MODEL,  # qwen3:4b (고품질 모델)
+                temperature=0.8,
+                num_ctx=CODING_CELERY_LLM_NUM_CTX,  # 4096 (충분한 컨텍스트)
+                num_predict=2048,  # 문제 JSON ~1000토큰이면 충분
+                think=None,  # thinking 모드 비활성화
+            )
+
             prompt = PROBLEM_GENERATION_PROMPT.format(difficulty=difficulty)
-            response = self.llm.invoke(
+            # /no_think 지시어로 Qwen3 thinking 모드 명시적 비활성화
+            response = celery_llm.invoke(
                 [
                     SystemMessage(
                         content="당신은 코딩 면접 문제 출제 전문가입니다. JSON 형식으로만 응답하세요."
                     ),
-                    HumanMessage(content=prompt),
+                    HumanMessage(content=prompt + "\n/no_think"),
                 ]
             )
             raw = response.content.strip()
 
-            # <think> 태그 제거 (Qwen 모델)
+            # <think> 태그 제거 (Qwen 모델 — 열림/닫힘 쌍 및 단독 닫힘 태그 모두 제거)
             raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+            raw = re.sub(r"</think>", "", raw).strip()
 
             # JSON 파싱
             parsed = parse_code_analysis_json(raw)
@@ -592,16 +618,20 @@ class CodingProblemGenerator:
             return None
 
     def _fallback_problem(self, difficulty: str = "easy") -> CodingProblem:
-        """LLM 사용 불가 시 기본 문제 반환"""
-        problem_id = str(uuid.uuid4())[:8]
-        problem = CodingProblem(
-            id=problem_id,
-            title="두 수의 합 (Two Sum)",
-            difficulty=difficulty,
-            description="""정수 배열 nums와 정수 target이 주어집니다.
-nums에서 두 수를 선택하여 더한 값이 target이 되는 두 수의 인덱스를 반환하세요.
+        """
+        LLM 사용 불가 시 문제 은행에서 랜덤 반환.
 
-각 입력에는 정확히 하나의 해답이 있다고 가정하며, 같은 요소를 두 번 사용할 수 없습니다.
+        난이도별 7+개의 문제를 보유하며, 요청시 랜덤으로 1개를 선택합니다.
+        Redis 풀이 비어있고 LLM도 실패할 때 사용되므로, 체감 지연 0초.
+        """
+
+        # ========== 난이도별 문제 은행 ==========
+        problems_bank = {
+            "easy": [
+                {
+                    "title": "두 수의 합 (Two Sum)",
+                    "description": """정수 배열 nums와 정수 target이 주어집니다.
+nums에서 두 수를 선택하여 더한 값이 target이 되는 두 수의 인덱스를 반환하세요.
 
 **입력 형식:**
 - 첫 번째 줄: 배열의 크기 n
@@ -610,25 +640,669 @@ nums에서 두 수를 선택하여 더한 값이 target이 되는 두 수의 인
 
 **출력 형식:**
 - 두 인덱스를 공백으로 구분하여 출력""",
-            examples=[
-                {
-                    "input": "4\n2 7 11 15\n9",
-                    "output": "0 1",
-                    "explanation": "nums[0] + nums[1] = 2 + 7 = 9",
+                    "examples": [
+                        {
+                            "input": "4\n2 7 11 15\n9",
+                            "output": "0 1",
+                            "explanation": "nums[0] + nums[1] = 2 + 7 = 9",
+                        },
+                        {
+                            "input": "3\n3 2 4\n6",
+                            "output": "1 2",
+                            "explanation": "nums[1] + nums[2] = 2 + 4 = 6",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "4\n2 7 11 15\n9", "expected": "0 1"},
+                        {"input": "3\n3 2 4\n6", "expected": "1 2"},
+                        {"input": "2\n3 3\n6", "expected": "0 1"},
+                        {"input": "5\n1 5 3 7 2\n9", "expected": "1 3"},
+                    ],
+                    "hints": [
+                        "해시맵을 사용하면 O(n) 시간 복잡도로 해결할 수 있습니다."
+                    ],
                 },
                 {
-                    "input": "3\n3 2 4\n6",
-                    "output": "1 2",
-                    "explanation": "nums[1] + nums[2] = 2 + 4 = 6",
+                    "title": "문자열 뒤집기 (Reverse String)",
+                    "description": """주어진 문자열을 뒤집어 출력하세요.
+
+**입력 형식:**
+- 한 줄의 문자열
+
+**출력 형식:**
+- 뒤집어진 문자열""",
+                    "examples": [
+                        {
+                            "input": "hello",
+                            "output": "olleh",
+                            "explanation": "'hello'를 뒤집으면 'olleh'",
+                        },
+                        {
+                            "input": "world",
+                            "output": "dlrow",
+                            "explanation": "'world'를 뒤집으면 'dlrow'",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "hello", "expected": "olleh"},
+                        {"input": "world", "expected": "dlrow"},
+                        {"input": "a", "expected": "a"},
+                        {"input": "abcdef", "expected": "fedcba"},
+                    ],
+                    "hints": ["문자열 슬라이싱을 활용해보세요."],
+                },
+                {
+                    "title": "최댓값 찾기 (Find Maximum)",
+                    "description": """정수 배열에서 최댓값을 찾아 출력하세요.
+
+**입력 형식:**
+- 첫 번째 줄: 배열의 크기 n
+- 두 번째 줄: n개의 정수 (공백으로 구분)
+
+**출력 형식:**
+- 최댓값""",
+                    "examples": [
+                        {
+                            "input": "5\n3 1 4 1 5",
+                            "output": "5",
+                            "explanation": "배열에서 가장 큰 수는 5",
+                        },
+                        {
+                            "input": "3\n-1 -5 -3",
+                            "output": "-1",
+                            "explanation": "음수만 있을 때 가장 큰 수는 -1",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "5\n3 1 4 1 5", "expected": "5"},
+                        {"input": "3\n-1 -5 -3", "expected": "-1"},
+                        {"input": "1\n42", "expected": "42"},
+                        {"input": "4\n10 20 30 40", "expected": "40"},
+                    ],
+                    "hints": ["변수 하나로 최댓값을 추적하면서 반복하세요."],
+                },
+                {
+                    "title": "팔린드롬 판별 (Palindrome Check)",
+                    "description": """주어진 문자열이 팔린드롬(앞뒤가 같은 문자열)인지 판별하세요.
+
+**입력 형식:**
+- 한 줄의 문자열 (소문자 영어만)
+
+**출력 형식:**
+- 팔린드롬이면 True, 아니면 False""",
+                    "examples": [
+                        {
+                            "input": "racecar",
+                            "output": "True",
+                            "explanation": "racecar는 뒤집어도 같으므로 팔린드롬",
+                        },
+                        {
+                            "input": "hello",
+                            "output": "False",
+                            "explanation": "hello는 뒤집으면 olleh이므로 팔린드롬이 아님",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "racecar", "expected": "True"},
+                        {"input": "hello", "expected": "False"},
+                        {"input": "a", "expected": "True"},
+                        {"input": "abba", "expected": "True"},
+                        {"input": "abc", "expected": "False"},
+                    ],
+                    "hints": ["문자열을 뒤집어서 원래 문자열과 비교해보세요."],
+                },
+                {
+                    "title": "FizzBuzz",
+                    "description": """정수 n이 주어지면 1부터 n까지 각 수에 대해:
+- 3의 배수이면 Fizz
+- 5의 배수이면 Buzz
+- 3과 5의 공배수이면 FizzBuzz
+- 아니면 그 수를 출력하세요.
+
+**입력 형식:**
+- 정수 n
+
+**출력 형식:**
+- 각 줄에 결과 출력""",
+                    "examples": [
+                        {
+                            "input": "5",
+                            "output": "1\n2\nFizz\n4\nBuzz",
+                            "explanation": "3은 Fizz, 5는 Buzz",
+                        },
+                        {
+                            "input": "15",
+                            "output": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz",
+                            "explanation": "15는 3과 5의 공배수",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "5", "expected": "1\n2\nFizz\n4\nBuzz"},
+                        {"input": "3", "expected": "1\n2\nFizz"},
+                        {"input": "1", "expected": "1"},
+                        {
+                            "input": "15",
+                            "expected": "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\nFizzBuzz",
+                        },
+                    ],
+                    "hints": [
+                        "나머지 연산자(%)를 활용하세요.",
+                        "3과 5의 공배수부터 먼저 확인하세요.",
+                    ],
+                },
+                {
+                    "title": "배열 정렬 (Array Sort)",
+                    "description": """주어진 정수 배열을 오름차순으로 정렬하여 출력하세요.
+
+**입력 형식:**
+- 첫 번째 줄: 배열의 크기 n
+- 두 번째 줄: n개의 정수 (공백으로 구분)
+
+**출력 형식:**
+- 정렬된 정수를 공백으로 구분하여 출력""",
+                    "examples": [
+                        {
+                            "input": "5\n5 3 1 4 2",
+                            "output": "1 2 3 4 5",
+                            "explanation": "오름차순 정렬",
+                        },
+                        {
+                            "input": "3\n3 1 2",
+                            "output": "1 2 3",
+                            "explanation": "오름차순 정렬",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "5\n5 3 1 4 2", "expected": "1 2 3 4 5"},
+                        {"input": "3\n3 1 2", "expected": "1 2 3"},
+                        {"input": "1\n1", "expected": "1"},
+                        {"input": "4\n-3 0 5 -1", "expected": "-3 -1 0 5"},
+                    ],
+                    "hints": ["내장 정렬 함수를 사용하거나 직접 구현해보세요."],
+                },
+                {
+                    "title": "짝수/홀수 분류 (Even/Odd Count)",
+                    "description": """정수 배열에서 짝수와 홀수의 개수를 각각 출력하세요.
+
+**입력 형식:**
+- 첫 번째 줄: 배열의 크기 n
+- 두 번째 줄: n개의 정수 (공백으로 구분)
+
+**출력 형식:**
+- 짝수_개수 홀수_개수 (공백으로 구분)""",
+                    "examples": [
+                        {
+                            "input": "5\n1 2 3 4 5",
+                            "output": "2 3",
+                            "explanation": "짝수(2,4)=2개, 홀수(1,3,5)=3개",
+                        },
+                        {
+                            "input": "3\n2 4 6",
+                            "output": "3 0",
+                            "explanation": "모두 짝수",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "5\n1 2 3 4 5", "expected": "2 3"},
+                        {"input": "3\n2 4 6", "expected": "3 0"},
+                        {"input": "1\n7", "expected": "0 1"},
+                        {"input": "4\n0 1 2 3", "expected": "2 2"},
+                    ],
+                    "hints": ["나머지 연산자(%)로 짝수/홀수를 판별하세요."],
                 },
             ],
-            test_cases=[
-                {"input": "4\n2 7 11 15\n9", "expected": "0 1"},
-                {"input": "3\n3 2 4\n6", "expected": "1 2"},
-                {"input": "2\n3 3\n6", "expected": "0 1"},
-                {"input": "5\n1 5 3 7 2\n9", "expected": "1 3"},
+            "medium": [
+                {
+                    "title": "유효한 괄호 (Valid Parentheses)",
+                    "description": """주어진 문자열이 유효한 괄호 조합인지 판별하세요.
+괄호 종류: (), {{}}, []
+
+**입력 형식:**
+- 한 줄의 괄호 문자열
+
+**출력 형식:**
+- 유효하면 True, 아니면 False""",
+                    "examples": [
+                        {
+                            "input": "()[]{}",
+                            "output": "True",
+                            "explanation": "모든 괄호가 올바르게 닫힘",
+                        },
+                        {
+                            "input": "(]",
+                            "output": "False",
+                            "explanation": "괄호 종류가 다름",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "()[]{}", "expected": "True"},
+                        {"input": "(]", "expected": "False"},
+                        {"input": "(())", "expected": "True"},
+                        {"input": "([)]", "expected": "False"},
+                        {"input": "", "expected": "True"},
+                    ],
+                    "hints": [
+                        "스택 자료구조를 활용하세요.",
+                        "여는 괄호는 push, 닫는 괄호는 pop하여 매칭하세요.",
+                    ],
+                },
+                {
+                    "title": "중복 문자 없는 가장 긴 부분 문자열",
+                    "description": """주어진 문자열에서 중복 문자가 없는 가장 긴 부분 문자열의 길이를 구하세요.
+
+**입력 형식:**
+- 한 줄의 문자열
+
+**출력 형식:**
+- 가장 긴 부분 문자열의 길이 (정수)""",
+                    "examples": [
+                        {
+                            "input": "abcabcbb",
+                            "output": "3",
+                            "explanation": "'abc'가 가장 긴 중복없는 부분문자열 (길이 3)",
+                        },
+                        {
+                            "input": "bbbbb",
+                            "output": "1",
+                            "explanation": "'b'가 가장 긴 중복없는 부분문자열 (길이 1)",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "abcabcbb", "expected": "3"},
+                        {"input": "bbbbb", "expected": "1"},
+                        {"input": "pwwkew", "expected": "3"},
+                        {"input": "abcdef", "expected": "6"},
+                        {"input": "a", "expected": "1"},
+                    ],
+                    "hints": [
+                        "슬라이딩 윈도우 기법을 사용해보세요.",
+                        "set으로 현재 윈도우의 문자를 추적하세요.",
+                    ],
+                },
+                {
+                    "title": "애너그램 그룹화 (Group Anagrams)",
+                    "description": """주어진 문자열 배열에서 애너그램끼리 그룹화하세요.
+애너그램: 문자를 재배열하면 같아지는 단어들
+
+**입력 형식:**
+- 첫 번째 줄: 단어의 개수 n
+- 두 번째 줄: n개의 단어 (공백으로 구분)
+
+**출력 형식:**
+- 각 그룹을 한 줄에 공백으로 구분하여 출력 (알파벳 순)""",
+                    "examples": [
+                        {
+                            "input": "3\neat tea ate",
+                            "output": "ate eat tea",
+                            "explanation": "eat, tea, ate는 서로 애너그램",
+                        },
+                        {
+                            "input": "2\nabc bca",
+                            "output": "abc bca",
+                            "explanation": "abc와 bca는 애너그램",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "3\neat tea ate", "expected": "ate eat tea"},
+                        {"input": "2\nabc bca", "expected": "abc bca"},
+                        {"input": "1\nhello", "expected": "hello"},
+                        {
+                            "input": "4\nlisten silent abc cab",
+                            "expected": "abc cab\nlisten silent",
+                        },
+                    ],
+                    "hints": [
+                        "단어를 정렬하면 애너그램은 같은 문자열이 됩니다.",
+                        "dict를 사용하여 그룹화하세요.",
+                    ],
+                },
+                {
+                    "title": "이진 탐색 (Binary Search)",
+                    "description": """정렬된 정수 배열에서 target 값의 인덱스를 찾으세요.
+존재하지 않으면 -1을 출력하세요.
+
+**입력 형식:**
+- 첫 번째 줄: 배열의 크기 n
+- 두 번째 줄: n개의 정렬된 정수 (공백으로 구분)
+- 세 번째 줄: target 값
+
+**출력 형식:**
+- target의 인덱스 (없으면 -1)""",
+                    "examples": [
+                        {
+                            "input": "5\n1 3 5 7 9\n5",
+                            "output": "2",
+                            "explanation": "5는 인덱스 2에 위치",
+                        },
+                        {
+                            "input": "5\n1 3 5 7 9\n4",
+                            "output": "-1",
+                            "explanation": "4는 배열에 없음",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "5\n1 3 5 7 9\n5", "expected": "2"},
+                        {"input": "5\n1 3 5 7 9\n4", "expected": "-1"},
+                        {"input": "1\n10\n10", "expected": "0"},
+                        {"input": "6\n2 4 6 8 10 12\n12", "expected": "5"},
+                    ],
+                    "hints": [
+                        "이진 탐색은 O(log n) 시간 복잡도입니다.",
+                        "left, right 포인터를 사용하세요.",
+                    ],
+                },
+                {
+                    "title": "순열 조합 (Permutation)",
+                    "description": """주어진 정수 n에 대해 1부터 n까지의 모든 순열을 사전순으로 출력하세요.
+
+**입력 형식:**
+- 정수 n (1 ≤ n ≤ 6)
+
+**출력 형식:**
+- 각 순열을 한 줄에 공백으로 구분하여 출력""",
+                    "examples": [
+                        {
+                            "input": "2",
+                            "output": "1 2\n2 1",
+                            "explanation": "1,2의 모든 순열",
+                        },
+                        {
+                            "input": "3",
+                            "output": "1 2 3\n1 3 2\n2 1 3\n2 3 1\n3 1 2\n3 2 1",
+                            "explanation": "1,2,3의 모든 순열",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "2", "expected": "1 2\n2 1"},
+                        {
+                            "input": "3",
+                            "expected": "1 2 3\n1 3 2\n2 1 3\n2 3 1\n3 1 2\n3 2 1",
+                        },
+                        {"input": "1", "expected": "1"},
+                    ],
+                    "hints": [
+                        "재귀 또는 백트래킹 알고리즘을 활용하세요.",
+                        "itertools.permutations를 사용할 수도 있습니다.",
+                    ],
+                },
+                {
+                    "title": "행렬 덧셈 (Matrix Addition)",
+                    "description": """두 개의 N×M 행렬을 더한 결과를 출력하세요.
+
+**입력 형식:**
+- 첫 번째 줄: N M (행과 열의 수)
+- 다음 N줄: 첫 번째 행렬
+- 다음 N줄: 두 번째 행렬
+
+**출력 형식:**
+- N개의 줄에 계산 결과 행렬 출력 (공백으로 구분)""",
+                    "examples": [
+                        {
+                            "input": "2 2\n1 2\n3 4\n5 6\n7 8",
+                            "output": "6 8\n10 12",
+                            "explanation": "(1+5, 2+6) (3+7, 4+8)",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "2 2\n1 2\n3 4\n5 6\n7 8", "expected": "6 8\n10 12"},
+                        {"input": "1 1\n5\n3", "expected": "8"},
+                        {
+                            "input": "2 3\n1 2 3\n4 5 6\n7 8 9\n10 11 12",
+                            "expected": "8 10 12\n14 16 18",
+                        },
+                    ],
+                    "hints": ["이중 반복문을 사용하여 각 위치의 값을 더하세요."],
+                },
+                {
+                    "title": "공통 문자 찾기 (Common Characters)",
+                    "description": """두 문자열에서 공통되는 문자를 알파벳 순서로 출력하세요.
+각 문자는 하나만 저장하며, 중복은 제거합니다.
+
+**입력 형식:**
+- 첫 번째 줄: 문자열 A
+- 두 번째 줄: 문자열 B
+
+**출력 형식:**
+- 공통 문자를 알파벳 순서로 출력 (없으면 NONE)""",
+                    "examples": [
+                        {
+                            "input": "abcde\nbcfgh",
+                            "output": "bc",
+                            "explanation": "b와 c가 공통",
+                        },
+                        {
+                            "input": "abc\nxyz",
+                            "output": "NONE",
+                            "explanation": "공통 문자 없음",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "abcde\nbcfgh", "expected": "bc"},
+                        {"input": "abc\nxyz", "expected": "NONE"},
+                        {"input": "hello\nworld", "expected": "lo"},
+                        {"input": "aaa\na", "expected": "a"},
+                    ],
+                    "hints": ["set 자료구조의 교집합 연산을 활용하세요."],
+                },
             ],
-            hints=["해시맵을 사용하면 O(n) 시간 복잡도로 해결할 수 있습니다."],
+            "hard": [
+                {
+                    "title": "최장 증가 부분 수열 (LIS)",
+                    "description": """정수 배열이 주어질 때, 가장 긴 증가 부분 수열의 길이를 구하세요.
+
+**입력 형식:**
+- 첫 번째 줄: 배열의 크기 n
+- 두 번째 줄: n개의 정수 (공백으로 구분)
+
+**출력 형식:**
+- 최장 증가 부분 수열의 길이""",
+                    "examples": [
+                        {
+                            "input": "6\n10 9 2 5 3 7",
+                            "output": "3",
+                            "explanation": "[2, 5, 7] 또는 [2, 3, 7]이 최장 증가 수열 (길이 3)",
+                        },
+                        {
+                            "input": "4\n7 7 7 7",
+                            "output": "1",
+                            "explanation": "모두 같으므로 길이 1",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "6\n10 9 2 5 3 7", "expected": "3"},
+                        {"input": "4\n7 7 7 7", "expected": "1"},
+                        {"input": "8\n0 1 0 3 2 3 4 5", "expected": "6"},
+                        {"input": "1\n5", "expected": "1"},
+                    ],
+                    "hints": [
+                        "DP 배열을 사용하여 각 위치에서의 LIS 길이를 구하세요.",
+                        "이진 탐색을 활용하면 O(n log n)으로 최적화할 수 있습니다.",
+                    ],
+                },
+                {
+                    "title": "동전 교환 (Coin Change)",
+                    "description": """동전 종류와 목표 금액이 주어질 때, 목표 금액을 만들기 위한 최소 동전 수를 구하세요.
+만들 수 없으면 -1을 출력하세요.
+
+**입력 형식:**
+- 첫 번째 줄: 동전 종류 수 n, 목표 금액 amount
+- 두 번째 줄: n개의 동전 값어치 (공백으로 구분)
+
+**출력 형식:**
+- 최소 동전 수 (불가능하면 -1)""",
+                    "examples": [
+                        {
+                            "input": "3 11\n1 5 6",
+                            "output": "2",
+                            "explanation": "6 + 5 = 11 (동전 2개)",
+                        },
+                        {
+                            "input": "1 3\n2",
+                            "output": "-1",
+                            "explanation": "2로 3을 만들 수 없음",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "3 11\n1 5 6", "expected": "2"},
+                        {"input": "1 3\n2", "expected": "-1"},
+                        {"input": "3 0\n1 2 5", "expected": "0"},
+                        {"input": "2 7\n3 5", "expected": "-1"},
+                        {"input": "3 6\n1 3 4", "expected": "2"},
+                    ],
+                    "hints": [
+                        "보텀업 DP를 활용하세요.",
+                        "dp[i] = 금액 i를 만드는 최소 동전 수",
+                    ],
+                },
+                {
+                    "title": "섬의 개수 (Number of Islands)",
+                    "description": """‘0’(물)과 ‘1’(땅)로 이루어진 2D 그리드에서 섬의 개수를 구하세요.
+섬은 상하좌우로 연결된 1들의 집합입니다.
+
+**입력 형식:**
+- 첫 번째 줄: 행 수 R, 열 수 C
+- 다음 R줄: 0과 1로 이루어진 그리드 (공백으로 구분)
+
+**출력 형식:**
+- 섬의 개수""",
+                    "examples": [
+                        {
+                            "input": "3 3\n1 1 0\n0 1 0\n0 0 1",
+                            "output": "2",
+                            "explanation": "왼쪽 상단 섬(1,1,1)과 우쪽 하단 섬(1) = 2개",
+                        },
+                        {
+                            "input": "2 2\n0 0\n0 0",
+                            "output": "0",
+                            "explanation": "땅이 없으므로 섬 0개",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "3 3\n1 1 0\n0 1 0\n0 0 1", "expected": "2"},
+                        {"input": "2 2\n0 0\n0 0", "expected": "0"},
+                        {"input": "1 5\n1 0 1 0 1", "expected": "3"},
+                        {
+                            "input": "4 4\n1 1 0 0\n1 1 0 0\n0 0 1 1\n0 0 1 1",
+                            "expected": "2",
+                        },
+                    ],
+                    "hints": [
+                        "BFS 또는 DFS를 활용하여 연결된 영역을 탐색하세요.",
+                        "방문한 칸은 0으로 표시하면 별도 visited 배열이 필요 없습니다.",
+                    ],
+                },
+                {
+                    "title": "계단 오르기 (Climbing Stairs)",
+                    "description": """계단이 n개 있을 때, 한 번에 1계단 또는 2계단을 오를 수 있습니다.
+꼭대기에 도달하는 방법의 수를 구하세요.
+
+**입력 형식:**
+- 정수 n
+
+**출력 형식:**
+- 방법의 수""",
+                    "examples": [
+                        {
+                            "input": "3",
+                            "output": "3",
+                            "explanation": "1+1+1, 1+2, 2+1 = 3가지",
+                        },
+                        {"input": "5", "output": "8", "explanation": "8가지 방법"},
+                    ],
+                    "test_cases": [
+                        {"input": "3", "expected": "3"},
+                        {"input": "5", "expected": "8"},
+                        {"input": "1", "expected": "1"},
+                        {"input": "10", "expected": "89"},
+                    ],
+                    "hints": [
+                        "피보나치 수열과 유사한 구조입니다.",
+                        "dp[i] = dp[i-1] + dp[i-2]",
+                    ],
+                },
+                {
+                    "title": "배낭 문제 (0/1 Knapsack)",
+                    "description": """무게 제한이 있는 배낭에 물건을 넣어 최대 가치를 구하세요.
+각 물건은 하나만 선택 가능합니다.
+
+**입력 형식:**
+- 첫 번째 줄: 물건 수 n, 배낭 용량 W
+- 다음 n줄: 각 물건의 무게와 가치 (공백으로 구분)
+
+**출력 형식:**
+- 최대 가치""",
+                    "examples": [
+                        {
+                            "input": "3 4\n1 2\n2 4\n3 5",
+                            "output": "6",
+                            "explanation": "물건 1(무게1,가치2) + 물건 2(무게2,가치4) = 무게3, 가치6",
+                        },
+                        {
+                            "input": "2 3\n2 3\n3 4",
+                            "output": "3",
+                            "explanation": "물건 1만 선택 (무게2, 가치3)",
+                        },
+                    ],
+                    "test_cases": [
+                        {"input": "3 4\n1 2\n2 4\n3 5", "expected": "6"},
+                        {"input": "2 3\n2 3\n3 4", "expected": "3"},
+                        {"input": "1 1\n2 3", "expected": "0"},
+                        {"input": "4 7\n1 1\n3 4\n4 5\n5 7", "expected": "9"},
+                    ],
+                    "hints": [
+                        "2차원 DP 테이블을 활용하세요.",
+                        "dp[i][w] = i번째 물건까지 고려하고 용량 w일 때 최대 가치",
+                    ],
+                },
+                {
+                    "title": "최단 경로 (Dijkstra)",
+                    "description": """가중치 그래프에서 시작 노드에서 도착 노드까지의 최단 거리를 구하세요.
+도달할 수 없으면 -1을 출력하세요.
+
+**입력 형식:**
+- 첫 번째 줄: 노드 수 V, 간선 수 E
+- 다음 E줄: 시작노드 도착노드 가중치 (공백으로 구분)
+- 마지막 줄: 시작노드 도착노드
+
+**출력 형식:**
+- 최단 거리 (도달 불가 시 -1)""",
+                    "examples": [
+                        {
+                            "input": "5 6\n1 2 2\n1 3 5\n2 3 1\n2 4 7\n3 4 3\n4 5 1\n1 5",
+                            "output": "7",
+                            "explanation": "1→2→3→4→5 = 2+1+3+1 = 7",
+                        },
+                    ],
+                    "test_cases": [
+                        {
+                            "input": "5 6\n1 2 2\n1 3 5\n2 3 1\n2 4 7\n3 4 3\n4 5 1\n1 5",
+                            "expected": "7",
+                        },
+                        {"input": "3 2\n1 2 3\n2 3 4\n1 3", "expected": "7"},
+                        {"input": "2 0\n1 2", "expected": "-1"},
+                        {"input": "3 3\n1 2 1\n2 3 2\n1 3 10\n1 3", "expected": "3"},
+                    ],
+                    "hints": [
+                        "다익스트라 알고리즘을 활용하세요.",
+                        "우선순위 큐(heapq)를 사용하면 O((V+E)logV)로 최적화됩니다.",
+                    ],
+                },
+            ],
+        }
+
+        # 해당 난이도 문제 목록에서 랜덤 선택
+        bank = problems_bank.get(difficulty, problems_bank["easy"])
+        selected = random.choice(bank)
+
+        problem_id = str(uuid.uuid4())[:8]
+        problem = CodingProblem(
+            id=problem_id,
+            title=selected["title"],
+            difficulty=difficulty,
+            description=selected["description"],
+            examples=selected["examples"],
+            test_cases=selected["test_cases"],
+            hints=selected.get("hints", []),
         )
         _generated_problems[problem_id] = problem
         return problem
@@ -1259,9 +1933,10 @@ class CodeAnalyzer:
         if LLM_AVAILABLE:
             try:
                 self.llm = ChatOllama(
-                    model=DEFAULT_LLM_MODEL,
+                    model=CODING_LLM_MODEL,  # 코딩 테스트 전용 경량 모델 (qwen3:1.7b)
                     temperature=0.3,
-                    num_ctx=DEFAULT_LLM_NUM_CTX,
+                    num_ctx=CODING_LLM_NUM_CTX,  # 코딩 분석은 4096 컨텍스트면 충분
+                    num_predict=2048,  # 최대 생성 토큰 수 제한 (분석 JSON ~1500토큰)
                 )
             except Exception as e:
                 print(f"⚠️ CodeAnalyzer LLM 초기화 실패: {e}")
@@ -1339,8 +2014,19 @@ class CodeAnalyzer:
             ),
         ]
 
-        response = self.llm.invoke(messages)
+        # asyncio.to_thread로 LLM 호출을 별도 스레드에서 실행하여 이벤트 루프 블로킹 방지
+        # wait_for로 120초 타임아웃을 설정하여 무한 대기 방지
+        response = await asyncio.wait_for(
+            asyncio.to_thread(self.llm.invoke, messages),
+            timeout=120,
+        )
         response_text = response.content
+
+        # <think> 태그 제거 (Qwen 모델 — 열림/닫힘 쌍 및 단독 닫힘 태그 모두 제거)
+        response_text = re.sub(
+            r"<think>.*?</think>", "", response_text, flags=re.DOTALL
+        ).strip()
+        response_text = re.sub(r"</think>", "", response_text).strip()
 
         # JSON Resilience 파싱
         analysis = parse_code_analysis_json(
@@ -1529,27 +2215,31 @@ class CodeExecutionService:
             result = self.executor.execute(code, language, "")
             return {"execution": result.dict(), "analysis": None, "test_results": []}
 
-        # 각 테스트 케이스 실행
-        test_results = []
-        for i, tc in enumerate(test_cases):
-            result = self.executor.execute(code, language, tc.get("input", ""))
-
+        # 각 테스트 케이스를 병렬로 실행 (asyncio.gather + to_thread)
+        # 순차 실행 대비 테스트 케이스 수만큼 실행 시간 단축
+        async def _run_single_test(i: int, tc: Dict) -> Dict:
+            """단일 테스트 케이스를 별도 스레드에서 실행하고 결과를 반환합니다."""
+            result = await asyncio.to_thread(
+                self.executor.execute, code, language, tc.get("input", "")
+            )
             expected = tc.get("expected", "").strip()
             actual = result.output.strip()
             passed = _smart_compare(actual, expected)
+            return {
+                "test_id": i + 1,
+                "input": tc.get("input", "")[:100]
+                + ("..." if len(tc.get("input", "")) > 100 else ""),
+                "expected": expected[:100],
+                "actual": actual[:100],
+                "passed": passed,
+                "execution_time": result.execution_time,
+                "error": result.error,
+            }
 
-            test_results.append(
-                {
-                    "test_id": i + 1,
-                    "input": tc.get("input", "")[:100]
-                    + ("..." if len(tc.get("input", "")) > 100 else ""),
-                    "expected": expected[:100],
-                    "actual": actual[:100],
-                    "passed": passed,
-                    "execution_time": result.execution_time,
-                    "error": result.error,
-                }
-            )
+        test_results = await asyncio.gather(
+            *[_run_single_test(i, tc) for i, tc in enumerate(test_cases)]
+        )
+        test_results = list(test_results)  # tuple → list 변환
 
         # AI 분석
         analysis = await self.analyzer.analyze(code, language, problem, test_results)

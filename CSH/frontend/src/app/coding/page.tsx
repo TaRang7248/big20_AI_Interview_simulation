@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Header from "@/components/common/Header";
 import {
   codingApi,
@@ -9,7 +9,7 @@ import {
   type CodeAnalysis,
   type TestCaseResult,
 } from "@/lib/api";
-import { Play, Send, RotateCcw, RefreshCw, CheckCircle2, XCircle, Loader2, Terminal, FlaskConical, Keyboard, ChevronDown, ChevronRight, Clock } from "lucide-react";
+import { Play, Send, RotateCcw, RefreshCw, CheckCircle2, XCircle, Loader2, Terminal, FlaskConical, Keyboard, ChevronDown, ChevronRight, Clock, SkipForward, AlertTriangle } from "lucide-react";
 import dynamic from "next/dynamic";
 
 // Monaco Editor – SSR 비활성화
@@ -40,6 +40,7 @@ export default function CodingTestPageWrapper() {
 }
 
 function CodingTestPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("session") || "";
 
@@ -60,6 +61,7 @@ function CodingTestPage() {
   const [bottomTab, setBottomTab] = useState<"output" | "testResults" | "stdin">("output");  // 하단 탭
   const [showAnalysis, setShowAnalysis] = useState(false);
   const [expandedTests, setExpandedTests] = useState<Set<number>>(new Set());  // 펼쳐진 테스트 상세
+  const [showSkipModal, setShowSkipModal] = useState(false);  // 건너뛰기 확인 모달
 
   // 테스트 상세 펼침 토글
   const toggleTestExpand = (testId: number) => {
@@ -272,8 +274,59 @@ function CodingTestPage() {
             {submitting ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
             제출
           </button>
+
+          {/* 다음 면접(시스템 아키텍처)으로 건너뛰기 버튼 */}
+          <div className="w-px h-5 bg-[#3c3c3c] mx-1" /> {/* 구분선 */}
+          <button onClick={() => setShowSkipModal(true)}
+            className="flex items-center gap-1 px-4 py-1.5 rounded text-xs bg-[rgba(255,152,0,0.2)] text-orange-400 hover:bg-[rgba(255,152,0,0.3)] border border-[rgba(255,152,0,0.3)] transition">
+            <SkipForward size={12} />
+            다음 면접으로
+          </button>
         </div>
       </div>
+
+      {/* ========== 건너뛰기 확인 모달 ========== */}
+      {showSkipModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#2d2d30] border border-[#3c3c3c] rounded-xl max-w-md w-full mx-4 p-6 shadow-2xl">
+            {/* 아이콘 + 제목 */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-[rgba(255,152,0,0.15)] flex items-center justify-center">
+                <AlertTriangle size={20} className="text-orange-400" />
+              </div>
+              <h3 className="text-base font-bold text-white">코딩 테스트를 건너뛰시겠습니까?</h3>
+            </div>
+
+            {/* 설명 */}
+            <p className="text-sm text-[#ccc] mb-2">
+              코딩 테스트를 건너뛰고 <strong className="text-[#569cd6]">시스템 아키텍처 설계</strong> 면접으로 이동합니다.
+            </p>
+            <div className="bg-[rgba(255,152,0,0.08)] border border-[rgba(255,152,0,0.2)] rounded-lg p-3 mb-6">
+              <p className="text-xs text-orange-400">
+                ⚠️ 현재 작성 중인 코드와 진행 상황은 저장되지 않습니다.
+              </p>
+            </div>
+
+            {/* 버튼 */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowSkipModal(false)}
+                className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium bg-[#3c3c3c] text-[#ccc] hover:bg-[#505050] transition">
+                계속 풀기
+              </button>
+              <button
+                onClick={() => {
+                  setShowSkipModal(false);
+                  router.push(`/whiteboard?session=${sessionId}`);
+                }}
+                className="flex-1 px-4 py-2.5 rounded-lg text-sm font-medium bg-[rgba(255,152,0,0.2)] text-orange-400 border border-[rgba(255,152,0,0.3)] hover:bg-[rgba(255,152,0,0.3)] transition flex items-center justify-center gap-2">
+                <SkipForward size={14} />
+                건너뛰기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 메인 */}
       <div className="flex flex-1 overflow-hidden">
@@ -363,8 +416,8 @@ function CodingTestPage() {
                 <FlaskConical size={12} /> 테스트 결과
                 {testSummary && (
                   <span className={`ml-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${testSummary.passed === testSummary.total
-                      ? "bg-green-500/20 text-green-400"
-                      : "bg-red-500/20 text-red-400"
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-red-500/20 text-red-400"
                     }`}>
                     {testSummary.passed}/{testSummary.total}
                   </span>
@@ -399,8 +452,8 @@ function CodingTestPage() {
                       {/* 요약 바 */}
                       {testSummary && (
                         <div className={`flex items-center justify-between px-4 py-2.5 rounded-lg text-sm font-medium ${testSummary.passed === testSummary.total
-                            ? "bg-green-500/10 border border-green-500/30 text-green-400"
-                            : "bg-red-500/10 border border-red-500/30 text-red-400"
+                          ? "bg-green-500/10 border border-green-500/30 text-green-400"
+                          : "bg-red-500/10 border border-red-500/30 text-red-400"
                           }`}>
                           <div className="flex items-center gap-2">
                             {testSummary.passed === testSummary.total
@@ -428,8 +481,8 @@ function CodingTestPage() {
                       {testResults.map(tc => (
                         <div key={tc.test_id}
                           className={`rounded-lg border transition-all ${tc.passed
-                              ? "border-green-500/20 bg-green-500/5"
-                              : "border-red-500/20 bg-red-500/5"
+                            ? "border-green-500/20 bg-green-500/5"
+                            : "border-red-500/20 bg-red-500/5"
                             }`}>
                           {/* 테스트 헤더 (클릭으로 펼침) */}
                           <button onClick={() => toggleTestExpand(tc.test_id)}
@@ -526,8 +579,8 @@ function CodingTestPage() {
                 {/* 종합 점수 */}
                 <div className="text-center py-4">
                   <div className={`text-5xl font-bold ${analysis.overall_score >= 80 ? "text-green-400" :
-                      analysis.overall_score >= 60 ? "text-yellow-400" :
-                        analysis.overall_score >= 40 ? "text-orange-400" : "text-red-400"
+                    analysis.overall_score >= 60 ? "text-yellow-400" :
+                      analysis.overall_score >= 40 ? "text-orange-400" : "text-red-400"
                     }`}>{analysis.overall_score}</div>
                   <p className="text-sm text-[#858585] mt-1">종합 점수 / 100</p>
                 </div>
