@@ -140,5 +140,7 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 - **질문 생성 로직 개선**: Gemini 2.0 Flash의 JSON 출력 안정성을 확보하기 위해 마크다운 정리 로직(`clean_json_string`)과 재시도 메커니즘을 추가했습니다.
 - **Rate Limit 대응**: 무료 등급 사용 시 발생할 수 있는 할당량 초과(429 Error)에 대비하여 지수 백오프(Exponential Backoff) 기반의 재시도 로직을 구현했습니다.
 - **테스트 스크립트 추가**: `scripts/test_stt_gemini.py` 및 `scripts/test_llm_gemini.py`를 통해 각 기능을 독립적으로 검증할 수 있습니다.
+- **오디오 파일 저장 개선**: 면접 답변 음성 파일의 이름을 `YYYY-MM-DD-HH-MM-SS-{면접세션명}.webm` 형식으로 저장하여, 언제 어떤 면접에서 녹음된 파일인지 쉽게 식별할 수 있도록 개선했습니다.
+- **비디오 심층 분석 통합**: `uploads/audio` 폴더에 저장된 `.webm` 영상 파일을 면접 종료 시 자동으로 스캔하여 **OpenCV**, **MoveNet Thunder**, **DeepFace**로 정밀 분석합니다. 프레임 단위로 감정과 자세를 분석하여 최종 태도/인성 평가에 반영합니다.
 
 

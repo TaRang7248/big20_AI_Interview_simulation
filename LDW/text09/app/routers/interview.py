@@ -3,6 +3,7 @@ import uuid
 import shutil
 import logging
 import json
+from datetime import datetime
 from psycopg2.extras import RealDictCursor
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from ..database import get_db_connection, logger
@@ -107,18 +108,9 @@ async def submit_answer(
     5. Save & Return.
     """
     
-    # Save Audio File
-    audio_filename = f"{interview_number}_{uuid.uuid4()}.webm"
-    audio_path = os.path.join(AUDIO_FOLDER, audio_filename)
-    
+    conn = None
     try:
-        with open(audio_path, "wb") as buffer:
-            shutil.copyfileobj(audio.file, buffer)
-            
-        # 1. STT (Whisper)
-        applicant_answer = transcribe_audio(audio_path)
-        
-        # 2. Find Previous Question
+        # 1. Connect DB & Get Session Info FIRST to determine filename
         conn = get_db_connection()
         c = conn.cursor()
         
@@ -132,7 +124,7 @@ async def submit_answer(
         
         if not row:
              logger.error("No active question found.")
-             conn.close()
+             if conn: conn.close()
              return {"success": False, "message": "진행 중인 면접을 찾을 수 없습니다."}
              
         current_row_id = row[0]
@@ -144,8 +136,20 @@ async def submit_answer(
         # Get session_name
         c.execute("SELECT session_name FROM Interview_Progress WHERE id = %s", (current_row_id,))
         session_name = c.fetchone()[0]
+
+        # 2. Save Audio File with NEW FORMAT
+        # Format: YYYY-MM-DD-HH-MM-SS-{session_name}.webm
+        timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+        audio_filename = f"{timestamp}-{session_name}.webm"
+        audio_path = os.path.join(AUDIO_FOLDER, audio_filename)
         
-        # 3. Determine Question Phase
+        with open(audio_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+            
+        # 3. STT (Whisper)
+        applicant_answer = transcribe_audio(audio_path)
+        
+        # 4. Determine Question Phase
         c.execute("SELECT COUNT(*) FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
         current_q_count = c.fetchone()[0]
         logger.info(f"Answer Submission. Interview={interview_number}, Count={current_q_count}")
@@ -160,10 +164,10 @@ async def submit_answer(
         else:
             next_phase = "END"
 
-        # 4. Fetch Job Questions for Reference
+        # 5. Fetch Job Questions for Reference
         ref_questions = get_job_questions(job_title)
 
-        # 5. Evaluate & Generate Next Question
+        # 6. Evaluate & Generate Next Question
         # Fetch ALL previous questions to prevent duplicates
         c.execute("SELECT Create_Question FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
         history_rows = c.fetchall()
@@ -194,7 +198,7 @@ async def submit_answer(
             evaluation += f"\n\n{video_summary}"
         # ------------------------------------------
 
-        # 5. Save Current Answer & Evaluation
+        # 7. Save Current Answer & Evaluation
         c.execute("""
             UPDATE Interview_Progress 
             SET Question_answer = %s, answer_time = %s, Answer_Evaluation = %s
@@ -206,7 +210,7 @@ async def submit_answer(
              interview_finished = True
              background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, id_name, announcement_id)
         else:
-            # 6. Insert Next Question Record (if not END)
+            # 8. Insert Next Question Record (if not END)
             c.execute('''
                 INSERT INTO Interview_Progress (
                     Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name, announcement_id
@@ -215,6 +219,7 @@ async def submit_answer(
         
         conn.commit()
         conn.close()
+        conn = None # Prevent finally block from creating issues if closed
 
         # Generate TTS if not finished
         audio_url = None
@@ -232,6 +237,7 @@ async def submit_answer(
 
     except Exception as e:
         logger.error(f"Answer Submission Error: {e}")
+        if conn: conn.close()
         return {"success": False, "message": f"오류 발생: {str(e)}"}
 
 @router.post("/upload/resume")
