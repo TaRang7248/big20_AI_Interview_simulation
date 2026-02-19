@@ -58,6 +58,14 @@
 - Track A (Business Stats): PostgreSQL Snapshot 기반 통계 및 Redis 결과 캐시 (LOCKED).
 - Track B (Operational Obs): Informational 목적의 운영 관측 계층 분리 (LOCKED).
 - Isolation: Heavy Query 격리를 위한 MView 전략 및 물리적 서비스 분리 검증 완료.
+- Phase 10 Audit (2026-02-19): **내부 테스트 한정 운영 가능** 판정 (심층 감사 보고서 생성 완료).
+
+### 2.8 Phase 10 Stabilization (Mini-Patch) - BACKLOG
+- 목표: 외부 운영 승격을 위한 핵심 계약 취약점(R-1, R-2, R-3) 보완.
+- 외부 운영 승격 조건:
+  - PostgreSQL Authority 권위 선행 보장 및 원자성 강화 (R-1 제거)
+  - DB 레벨 Snapshot Immutable 강제 및 UPSERT 갱신 경로 차단 (R-3 제거)
+  - DB 레벨 tag_code 허용 값 제약 강화 (R-2 제거)
 
 ---
 
@@ -94,7 +102,12 @@
 ## 5. 현재 작업 섹션
 
 ### ACTIVE
-- 없음 (TASK-029 완료. Phase 10 안정화 완료 상태)
+- 없음 (Phase 10 안정화 패치 대기 중)
+
+### BACKLOG
+- TASK-030: 상태 저장 원자성 및 PostgreSQL 권위 선행 보장 (R-1 대응)
+- TASK-031: Snapshot Immutable DB 강제 및 갱신 차단 (R-3 대응)
+- TASK-032: tag_code 허용 값 제약 및 무결성 강화 (R-2 대응)
 
 ### HOLD
 - TASK-016 (TTS Provider): 스트리밍 아키텍처 연동 고려로 인해 일시 보류.
@@ -103,8 +116,15 @@
 
 ## 6. 특이사항 및 에이전트 주의사항
 
-1.  **HIGH_RISK (해소됨 / ARCHIVED)**: TASK-029 완료. 테이블 네이밍 불일치(sessions->interviews, reports->evaluation_scores), PostgreSQL Authority 누락(FileRepo->PostgreSQLHistoryRepository 교체), Redis Miss Hydration 부재 3종 모두 해소. Live Verification PASS. Schema Fail-Fast 적용으로 재발 방지.
-2.  **상태 표기**: 문서 내의 모든 상태는 DONE, ACTIVE, BACKLOG, HOLD, LOCKED, DISABLED 중 하나를 사용한다.
+0.  **HIGH_RISK (해소됨 / ARCHIVED)**: TASK-029 완료. 테이블 네이밍 불일치(sessions->interviews, reports->evaluation_scores), PostgreSQL Authority 누락(FileRepo->PostgreSQLHistoryRepository 교체), Redis Miss Hydration 부재 3종 모두 해소. Live Verification PASS. Schema Fail-Fast 적용으로 재발 방지.
+0.1 **Audit Risk (2026-02-19)**: Phase 10 심층 감사 결과 5종 위험 식별.
+    - R-1 (MEDIUM): 상태 저장 비원자성 (Hot -> Cold 순서)
+    - R-2 (LOW): tag_code DB 레벨 제약 부재
+    - R-3 (LOW): Snapshot UPSERT 갱신 경로 잔존
+    - R-4 (LOW): JSONB 인덱스 미비
+    - R-5 (LOW): 평가 해상도 제한 (Communication 고정치)
+    - 대응: R-1, R-2, R-3은 안정화 패치(TASK-030~032)로 해소 예정.
+1.  **상태 표기**: 문서 내의 모든 상태는 DONE, ACTIVE, BACKLOG, HOLD, LOCKED, DISABLED 중 하나를 사용한다.
 2. **이모지 금지**: 어떠한 상황에서도 문서 내에 이모지를 사용하지 않는다.
 3. **PASS 기준**: Verification 결과는 반드시 `scripts/verify_task_xxx.py Pass` 형식으로 명시한다.
 4. **계약 우선**: 기능 구현보다 상위 계약(Authority, Snapshot, State Contract)의 보호가 최우선이다.
