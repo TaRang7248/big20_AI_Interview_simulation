@@ -1,9 +1,12 @@
+
 import json
 import os
+import time
 import warnings
 import google.generativeai as genai
 from ..config import GOOGLE_API_KEY, logger
 from ..database import get_db_connection
+from google.api_core.exceptions import ResourceExhausted
 
 # Suppress Google GenAI FutureWarnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
@@ -20,6 +23,34 @@ MODEL_NAME = "gemini-2.0-flash"
 
 def get_model():
     return genai.GenerativeModel(MODEL_NAME)
+
+def generate_content_with_retry(model, prompt, generation_config=None, max_retries=3):
+    """
+    Helper function to generate content with retry logic for rate limits.
+    """
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(prompt, generation_config=generation_config)
+            return response
+        except ResourceExhausted:
+            wait_time = (2 ** attempt) + 1  # Exponential backoff + jitter-ish
+            logger.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+        except Exception as e:
+            # If it's a blocked prompt or other safety issue, we might want to catch it specifically,
+            # but for now, re-raising is okay or handle gracefully.
+            raise e
+    raise ResourceExhausted("Max retries exceeded")
+
+def clean_json_string(json_str):
+    """
+    Cleans markdown code blocks from JSON string.
+    """
+    if "```json" in json_str:
+        json_str = json_str.split("```json")[1].split("```")[0]
+    elif "```" in json_str:
+        json_str = json_str.split("```")[1].split("```")[0]
+    return json_str.strip()
 
 def get_job_questions(job_title):
     """
@@ -77,12 +108,14 @@ def get_job_questions(job_title):
     
     try:
         model = get_model()
-        response = model.generate_content(
+        response = generate_content_with_retry(
+            model,
             prompt,
             generation_config={"response_mime_type": "application/json"}
         )
         
-        result = json.loads(response.text)
+        text_response = clean_json_string(response.text)
+        result = json.loads(text_response)
         selected_ids = result.get("ids", [])
         
         if not selected_ids:
@@ -105,6 +138,7 @@ def get_job_questions(job_title):
              
         conn.close()
         return questions
+
 
     except Exception as e:
         logger.error(f"LLM Pool Creation Error: {e}")
@@ -138,7 +172,7 @@ def summarize_resume(text):
 
     try:
         model = get_model()
-        response = model.generate_content(prompt)
+        response = generate_content_with_retry(model, prompt)
         summary = response.text
         logger.info(f"Resume Summary: {summary[:100]}...")
         return summary
@@ -165,7 +199,7 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
          - 답변이 있다면 그 내용을 바탕으로 간단히 평가해주세요. (관리자용)
          """
          try:
-             response = model.generate_content(evaluation_prompt)
+             response = generate_content_with_retry(model, evaluation_prompt)
              evaluation = response.text
              next_question = "면접이 종료되었습니다. 수고하셨습니다."
              return evaluation, next_question
@@ -185,7 +219,9 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         ref_context = ""
         if ref_questions:
             # Join top 3-5 questions
-            ref_q_text = "\n".join([f"- {q}" for q in ref_questions[:5]])
+            ref_questions_list = list(ref_questions) # ensure list
+            # Avoid error if ref_questions has integers or other types
+            ref_q_text = "\\n".join([f"- {str(q)}" for q in ref_questions_list[:5]])
             ref_context = f"""
             [직무 관련 참고 질문 (질문 생성 시 참고용)]
             {ref_q_text}
@@ -194,7 +230,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         history_context = ""
         if history_questions:
             # Join previous questions
-            hist_text = "\n".join([f"- {q}" for q in history_questions])
+            history_questions_list = list(history_questions)
+            hist_text = "\\n".join([f"- {str(q)}" for q in history_questions_list])
             history_context = f"""
             [이미 질문한 내역 (중복 질문 절대 금지)]
             {hist_text}
@@ -231,7 +268,7 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         - 질문은 구어체로 정중하게 1~2문장으로 작성해주세요.
         
         [출력 형식]
-        JSON 형식으로만 출력해주세요.
+        JSON 형식으로만 출력해주세요. 마크다운 코드 블록(```json ... ```)은 사용하지 마세요.
         {{
             "evaluation": "평가 내용...",
             "next_question": "다음 질문 내용..."
@@ -239,13 +276,20 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         """
         
         try:
-            response = model.generate_content(
+            response = generate_content_with_retry(
+                model, 
                 prompt,
                 generation_config={"response_mime_type": "application/json"}
             )
-            result = json.loads(response.text)
+            
+            text_response = clean_json_string(response.text)
+            result = json.loads(text_response)
             return result.get("evaluation", "평가 없음"), result.get("next_question", "다음 질문을 준비하지 못했습니다.")
+        except ResourceExhausted:
+             logger.error("LLM Quota Exceeded")
+             return "평가 실패 (사용량 초과)", "다음 질문으로 넘어가겠습니다. (잠시 후 다시 시도해주세요)"
         except Exception as e:
             logger.error(f"Evaluation Error: {e}")
+            if 'response' in locals():
+                logger.error(f"Response Text: {response.text}")
             return "평가 중 오류 발생", "다음 질문으로 넘어가겠습니다."
-

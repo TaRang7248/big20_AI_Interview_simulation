@@ -135,8 +135,10 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ---
 
 ## 7. 이번 작업으로 추가/변경된 기능
-- **STT 엔진 변경**: 기존 OpenAI Whisper에서 **Google Gemini 2.0 Flash (Multimodal Audio)**로 변경하여 `ImportError`를 해결하고 비용 효율성을 높였습니다.
-- **LLM 모델 통합**: 면접 질문 생성, 답변 평가, 그리고 음성 인식까지 하나의 Gemini 모델로 통합 운영됩니다.
-- **Deprecation Warning 해결**: `google.generativeai` 패키지 관련 경고 메시지를 처리하여 안정적인 실행 환경을 구축했습니다.
-- **서버 검증 완료**: `server.py` 실행 시 발생하던 임포트 에러를 수정하고 정상 구동을 확인했습니다.
+- **STT/LLM 모델 통합**: OpenAI Whisper 및 GPT-4o를 **Google Gemini 2.0 Flash**로 전면 교체하여 비용 효율성과 처리 속도를 개선했습니다.
+- **음성 인식(STT) 강화**: Gemini Multimodal 기능을 활용하여 음성 파일의 유효성을 검사하고, 인식 실패 시 재시도하거나 명확한 에러 메시지를 반환하도록 개선했습니다.
+- **질문 생성 로직 개선**: Gemini 2.0 Flash의 JSON 출력 안정성을 확보하기 위해 마크다운 정리 로직(`clean_json_string`)과 재시도 메커니즘을 추가했습니다.
+- **Rate Limit 대응**: 무료 등급 사용 시 발생할 수 있는 할당량 초과(429 Error)에 대비하여 지수 백오프(Exponential Backoff) 기반의 재시도 로직을 구현했습니다.
+- **테스트 스크립트 추가**: `scripts/test_stt_gemini.py` 및 `scripts/test_llm_gemini.py`를 통해 각 기능을 독립적으로 검증할 수 있습니다.
+
 
