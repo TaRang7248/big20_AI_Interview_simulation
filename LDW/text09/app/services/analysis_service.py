@@ -162,8 +162,25 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             e = row[2] if row[2] else "평가 없음"
             interview_log += f"Q: {q}\nA: {a}\nEval: {e}\n\n"
             
-        # Get Video Analysis Summary
-        video_summary = get_video_analysis_summary(interview_number)
+        # Get Video Analysis Summary (Real processing)
+        # Note: The user specified uploads/audio as the directory where webm files are
+        video_upload_dir = os.path.join(os.getcwd(), "uploads", "audio")
+        
+        from .video_analysis_service import video_analysis_service
+        video_results = video_analysis_service.process_session_videos(session_name, video_upload_dir)
+        
+        # Summarize video results for LLM
+        import collections
+        emotion_counts = collections.Counter(video_results["total_emotions"])
+        top_emotions = emotion_counts.most_common(3)
+        emotion_str = ", ".join([f"{e}: {c}회" for e, c in top_emotions]) if top_emotions else "데이터 없음"
+        
+        video_summary = f"""
+        [비디오 파일 분석 요약]
+        - 분석된 파일 수: {video_results['processed_files']}
+        - 감지된 주요 감정: {emotion_str}
+        - 참고: {video_results['files']}
+        """
             
         prompt = f"""
         당신은 면접관입니다. 다음은 지원자의 전체 면접 기록과 비디오 분석 결과입니다.
