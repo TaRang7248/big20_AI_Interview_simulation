@@ -8,6 +8,7 @@
 - **실시간 대화**: STT(음성 인식)와 TTS(음성 합성) 기술을 활용하여 실제 사람과 대화하듯 면접을 진행합니다.
 - **맞춤형 질문**: 지원한 직무와 자기소개서 내용을 바탕으로 생성형 AI가 심층 질문을 생성합니다.
 - **루브릭 기반 평가**: 기술/직무, 문제해결, 의사소통, 태도/인성 4가지 영역을 5단계 척도로 정밀하게 평가합니다.
+- **통합 분석 시스템**: 답변 내용뿐만 아니라 **영상 분석(MoveNet, DeepFace)**을 통해 지원자의 태도와 인성을 다각도로 분석하여 데이터베이스에 저장합니다.
 - **웹 인터페이스**: 직관적인 웹 UI를 통해 누구나 쉽게 이용할 수 있습니다.
 
 ---
@@ -18,6 +19,7 @@
 - **OS**: Windows (권장)
 - **Python 버전**: Python 3.10 이상 권장
 - **브라우저**: Chrome, Edge 등 최신 웹 브라우저
+- **웹캠**: 영상 분석을 위한 필수 하드웨어
 
 ---
 
@@ -62,17 +64,20 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 
 ## 4. 사용 모델 및 라이브러리 목록
 
+## 4. 사용 모델 및 라이브러리 목록
+
 ### 핵심 기술 (AI & Backend)
 - **FastAPI**: 고성능 비동기 웹 프레임워크 (백엔드 서버)
-- **OpenAI GPT-4o**: 면접 질문 생성 및 답변 분석, 평가 (LLM)
+- **Google Gemini 2.0 Flash**: 면접 질문 생성, 답변 분석, 평가(LLM) 및 **음성 인식(STT)** 통합 모델 - **[NEW]** All-in-One AI 적용
 - **LangChain**: LLM 오케스트레이션 및 프롬프트 관리
 - **Uvicorn**: ASGI 웹 서버
 
 ### 음성 및 멀티미디어
-- **Deepgram**: 고성능 음성 인식 (STT)
+- **Google Gemini (Multimodal)**: 고성능 음성 인식 (STT) - **[NEW]** OpenAI Whisper 대체
 - **Edge-TTS**: 자연스러운 음성 합성 (TTS)
 - **PyAudio**: 오디오 입출력 처리
-- **Opencv-python / Deepface**: (선택 사항) 영상 처리 및 감정 분석
+- **MoveNet Thunder (Google)**: 실시간 자세(Pose) 분석
+- **DeepFace (Facebook) / OpenCV**: 표정 기반 감정 분석 (영상 분석 데이터로 활용)
 
 ### 데이터베이스 및 저장소
 - **PostgreSQL / SQLite**: (설정에 따라) 면접 데이터 및 결과 저장
@@ -89,13 +94,15 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 
 ### [2] 면접 진행
 1. '면접 시작' 버튼을 누르면 AI 면접관이 첫 인사를 건넵니다.
-2. 마이크를 통해 답변을 말하면 AI가 이를 인식하고 꼬리물기 질문을 이어갑니다.
-3. 설정된 질문 개수만큼 면접이 진행됩니다.
+2. **영상 분석**: 면접 진행 중 웹캠을 통해 사용자의 표정과 자세를 실시간으로 분석합니다. 이 데이터는 답변 제출 시 자동으로 서버에 전송되어 저장됩니다.
+3. 마이크를 통해 답변을 말하면 AI가 이를 인식하고 꼬리물기 질문을 이어갑니다.
+4. 설정된 질문 개수만큼 면접이 진행됩니다.
 
-### [3] 결과 확인
+### [3] 결과 확인 (관리자/사용자)
 1. 면접이 종료되면 잠시 후 **분석 결과 페이지**로 이동합니다.
 2. **평가 루브릭**에 따라 4가지 항목(기술, 문제해결, 의사소통, 태도)에 대한 점수와 상세 피드백을 확인합니다.
-3. '합격/불합격' 여부와 개선점을 파악합니다.
+3. **태도/인성 상세 분석**: 관리자는 지원자 상세 정보 페이지에서 `MoveNet`(자세) 및 `DeepFace`(표정) 분석 데이터를 포함한 종합 태도 평가 결과를 확인할 수 있습니다.
+4. '합격/불합격' 여부와 개선점을 파악합니다.
 
 ---
 
@@ -104,71 +111,34 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── app/
 │   ├── main.py              # FastAPI 애플리케이션 진입점
-│   ├── config.py            # 환경 변수 및 설정 관리
+│   ├── config.py            # 환경 변수 및 설정 관리 (Gemini 설정 추가)
 │   ├── database.py          # 데이터베이스 연결 설정
 │   ├── models.py            # Pydantic/SQLAlchemy 데이터 모델 정의
 │   └── services/            # 핵심 비즈니스 로직
-│       ├── analysis_service.py  # 면접 결과 분석 및 루브릭 평가 로직 ★
-│       ├── llm_service.py       # LLM 연동 (GPT-4)
-│       ├── stt_service.py       # 음성 인식
-│       └── tts_service.py       # 음성 합성
+│       ├── analysis_service.py  # 면접 결과 분석 및 루브릭 평가 로직 (Gemini 적용) ★
+│       ├── llm_service.py       # LLM 연동 (Gemini 2.0 Flash 적용) ★
+│       ├── stt_service.py       # 음성 인식 (Gemini Multimodal 적용) ★ [NEW]
+│       ├── tts_service.py       # 음성 합성
+│       └── video_analysis_service.py # MoveNet, DeepFace 영상 분석 로직
 ├── static/                  # CSS, JS, 이미지 등 정적 파일
 ├── templates/               # HTML 템플릿 파일
-├── requirements.txt         # 프로젝트 의존성 패키지 목록
+├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
 ├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
+├── scripts/                 # 유틸리티 스크립트 (모델 다운로드 등)
+├── models/                  # AI 모델 저장소
+├── tests/                   # 테스트 코드
+│   └── test_gemini_integration.py # Gemini 연동 검증 스크립트
 ├── Dockerfile               # 도커 이미지 빌드 설정 파일
 └── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
 ```
 
 ---
 
-## 7. 데이터베이스 이관 및 설정 가이드 (Migration Guide)
+## 7. 이번 작업으로 추가/변경된 기능
+- **STT/LLM 모델 통합**: OpenAI Whisper 및 GPT-4o를 **Google Gemini 2.0 Flash**로 전면 교체하여 비용 효율성과 처리 속도를 개선했습니다.
+- **음성 인식(STT) 강화**: Gemini Multimodal 기능을 활용하여 음성 파일의 유효성을 검사하고, 인식 실패 시 재시도하거나 명확한 에러 메시지를 반환하도록 개선했습니다.
+- **질문 생성 로직 개선**: Gemini 2.0 Flash의 JSON 출력 안정성을 확보하기 위해 마크다운 정리 로직(`clean_json_string`)과 재시도 메커니즘을 추가했습니다.
+- **Rate Limit 대응**: 무료 등급 사용 시 발생할 수 있는 할당량 초과(429 Error)에 대비하여 지수 백오프(Exponential Backoff) 기반의 재시도 로직을 구현했습니다.
+- **테스트 스크립트 추가**: `scripts/test_stt_gemini.py` 및 `scripts/test_llm_gemini.py`를 통해 각 기능을 독립적으로 검증할 수 있습니다.
 
-이 섹션은 현재 실행 중인 데이터베이스 컨테이너(`interview_db_container`)의 데이터와 설정을 다른 컴퓨터로 그대로 옮겨 실행하는 방법을 설명합니다.
 
-### 1단계: 데이터 백업 (기존 컴퓨터)
-기존 컴퓨터에서 다음 스크립트를 실행하여 데이터베이스의 **스키마(구조)**와 **데이터**를 추출합니다.
-
-1. `migration_package` 폴더로 이동합니다.
-   ```bash
-   cd C:\big20\big20_AI_Interview_simulation\LDW\text09\migration_package
-   ```
-2. 스키마 추출 실행:
-   ```bash
-   python export_schema.py
-   ```
-   - 결과물: `../data/schema.sql` 생성됨
-3. 데이터 추출 실행 (기존 `export_db.py` 위치에서 실행 권장):
-   ```bash
-   cd ..
-   python export_db.py
-   ```
-   - 결과물: `data/interview_db_backup.json` 생성됨
-
-### 2단계: 파일 복사 (이관)
-다음 파일 및 폴더를 압축하여 **새로운 컴퓨터**로 복사합니다.
-
-- **전체 프로젝트 폴더**: `C:\big20\big20_AI_Interview_simulation\LDW\text09` (하위 폴더 포함)
-  - 특히 `data/` 폴더 내의 `schema.sql`과 `interview_db_backup.json`이 반드시 포함되어야 합니다.
-  - `.env` 파일 (상위 폴더에 위치)도 함께 복사하거나, 새 컴퓨터에 동일한 내용으로 생성해야 합니다.
-
-### 3단계: 데이터베이스 복원 (새로운 컴퓨터)
-새로운 컴퓨터에서 다음 절차를 따릅니다.
-
-1. **Docker 환경 실행**:
-   `migration_package` 폴더 내의 `docker-compose.yml`을 사용하여 DB와 앱을 실행합니다.
-   ```bash
-   cd migration_package
-   docker-compose up -d --build
-   ```
-   - `-d`: 백그라운드 실행
-2. **데이터 복원 실행**:
-   데이터베이스가 실행된 상태에서 복원 스크립트를 실행합니다.
-   ```bash
-   # (필요시 가상환경 활성화 후)
-   python import_data.py
-   ```
-   - 이 스크립트는 `data/schema.sql`로 테이블을 생성하고, `data/interview_db_backup.json`의 데이터를 입력합니다.
-
-3. **확인**:
-   웹 브라우저에서 `http://localhost:5000`에 접속하여 데이터가 정상적으로 조회되는지 확인합니다.

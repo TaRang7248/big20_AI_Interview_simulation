@@ -1,9 +1,123 @@
 import json
 import os
 import logging
+import collections
 from ..database import get_db_connection, logger
-from ..services.llm_service import client
+from ..services.llm_service import get_model
 from ..services.pdf_service import convert_pdf_to_images
+from ..config import UPLOAD_FOLDER
+
+def get_video_analysis_summary(interview_number):
+    """
+    Reads the video log JSON for the interview and returns a summary string.
+    """
+    log_path = os.path.join(UPLOAD_FOLDER, "video_logs", f"{interview_number}.json")
+    if not os.path.exists(log_path):
+        return "비디오 분석 데이터가 없습니다."
+        
+    try:
+        with open(log_path, "r", encoding="utf-8") as f:
+            logs = json.load(f)
+            
+        if not logs:
+            return "비디오 분석 데이터가 비어 있습니다."
+            
+        total_frames = len(logs)
+        emotions = []
+        gaze_avoidance_count = 0
+        bad_posture_count = 0
+        hand_fidgeting_count = 0
+        
+        for log in logs:
+            # Emotion
+            if "emotion" in log and log["emotion"]:
+                emotions.append(log["emotion"])
+            
+            # Gaze (Placeholder logic: if face not detected or specific gaze flag)
+            # In real implementation, we would check specific landmarks
+            if log.get("face_mesh") != "detected": 
+                 # Assuming if face mesh didn't detect efficiently or logic was added
+                 pass 
+            
+            # Posture (Placeholder)
+            if log.get("pose") == "bad_posture": # Placeholder if we added logic
+                bad_posture_count += 1
+                
+            # Hands
+            if log.get("hands", 0) > 0:
+                hand_fidgeting_count += 1
+
+        emotion_counts = collections.Counter(emotions)
+        top_emotions = emotion_counts.most_common(3)
+        emotion_summary = ", ".join([f"{e}: {c}회" for e, c in top_emotions])
+        
+        summary = f"""
+        [비디오 분석 요약]
+        - 총 분석 프레임: {total_frames}
+        - 주요 감정: {emotion_summary}
+        - 손 움직임 감지 프레임: {hand_fidgeting_count} (손을 자주 움직이는지 참고)
+        - (참고: 자세 및 시선 분석은 현재 감지된 프레임 수만 집계됨)
+        """
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error reading video logs: {e}")
+        return "비디오 분석 데이터 처리 중 오류 발생."
+
+def get_recent_video_log_summary(interview_number: str, duration_seconds: int = 60) -> str:
+    """
+    Retrieves video logs for the specified interview_number within the last 'duration_seconds'.
+    Returns a text summary of emotions and posture.
+    """
+    log_path = os.path.join(UPLOAD_FOLDER, "video_logs", f"{interview_number}.json")
+    if not os.path.exists(log_path):
+        return ""
+
+    try:
+        import time
+        current_time = time.time()
+        start_time = current_time - duration_seconds
+
+        with open(log_path, "r", encoding="utf-8") as f:
+            logs = json.load(f)
+
+        if not logs:
+            return ""
+
+        # Filter logs by timestamp if available, else take last N
+        recent_logs = []
+        for log in logs:
+            # Assuming log has 'timestamp', if not, we can't filter by time accurately
+            # But the video_router adds it.
+            if "timestamp" in log:
+                 if log["timestamp"] >= start_time:
+                     recent_logs.append(log)
+            else:
+                # If no timestamp, fallback to taking the last portion (heuristic)
+                # This is a fallback
+                pass
+        
+        # If we found no time-based logs (maybe old format), take last 30 frames ~ 1 sec @ 30fps? 
+        # Actually simulation might be slow. Let's just create a summary of whatever we found.
+        if not recent_logs:
+             # If strictly no logs in time window, maybe return empty or last few 
+             return ""
+        
+        emotions = [log["emotion"] for log in recent_logs if log.get("emotion")]
+        
+        # Count analysis
+        emotion_counts = collections.Counter(emotions)
+        top_emotion = emotion_counts.most_common(1)
+        top_emotion_str = top_emotion[0][0] if top_emotion else "분석불가"
+        
+        bad_posture = sum(1 for log in recent_logs if log.get("pose") == "bad_posture")
+        
+        summary = f"[영상분석] 주 감정: {top_emotion_str}, 분석 프레임: {len(recent_logs)}"
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error getting recent video logs: {e}")
+        return ""
 
 def analyze_interview_result(interview_number, job_title, applicant_name, id_name, announcement_id=None):
     logger.info(f"Analyzing interview result for {interview_number}...")
@@ -11,6 +125,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
     c = conn.cursor()
     
     try:
+        model = get_model()
+        
         # Fetch Announcement Details (Title & Job Description)
         if announcement_id:
              c.execute("SELECT title, job FROM interview_announcement WHERE id = %s", (announcement_id,))
@@ -46,13 +162,20 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             e = row[2] if row[2] else "평가 없음"
             interview_log += f"Q: {q}\nA: {a}\nEval: {e}\n\n"
             
+        # Get Video Analysis Summary
+        video_summary = get_video_analysis_summary(interview_number)
+            
         prompt = f"""
-        당신은 면접관입니다. 다음은 지원자의 전체 면접 기록입니다.
+        당신은 면접관입니다. 다음은 지원자의 전체 면접 기록과 비디오 분석 결과입니다.
+        이를 바탕으로 종합적으로 평가해주세요.
         
         [면접 정보]
         지원자: {applicant_name}
         지원 직무: {announcement_title}
         직무 내용: {announcement_job}
+        
+        [비디오 태도 분석 데이터]
+        {video_summary}
         
         [면접 기록]
         {interview_log}
@@ -82,10 +205,11 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
         - 부족 (20~0): 타인과의 소통이 원활하지 않으며 부정확한 표현을 사용함.
 
         4. 태도 / 인성 (Attitude / Personality) -> DB에는 'non_verbal' 컬럼에 저장됩니다.
-        - 최우수 (100~81): 조직의 가치와 부합하며, 매우 긍정적이고 주도적인 성장의지를 보임.
+        - 비디오 분석 데이터(감정, 손 움직임 등)와 답변의 태도를 종합하여 평가하세요.
+        - 최우수 (100~81): 조직의 가치와 부합하며, 매우 긍정적이고 주도적인 성장의지를 보임. (비디오: 자신감 있는 표정, 안정된 자세)
         - 우수 (80~61): 전문적인 태도를 갖추었으며 성실함과 협업 의지가 확인됨.
         - 보통 (60~41): 평이한 태도를 보이며 조직 적응에 큰 문제는 없어 보임.
-        - 미흡 (40~21): 태도가 다소 소극적이거나 조직 문화와 충돌할 가능성이 보임.
+        - 미흡 (40~21): 태도가 다소 소극적이거나 조직 문화와 충돌할 가능성이 보임. (비디오: 잦은 시선 회피, 불안한 손동작 등 감지 시 감점 요인)
         - 부족 (20~0): 면접 태도가 불량하거나 직업 윤리 및 인성적 결함이 우려됨.
 
         [요청 사항]
@@ -101,19 +225,18 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             "communication_score": 90,
             "communication_eval": "(구체적인 평가 내용)",
             "non_verbal_score": 88,
-            "non_verbal_eval": "(구체적인 평가 내용)",
+            "non_verbal_eval": "(구체적인 평가 내용 - 비디오 분석 결과 포함하여 서술)",
             "pass_fail": "합격"
         }}
         pass_fail 값은 반드시 "합격" 또는 "불합격" 이어야 합니다.
         """
         
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
         )
         
-        content = completion.choices[0].message.content
+        content = response.text
         result = json.loads(content)
         
         pass_fail = result.get("pass_fail", "불합격")

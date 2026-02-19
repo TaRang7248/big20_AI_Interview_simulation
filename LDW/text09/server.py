@@ -2,10 +2,6 @@ import uvicorn
 import webbrowser
 from threading import Timer
 from app.config import logger
-
-# Import the app factory or instance
-# uvicorn needs the import string like "app.main:app" if running reload, 
-# or the app instance itself.
 from app.main import app
 
 def open_browser():

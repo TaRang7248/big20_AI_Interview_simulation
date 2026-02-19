@@ -42,7 +42,8 @@ TTS_FOLDER = 'uploads/tts_audio'
 # Use data folder for specific data files if referenced
 DATA_FOLDER = 'data'
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Google Gemini API Key
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)

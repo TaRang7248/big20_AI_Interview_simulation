@@ -1,10 +1,56 @@
-import json
-from openai import OpenAI
-from ..config import OPENAI_API_KEY, logger
-from ..database import get_db_connection
 
-# Initialize OpenAI Client
-client = OpenAI(api_key=OPENAI_API_KEY)
+import json
+import os
+import time
+import warnings
+import google.generativeai as genai
+from ..config import GOOGLE_API_KEY, logger
+from ..database import get_db_connection
+from google.api_core.exceptions import ResourceExhausted
+
+# Suppress Google GenAI FutureWarnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.api_core")
+
+# Initialize Gemini Client
+if not GOOGLE_API_KEY:
+    logger.error("GOOGLE_API_KEY is missing. Please set it in .env file.")
+else:
+    genai.configure(api_key=GOOGLE_API_KEY)
+
+# Use Gemini 2.0 Flash
+MODEL_NAME = "gemini-2.0-flash"
+
+def get_model():
+    return genai.GenerativeModel(MODEL_NAME)
+
+def generate_content_with_retry(model, prompt, generation_config=None, max_retries=3):
+    """
+    Helper function to generate content with retry logic for rate limits.
+    """
+    for attempt in range(max_retries):
+        try:
+            response = model.generate_content(prompt, generation_config=generation_config)
+            return response
+        except ResourceExhausted:
+            wait_time = (2 ** attempt) + 1  # Exponential backoff + jitter-ish
+            logger.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+        except Exception as e:
+            # If it's a blocked prompt or other safety issue, we might want to catch it specifically,
+            # but for now, re-raising is okay or handle gracefully.
+            raise e
+    raise ResourceExhausted("Max retries exceeded")
+
+def clean_json_string(json_str):
+    """
+    Cleans markdown code blocks from JSON string.
+    """
+    if "```json" in json_str:
+        json_str = json_str.split("```json")[1].split("```")[0]
+    elif "```" in json_str:
+        json_str = json_str.split("```")[1].split("```")[0]
+    return json_str.strip()
 
 def get_job_questions(job_title):
     """
@@ -40,31 +86,38 @@ def get_job_questions(job_title):
     # Convert to JSON for LLM
     questions_json = [{"id": q[0], "question": q[1]} for q in all_questions]
     
+    # Selecting fewer questions context to fit in generic limits if needed, 
+    # but Gemini Flash has large context window so 300 is fine.
+    
     prompt = f"""
     당신은 채용 담당자입니다.
     지원 직무: {job_title}
     
     아래 전체 면접 질문 리스트에서 해당 직무에 가장 적합한 핵심 질문 5~10개를 선별해주세요.
-    반드시 JSON 형식으로 ID 리스트만 반환해주세요. 예: [1, 5, 10, ...]
+    반드시 JSON 형식으로 ID 리스트만 반환해주세요. 
     
     질문 리스트:
-    {json.dumps(questions_json[:300], ensure_ascii=False)} 
+    {json.dumps(questions_json[:500], ensure_ascii=False)} 
     (데이터가 많으면 일부만 전송됨)
+
+    Response Schema:
+    {{
+        "ids": [1, 5, 10]
+    }}
     """
     
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
+        model = get_model()
+        response = generate_content_with_retry(
+            model,
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
         )
-        result = json.loads(completion.choices[0].message.content)
+        
+        text_response = clean_json_string(response.text)
+        result = json.loads(text_response)
         selected_ids = result.get("ids", [])
         
-        # fallback if json structure is different
-        if not selected_ids and "usage" not in result: # just in case
-             pass
-
         if not selected_ids:
              # If LLM fails, pick random 5
              selected_ids = [q[0] for q in all_questions[:5]]
@@ -76,10 +129,16 @@ def get_job_questions(job_title):
         conn.commit()
         
         # Return text
-        c.execute(f"SELECT question FROM interview_answer WHERE id = ANY(%s)", (selected_ids,))
-        questions = [r[0] for r in c.fetchall()]
+        # Make sure selected_ids is not empty tuple for ANY syntax
+        if not selected_ids:
+             questions = ["자기소개를 부탁드립니다."]
+        else:
+             c.execute(f"SELECT question FROM interview_answer WHERE id = ANY(%s)", (selected_ids,))
+             questions = [r[0] for r in c.fetchall()]
+             
         conn.close()
         return questions
+
 
     except Exception as e:
         logger.error(f"LLM Pool Creation Error: {e}")
@@ -107,16 +166,14 @@ def summarize_resume(text):
     3. 경력 사항 요약
     
     이력서 내용:
-    {text[:4000]} 
-    (내용이 너무 길면 앞부분 4000자만 참조함)
+    {text[:10000]} 
+    (내용이 너무 길면 앞부분만 참조함)
     """
 
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        summary = completion.choices[0].message.content
+        model = get_model()
+        response = generate_content_with_retry(model, prompt)
+        summary = response.text
         logger.info(f"Resume Summary: {summary[:100]}...")
         return summary
     except Exception as e:
@@ -128,6 +185,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
     Evaluates the applicant's answer and generates the next question or closing remark.
     Enhanced to use Resume Summary and Reference Questions from Pool.
     """
+    model = get_model()
+    
     if next_phase == "END":
          evaluation_prompt = f"""
          [상황]
@@ -140,11 +199,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
          - 답변이 있다면 그 내용을 바탕으로 간단히 평가해주세요. (관리자용)
          """
          try:
-             completion = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": evaluation_prompt}]
-             )
-             evaluation = completion.choices[0].message.content
+             response = generate_content_with_retry(model, evaluation_prompt)
+             evaluation = response.text
              next_question = "면접이 종료되었습니다. 수고하셨습니다."
              return evaluation, next_question
          except Exception as e:
@@ -163,7 +219,9 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         ref_context = ""
         if ref_questions:
             # Join top 3-5 questions
-            ref_q_text = "\n".join([f"- {q}" for q in ref_questions[:5]])
+            ref_questions_list = list(ref_questions) # ensure list
+            # Avoid error if ref_questions has integers or other types
+            ref_q_text = "\\n".join([f"- {str(q)}" for q in ref_questions_list[:5]])
             ref_context = f"""
             [직무 관련 참고 질문 (질문 생성 시 참고용)]
             {ref_q_text}
@@ -172,7 +230,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         history_context = ""
         if history_questions:
             # Join previous questions
-            hist_text = "\n".join([f"- {q}" for q in history_questions])
+            history_questions_list = list(history_questions)
+            hist_text = "\\n".join([f"- {str(q)}" for q in history_questions_list])
             history_context = f"""
             [이미 질문한 내역 (중복 질문 절대 금지)]
             {hist_text}
@@ -209,7 +268,7 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         - 질문은 구어체로 정중하게 1~2문장으로 작성해주세요.
         
         [출력 형식]
-        JSON 형식으로만 출력해주세요.
+        JSON 형식으로만 출력해주세요. 마크다운 코드 블록(```json ... ```)은 사용하지 마세요.
         {{
             "evaluation": "평가 내용...",
             "next_question": "다음 질문 내용..."
@@ -217,14 +276,20 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         """
         
         try:
-            completion = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
+            response = generate_content_with_retry(
+                model, 
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
             )
-            result = json.loads(completion.choices[0].message.content)
+            
+            text_response = clean_json_string(response.text)
+            result = json.loads(text_response)
             return result.get("evaluation", "평가 없음"), result.get("next_question", "다음 질문을 준비하지 못했습니다.")
+        except ResourceExhausted:
+             logger.error("LLM Quota Exceeded")
+             return "평가 실패 (사용량 초과)", "다음 질문으로 넘어가겠습니다. (잠시 후 다시 시도해주세요)"
         except Exception as e:
             logger.error(f"Evaluation Error: {e}")
+            if 'response' in locals():
+                logger.error(f"Response Text: {response.text}")
             return "평가 중 오류 발생", "다음 질문으로 넘어가겠습니다."
-

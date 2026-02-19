@@ -33,10 +33,13 @@ hume[microphone]
 aiohttp
 
 # --- LLM Orchestration / RAG ---
-openai
+# --- LLM Orchestration / RAG ---
+google-generativeai
 anthropic
 langchain
-langchain-openai
+langchain-google-genai
+langchain-ollama
+langchain-community
 langchain-ollama
 langchain-community
 langchain-postgres
@@ -58,6 +61,11 @@ pyannote-audio
 # --- CV / Emotion (선택: 필요 시 사용) ---
 opencv-python
 deepface
+
+tensorflow
+tensorflow-hub
+
+tf-keras
 
 # --- Dev tools ---
 pytest
