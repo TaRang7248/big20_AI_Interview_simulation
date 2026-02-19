@@ -3,7 +3,7 @@ import os
 import logging
 import collections
 from ..database import get_db_connection, logger
-from ..services.llm_service import client
+from ..services.llm_service import get_model
 from ..services.pdf_service import convert_pdf_to_images
 from ..config import UPLOAD_FOLDER
 
@@ -125,6 +125,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
     c = conn.cursor()
     
     try:
+        model = get_model()
+        
         # Fetch Announcement Details (Title & Job Description)
         if announcement_id:
              c.execute("SELECT title, job FROM interview_announcement WHERE id = %s", (announcement_id,))
@@ -229,13 +231,12 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
         pass_fail 값은 반드시 "합격" 또는 "불합격" 이어야 합니다.
         """
         
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
         )
         
-        content = completion.choices[0].message.content
+        content = response.text
         result = json.loads(content)
         
         pass_fail = result.get("pass_fail", "불합격")

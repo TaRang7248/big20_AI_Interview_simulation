@@ -1,37 +1,47 @@
 import os
-from ..config import logger
-from .llm_service import client  # Reuse OpenAI client
+import google.generativeai as genai
+from ..config import logger, GOOGLE_API_KEY
+
+# Configure GenAI
+if GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 def transcribe_audio(audio_path):
     """
-    Transcribes audio file to text using OpenAI Whisper API.
+    Transcribes audio file to text using Google Gemini 2.0 Flash (Multimodal).
     """
-    applicant_answer = ""
     try:
-        # Check file size before sending to Whisper
+        # Check file availability
         if not os.path.exists(audio_path):
+            logger.warning(f"Audio file not found: {audio_path}")
             return "답변 없음 (파일 없음)"
 
         file_size = os.path.getsize(audio_path)
         if file_size < 100: # Too small to be a valid audio file
              return "답변 없음"
 
-        with open(audio_path, "rb") as audio_file:
-            transcript = client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_file,
-                language="ko",
-                prompt="이것은 면접 지원자의 답변입니다. 절대로 추측하지 마세요. ai 개인적인 생각을 넣지 마세요. 오직 지원자의 명확한 답변 내용만 텍스트로 변환해 주세요."
-            )
-        applicant_answer = transcript.text.strip()
+        # Upload file to Gemini
+        # Note: Gemini 1.5/2.0 Flash supports audio inputs directly via File API
+        logger.info(f"Uploading audio to Gemini: {audio_path}")
+        audio_file = genai.upload_file(path=audio_path)
         
-        # Check if answer is too short
-        if len(applicant_answer) < 2:
-            logger.info(f"Filtered Short Noise or Empty: {applicant_answer}")
-            return "답변 없음"
-            
+        # Use Gemini 2.0 Flash
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        
+        prompt = "이 오디오 파일은 면접 지원자의 답변입니다. 오직 지원자의 명확한 답변 내용만 텍스트로 변환(전사)해주세요. 다른 부가적인 설명이나 감탄사 등은 제외하세요."
+        
+        response = model.generate_content([prompt, audio_file])
+        
+        applicant_answer = response.text.strip()
+        logger.info(f"STT Result: {applicant_answer[:50]}...")
+        
+        # Cleanup: It's good practice to delete the file from Gemini cloud if not needed, 
+        # but for this simulation, we might rely on auto-expiration or handling it later.
+        # audio_file.delete() # Optional: delete immediately if desired
+        
         return applicant_answer
 
-    except Exception as stt_e:
-        logger.error(f"STT Error: {stt_e}")
+    except Exception as e:
+        logger.error(f"STT Error (Gemini): {e}")
         return "답변 없음"
+

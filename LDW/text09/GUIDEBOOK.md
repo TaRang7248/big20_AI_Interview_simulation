@@ -64,14 +64,16 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 
 ## 4. 사용 모델 및 라이브러리 목록
 
+## 4. 사용 모델 및 라이브러리 목록
+
 ### 핵심 기술 (AI & Backend)
 - **FastAPI**: 고성능 비동기 웹 프레임워크 (백엔드 서버)
-- **OpenAI GPT-4o**: 면접 질문 생성 및 답변 분석, 평가 (LLM)
+- **Google Gemini 2.0 Flash**: 면접 질문 생성, 답변 분석, 평가(LLM) 및 **음성 인식(STT)** 통합 모델 - **[NEW]** All-in-One AI 적용
 - **LangChain**: LLM 오케스트레이션 및 프롬프트 관리
 - **Uvicorn**: ASGI 웹 서버
 
 ### 음성 및 멀티미디어
-- **Deepgram**: 고성능 음성 인식 (STT)
+- **Google Gemini (Multimodal)**: 고성능 음성 인식 (STT) - **[NEW]** OpenAI Whisper 대체
 - **Edge-TTS**: 자연스러운 음성 합성 (TTS)
 - **PyAudio**: 오디오 입출력 처리
 - **MoveNet Thunder (Google)**: 실시간 자세(Pose) 분석
@@ -109,23 +111,23 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── app/
 │   ├── main.py              # FastAPI 애플리케이션 진입점
-│   ├── config.py            # 환경 변수 및 설정 관리
+│   ├── config.py            # 환경 변수 및 설정 관리 (Gemini 설정 추가)
 │   ├── database.py          # 데이터베이스 연결 설정
 │   ├── models.py            # Pydantic/SQLAlchemy 데이터 모델 정의
 │   └── services/            # 핵심 비즈니스 로직
-│       ├── analysis_service.py  # 면접 결과 분석 및 루브릭 평가 로직 (+ 영상 분석 데이터 통합) ★
-│       ├── llm_service.py       # LLM 연동 (GPT-4)
-│       ├── stt_service.py       # 음성 인식
-│       └── tts_service.py       # 음성 합성
+│       ├── analysis_service.py  # 면접 결과 분석 및 루브릭 평가 로직 (Gemini 적용) ★
+│       ├── llm_service.py       # LLM 연동 (Gemini 2.0 Flash 적용) ★
+│       ├── stt_service.py       # 음성 인식 (Gemini Multimodal 적용) ★ [NEW]
+│       ├── tts_service.py       # 음성 합성
 │       └── video_analysis_service.py # MoveNet, DeepFace 영상 분석 로직
 ├── static/                  # CSS, JS, 이미지 등 정적 파일
 ├── templates/               # HTML 템플릿 파일
-├── requirements.txt         # 프로젝트 의존성 패키지 목록
-├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트 (Refactored)
+├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
+├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
 ├── scripts/                 # 유틸리티 스크립트 (모델 다운로드 등)
 ├── models/                  # AI 모델 저장소
 ├── tests/                   # 테스트 코드
-│   └── verify_integration.py # 통합 검증 스크립트
+│   └── test_gemini_integration.py # Gemini 연동 검증 스크립트
 ├── Dockerfile               # 도커 이미지 빌드 설정 파일
 └── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
 ```
@@ -133,6 +135,8 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ---
 
 ## 7. 이번 작업으로 추가/변경된 기능
-- **영상 분석 데이터 통합 저장**: `MoveNet`과 `DeepFace`로 분석한 데이터를 답변 제출 시 `Interview_Progress` 테이블의 `Answer_Evaluation` 컬럼에 자동으로 통합 저장하도록 개선하였습니다. 이제 관리자는 텍스트 평가뿐만 아니라 영상 분석 기반의 태도 데이터도 함께 확인할 수 있습니다.
-- **서버 스크립트 최적화**: `server.py`를 정리하여 서버 실행과 브라우저 자동 실행이라는 본연의 기능에 집중하도록 리팩토링하였습니다.
-- **통합 검증**: 데이터 흐름을 검증할 수 있는 테스트 스크립트(`tests/verify_integration.py`)를 추가하였습니다.
+- **STT 엔진 변경**: 기존 OpenAI Whisper에서 **Google Gemini 2.0 Flash (Multimodal Audio)**로 변경하여 `ImportError`를 해결하고 비용 효율성을 높였습니다.
+- **LLM 모델 통합**: 면접 질문 생성, 답변 평가, 그리고 음성 인식까지 하나의 Gemini 모델로 통합 운영됩니다.
+- **Deprecation Warning 해결**: `google.generativeai` 패키지 관련 경고 메시지를 처리하여 안정적인 실행 환경을 구축했습니다.
+- **서버 검증 완료**: `server.py` 실행 시 발생하던 임포트 에러를 수정하고 정상 구동을 확인했습니다.
+

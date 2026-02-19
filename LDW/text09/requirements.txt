@@ -33,10 +33,13 @@ hume[microphone]
 aiohttp
 
 # --- LLM Orchestration / RAG ---
-openai
+# --- LLM Orchestration / RAG ---
+google-generativeai
 anthropic
 langchain
-langchain-openai
+langchain-google-genai
+langchain-ollama
+langchain-community
 langchain-ollama
 langchain-community
 langchain-postgres

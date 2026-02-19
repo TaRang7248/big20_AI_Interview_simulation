@@ -1,10 +1,25 @@
 import json
-from openai import OpenAI
-from ..config import OPENAI_API_KEY, logger
+import os
+import warnings
+import google.generativeai as genai
+from ..config import GOOGLE_API_KEY, logger
 from ..database import get_db_connection
 
-# Initialize OpenAI Client
-client = OpenAI(api_key=OPENAI_API_KEY)
+# Suppress Google GenAI FutureWarnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.api_core")
+
+# Initialize Gemini Client
+if not GOOGLE_API_KEY:
+    logger.error("GOOGLE_API_KEY is missing. Please set it in .env file.")
+else:
+    genai.configure(api_key=GOOGLE_API_KEY)
+
+# Use Gemini 2.0 Flash
+MODEL_NAME = "gemini-2.0-flash"
+
+def get_model():
+    return genai.GenerativeModel(MODEL_NAME)
 
 def get_job_questions(job_title):
     """
@@ -40,31 +55,36 @@ def get_job_questions(job_title):
     # Convert to JSON for LLM
     questions_json = [{"id": q[0], "question": q[1]} for q in all_questions]
     
+    # Selecting fewer questions context to fit in generic limits if needed, 
+    # but Gemini Flash has large context window so 300 is fine.
+    
     prompt = f"""
     당신은 채용 담당자입니다.
     지원 직무: {job_title}
     
     아래 전체 면접 질문 리스트에서 해당 직무에 가장 적합한 핵심 질문 5~10개를 선별해주세요.
-    반드시 JSON 형식으로 ID 리스트만 반환해주세요. 예: [1, 5, 10, ...]
+    반드시 JSON 형식으로 ID 리스트만 반환해주세요. 
     
     질문 리스트:
-    {json.dumps(questions_json[:300], ensure_ascii=False)} 
+    {json.dumps(questions_json[:500], ensure_ascii=False)} 
     (데이터가 많으면 일부만 전송됨)
+
+    Response Schema:
+    {{
+        "ids": [1, 5, 10]
+    }}
     """
     
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
+        model = get_model()
+        response = model.generate_content(
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
         )
-        result = json.loads(completion.choices[0].message.content)
+        
+        result = json.loads(response.text)
         selected_ids = result.get("ids", [])
         
-        # fallback if json structure is different
-        if not selected_ids and "usage" not in result: # just in case
-             pass
-
         if not selected_ids:
              # If LLM fails, pick random 5
              selected_ids = [q[0] for q in all_questions[:5]]
@@ -76,8 +96,13 @@ def get_job_questions(job_title):
         conn.commit()
         
         # Return text
-        c.execute(f"SELECT question FROM interview_answer WHERE id = ANY(%s)", (selected_ids,))
-        questions = [r[0] for r in c.fetchall()]
+        # Make sure selected_ids is not empty tuple for ANY syntax
+        if not selected_ids:
+             questions = ["자기소개를 부탁드립니다."]
+        else:
+             c.execute(f"SELECT question FROM interview_answer WHERE id = ANY(%s)", (selected_ids,))
+             questions = [r[0] for r in c.fetchall()]
+             
         conn.close()
         return questions
 
@@ -107,16 +132,14 @@ def summarize_resume(text):
     3. 경력 사항 요약
     
     이력서 내용:
-    {text[:4000]} 
-    (내용이 너무 길면 앞부분 4000자만 참조함)
+    {text[:10000]} 
+    (내용이 너무 길면 앞부분만 참조함)
     """
 
     try:
-        completion = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        summary = completion.choices[0].message.content
+        model = get_model()
+        response = model.generate_content(prompt)
+        summary = response.text
         logger.info(f"Resume Summary: {summary[:100]}...")
         return summary
     except Exception as e:
@@ -128,6 +151,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
     Evaluates the applicant's answer and generates the next question or closing remark.
     Enhanced to use Resume Summary and Reference Questions from Pool.
     """
+    model = get_model()
+    
     if next_phase == "END":
          evaluation_prompt = f"""
          [상황]
@@ -140,11 +165,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
          - 답변이 있다면 그 내용을 바탕으로 간단히 평가해주세요. (관리자용)
          """
          try:
-             completion = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": evaluation_prompt}]
-             )
-             evaluation = completion.choices[0].message.content
+             response = model.generate_content(evaluation_prompt)
+             evaluation = response.text
              next_question = "면접이 종료되었습니다. 수고하셨습니다."
              return evaluation, next_question
          except Exception as e:
@@ -217,12 +239,11 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         """
         
         try:
-            completion = client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"}
+            response = model.generate_content(
+                prompt,
+                generation_config={"response_mime_type": "application/json"}
             )
-            result = json.loads(completion.choices[0].message.content)
+            result = json.loads(response.text)
             return result.get("evaluation", "평가 없음"), result.get("next_question", "다음 질문을 준비하지 못했습니다.")
         except Exception as e:
             logger.error(f"Evaluation Error: {e}")
