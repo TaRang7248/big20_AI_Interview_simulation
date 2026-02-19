@@ -79,6 +79,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - APP_ENV=${APP_ENV:-development}
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - DID_API_KEY=${DID_API_KEY}
+      - HUME_API_KEY=${HUME_API_KEY}
+      - HUME_SECRET_KEY=${HUME_SECRET_KEY}
+      - HUME_CONFIG_ID=${HUME_CONFIG_ID}
       - LLM_MODEL=${LLM_MODEL:-qwen3:4b}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       # NGINX 뒤에서 동작하므로 직접 TLS 불필요
