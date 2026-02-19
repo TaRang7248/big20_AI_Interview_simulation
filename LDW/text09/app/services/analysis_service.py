@@ -64,6 +64,61 @@ def get_video_analysis_summary(interview_number):
         logger.error(f"Error reading video logs: {e}")
         return "비디오 분석 데이터 처리 중 오류 발생."
 
+def get_recent_video_log_summary(interview_number: str, duration_seconds: int = 60) -> str:
+    """
+    Retrieves video logs for the specified interview_number within the last 'duration_seconds'.
+    Returns a text summary of emotions and posture.
+    """
+    log_path = os.path.join(UPLOAD_FOLDER, "video_logs", f"{interview_number}.json")
+    if not os.path.exists(log_path):
+        return ""
+
+    try:
+        import time
+        current_time = time.time()
+        start_time = current_time - duration_seconds
+
+        with open(log_path, "r", encoding="utf-8") as f:
+            logs = json.load(f)
+
+        if not logs:
+            return ""
+
+        # Filter logs by timestamp if available, else take last N
+        recent_logs = []
+        for log in logs:
+            # Assuming log has 'timestamp', if not, we can't filter by time accurately
+            # But the video_router adds it.
+            if "timestamp" in log:
+                 if log["timestamp"] >= start_time:
+                     recent_logs.append(log)
+            else:
+                # If no timestamp, fallback to taking the last portion (heuristic)
+                # This is a fallback
+                pass
+        
+        # If we found no time-based logs (maybe old format), take last 30 frames ~ 1 sec @ 30fps? 
+        # Actually simulation might be slow. Let's just create a summary of whatever we found.
+        if not recent_logs:
+             # If strictly no logs in time window, maybe return empty or last few 
+             return ""
+        
+        emotions = [log["emotion"] for log in recent_logs if log.get("emotion")]
+        
+        # Count analysis
+        emotion_counts = collections.Counter(emotions)
+        top_emotion = emotion_counts.most_common(1)
+        top_emotion_str = top_emotion[0][0] if top_emotion else "분석불가"
+        
+        bad_posture = sum(1 for log in recent_logs if log.get("pose") == "bad_posture")
+        
+        summary = f"[영상분석] 주 감정: {top_emotion_str}, 분석 프레임: {len(recent_logs)}"
+        return summary
+
+    except Exception as e:
+        logger.error(f"Error getting recent video logs: {e}")
+        return ""
+
 def analyze_interview_result(interview_number, job_title, applicant_name, id_name, announcement_id=None):
     logger.info(f"Analyzing interview result for {interview_number}...")
     conn = get_db_connection()

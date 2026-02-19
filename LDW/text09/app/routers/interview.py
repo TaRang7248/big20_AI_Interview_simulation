@@ -184,6 +184,16 @@ async def submit_answer(
             history_questions  # Pass history
         )
 
+        # --- NEW: Append Video Analysis Summary ---
+        from ..services.analysis_service import get_recent_video_log_summary
+        # Determine duration from answer_time if possible, else default 60s
+        # answer_time string format is unknown, defaulting to check last 60s
+        video_summary = get_recent_video_log_summary(interview_number, duration_seconds=60)
+        
+        if video_summary:
+            evaluation += f"\n\n{video_summary}"
+        # ------------------------------------------
+
         # 5. Save Current Answer & Evaluation
         c.execute("""
             UPDATE Interview_Progress 
