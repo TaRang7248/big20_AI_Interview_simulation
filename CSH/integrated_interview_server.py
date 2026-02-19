@@ -647,21 +647,6 @@ except ImportError as e:
     CELERY_AVAILABLE = False
     print(f"⚠️ Celery 서비스 비활성화: {e}")
 
-# D-ID AI 아바타 서비스
-try:
-    from did_avatar_service import create_did_router, is_did_available
-
-    did_router = create_did_router()
-    app.include_router(did_router)
-    DID_AVAILABLE = is_did_available()
-    if DID_AVAILABLE:
-        print("✅ D-ID AI 아바타 서비스 활성화됨")
-    else:
-        print("⚠️ D-ID API 키가 설정되지 않음 (정적 이미지 사용)")
-except ImportError as e:
-    DID_AVAILABLE = False
-    print(f"⚠️ D-ID 서비스 비활성화: {e}")
-
 # 코딩 테스트 서비스
 try:
     from code_execution_service import create_coding_router

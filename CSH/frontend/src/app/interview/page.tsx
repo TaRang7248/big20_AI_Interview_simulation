@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import EventToastContainer from "@/components/common/EventToast";
 import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
-import { sessionApi, interviewApi, ttsApi, interventionApi, resumeApi, didApi } from "@/lib/api";
+import { sessionApi, interviewApi, ttsApi, interventionApi, resumeApi } from "@/lib/api";
 import { useToast } from "@/contexts/ToastContext";
 import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2, FileText, Download, LayoutDashboard, AlertTriangle, Upload } from "lucide-react";
 
@@ -59,11 +59,12 @@ function InterviewPageInner() {
   const [messages, setMessages] = useState<{ role: "ai" | "user"; text: string }[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [questionNum, setQuestionNum] = useState(0);
-  const totalQuestions = 9;
+  const totalQuestions = 5;
   const [sttText, setSttText] = useState("");
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [interviewStarted, setInterviewStarted] = useState(false);
+  const [serverTtsEnabled, setServerTtsEnabled] = useState(true);
   const [reportData, setReportData] = useState<ReportData | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
 
@@ -83,13 +84,6 @@ function InterviewPageInner() {
   const interventionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pushEventRef = useRef<((raw: Record<string, unknown>) => void) | null>(null);
 
-  // ── D-ID AI 아바타 상태 ──
-  const [didAvailable, setDidAvailable] = useState(false);   // D-ID API 사용 가능 여부
-  const [didConnected, setDidConnected] = useState(false);   // WebRTC 연결 완료 여부
-  const [didLoading, setDidLoading] = useState(false);       // D-ID 스트림 연결 진행 중
-  const avatarVideoRef = useRef<HTMLVideoElement>(null);     // D-ID 아바타 영상 <video>
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null); // WebRTC PC
-
   // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   useEffect(() => {
     if (!loading && !token) router.push("/");
@@ -108,16 +102,6 @@ function InterviewPageInner() {
 
   // 채팅 자동 스크롤
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
-
-  // ── D-ID 사용 가능 여부 확인 (컴포넌트 마운트 시 1회) ──
-  useEffect(() => {
-    didApi.status()
-      .then(res => {
-        setDidAvailable(res.available);
-        if (res.available) console.log("✅ D-ID AI 아바타 사용 가능");
-      })
-      .catch(() => setDidAvailable(false));
-  }, []);
 
   // ── 페이지 진입 시 자동으로 면접 시작 (setup 화면 스킵) ──
   // 사용자 인증 완료 후 바로 startInterview()를 호출하여 면접을 시작
@@ -145,86 +129,15 @@ function InterviewPageInner() {
     requestAnimationFrame(assignStream);
   }, [phase]);
 
-  // 클린업 (카메라, WebSocket, 음성인식, D-ID WebRTC)
+  // 클린업 (카메라, WebSocket, 음성인식)
   useEffect(() => {
     return () => {
       streamRef.current?.getTracks().forEach(t => t.stop());
       wsRef.current?.close();
       recognitionRef.current?.stop();
       if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
-      // D-ID 정리
-      peerConnectionRef.current?.close();
-      peerConnectionRef.current = null;
     };
   }, []);
-
-  /**
-   * D-ID WebRTC 아바타 스트림 연결
-   * —————————————————————————————
-   * 1. /api/did/stream/create → SDP Offer + ICE 서버 정보 수신
-   * 2. RTCPeerConnection 생성 → Remote Description 설정
-   * 3. SDP Answer 생성 → /api/did/stream/sdp 전송
-   * 4. ICE Candidate → /api/did/stream/ice 전송
-   * 5. ontrack 이벤트로 수신한 비디오를 avatarVideoRef에 연결
-   */
-  const initDIDAvatar = async (sid: string) => {
-    if (!didAvailable) return;
-    setDidLoading(true);
-    try {
-      // 1단계: 스트림 생성 요청
-      const streamRes = await didApi.createStream(sid);
-      if (!streamRes.success || !streamRes.offer) {
-        console.warn("D-ID 스트림 생성 실패:", streamRes);
-        return;
-      }
-
-      // 2단계: RTCPeerConnection 생성
-      const pc = new RTCPeerConnection({
-        iceServers: streamRes.ice_servers || [{ urls: "stun:stun.l.google.com:19302" }],
-      });
-      peerConnectionRef.current = pc;
-
-      // 수신 트랙 처리 → 아바타 비디오에 연결
-      pc.ontrack = (event) => {
-        if (event.streams?.[0] && avatarVideoRef.current) {
-          avatarVideoRef.current.srcObject = event.streams[0];
-          setDidConnected(true);
-          console.log("✅ D-ID 아바타 비디오 스트림 연결됨");
-        }
-      };
-
-      // ICE Candidate 수집 → 서버로 전송
-      pc.onicecandidate = (event) => {
-        if (event.candidate) {
-          didApi.sendIceCandidate(sid, event.candidate.toJSON()).catch(() => { });
-        }
-      };
-
-      pc.onconnectionstatechange = () => {
-        console.log(`[D-ID WebRTC] 연결 상태: ${pc.connectionState}`);
-        if (pc.connectionState === "disconnected" || pc.connectionState === "failed") {
-          setDidConnected(false);
-        }
-      };
-
-      // 3단계: Remote SDP Offer 설정 → Local SDP Answer 생성
-      await pc.setRemoteDescription(new RTCSessionDescription(streamRes.offer));
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      // 4단계: SDP Answer를 D-ID 서버에 전송
-      await didApi.sendSdpAnswer(sid, answer);
-
-      // 5단계: 스트림 시작
-      await didApi.startStream(sid);
-      console.log("✅ D-ID 아바타 스트림 시작");
-    } catch (err) {
-      console.error("D-ID 아바타 초기화 실패:", err);
-      // D-ID 실패해도 면접은 계속 진행 (CSS 폴백 아바타 사용)
-    } finally {
-      setDidLoading(false);
-    }
-  };
 
   // ========== 면접 시작 ==========
   const startInterview = async () => {
@@ -269,6 +182,8 @@ function InterviewPageInner() {
    */
   const proceedInterview = async (sid: string) => {
     try {
+
+
       // 카메라가 아직 초기화되지 않은 경우 (경고 모달에서 이력서 업로드 후 재진행)
       if (!streamRef.current) {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -296,9 +211,6 @@ function InterviewPageInner() {
       setPhase("interview");
       setInterviewStarted(true);
       setSessionId(sid);
-
-      // D-ID 아바타 초기화 (비동기 — 면접 진행을 블로킹하지 않음)
-      initDIDAvatar(sid);
 
       await getNextQuestion(sid, "[START]");
     } catch (err) {
@@ -379,48 +291,46 @@ function InterviewPageInner() {
     } catch { setStatus("ready"); }
   };
 
-  // ========== TTS 발화 + D-ID 립싱크 ==========
+  // ========== TTS 발화 ==========
   const speakQuestion = async (text: string) => {
     setStatus("speaking");
 
-    // D-ID 아바타가 연결된 경우: D-ID 립싱크도 병렬로 요청
-    // (D-ID는 자체 TTS를 사용하여 립싱크 영상을 생성)
-    if (didConnected && sessionId) {
-      didApi.speak(sessionId, text, "female").catch(err =>
-        console.warn("D-ID speak 실패 (음성은 Hume TTS로 재생):", err)
-      );
+    if (serverTtsEnabled) {
+      try {
+        const blob = await ttsApi.speak(text, "professional");
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        await new Promise<void>((resolve) => {
+          audio.onended = () => resolve();
+          audio.onerror = () => resolve();
+          audio.play().catch(() => resolve());
+        });
+        URL.revokeObjectURL(url);
+        return;
+      } catch {
+        setServerTtsEnabled(false);
+      }
     }
 
+    // 서버 TTS 비활성/실패 시 Web Speech API 폴백
     try {
-      const blob = await ttsApi.speak(text, "professional");
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      await new Promise<void>((resolve) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => resolve();
-        audio.play().catch(() => resolve());
-      });
-      URL.revokeObjectURL(url);
-    } catch {
-      // TTS 실패 시 Web Speech API 폴백
-      try {
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "ko-KR";
-        speechSynthesis.speak(utterance);
-      } catch { /* ignore */ }
-    }
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = "ko-KR";
+      speechSynthesis.speak(utterance);
+    } catch { /* ignore */ }
   };
 
   // ========== 개입 체크 ==========
   const startInterventionCheck = (sid: string) => {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
-    interventionApi.startTurn(sid).catch(() => { });
+    interventionApi.startTurn(sid, currentQuestion).catch(() => { });
     interventionTimerRef.current = setInterval(async () => {
       try {
         const res = await interventionApi.check(sid, sttText);
-        if (res.should_intervene && res.message) {
-          setMessages(prev => [...prev, { role: "ai", text: `💡 ${res.message}` }]);
-          await speakQuestion(res.message);
+        const interventionMessage = res.intervention?.message;
+        if (res.needs_intervention && interventionMessage) {
+          setMessages(prev => [...prev, { role: "ai", text: `💡 ${interventionMessage}` }]);
+          await speakQuestion(interventionMessage);
         }
       } catch { /* ignore */ }
     }, 3000);
@@ -461,14 +371,6 @@ function InterviewPageInner() {
     setInterviewStarted(false);
     recognitionRef.current?.stop();
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
-
-    // D-ID 스트림 종료
-    if (didConnected && sessionId) {
-      didApi.closeStream(sessionId).catch(() => { });
-      peerConnectionRef.current?.close();
-      peerConnectionRef.current = null;
-      setDidConnected(false);
-    }
 
     setPhase("coding");
   };
@@ -609,115 +511,67 @@ function InterviewPageInner() {
             ))}
           </div>
 
-          {/* 2열 레이아웃 */}
+          {/* 2열 레이아웃: 사용자 영상 + 대화창 */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
-            {/* AI 면접관 아바타 */}
+            {/* ══ 왼쪽: 사용자 카메라 영상 (크게) ══ */}
             <div className="glass-card flex flex-col">
               <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                <Volume2 size={16} className="text-[var(--cyan)]" /> AI 면접관
-                {/* D-ID 연결 상태 배지 */}
-                {didLoading && <span className="text-xs text-[var(--warning)] animate-pulse">아바타 연결 중...</span>}
-                {didConnected && <span className="text-xs text-[var(--green)]">● LIVE</span>}
+                <Camera size={16} className="text-[var(--cyan)]" /> 내 화면
               </h3>
-              <div className="flex-1 rounded-xl bg-gradient-to-br from-[#1e3a5f] to-[#0d2137] flex items-center justify-center min-h-[200px] relative overflow-hidden">
-
-                {/* ══ D-ID WebRTC 아바타 비디오 (연결 성공 시 표시) ══ */}
-                {didConnected && (
-                  <video
-                    ref={avatarVideoRef}
-                    autoPlay
-                    playsInline
-                    className="absolute inset-0 w-full h-full object-cover rounded-xl"
-                  />
+              <div className="flex-1 rounded-xl overflow-hidden bg-black relative min-h-[300px]">
+                {/* 사용자 웹캠 비디오 — 영역 전체를 채움 */}
+                <video ref={interviewVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+                {/* 카메라 OFF 오버레이 */}
+                {!camEnabled && (
+                  <div className="absolute inset-0 bg-black/80 flex items-center justify-center">
+                    <CameraOff size={48} className="text-[var(--text-secondary)]" />
+                  </div>
                 )}
-
-                {/* ══ CSS 폴백 아바타 (D-ID 미연결 시 표시) ══ */}
-                {!didConnected && (
-                  <>
-                    {/* 발화 상태 배경 파동 효과 */}
-                    {status === "speaking" && (
-                      <>
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <div className="w-64 h-64 rounded-full bg-[rgba(0,255,136,0.06)] animate-ping" style={{ animationDuration: "2s" }} />
-                        </div>
-                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                          <div className="w-52 h-52 rounded-full bg-[rgba(0,217,255,0.08)] animate-ping" style={{ animationDuration: "2.5s" }} />
-                        </div>
-                      </>
-                    )}
-                    {/* 처리 중 배경 효과 */}
-                    {status === "processing" && (
-                      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                        <div className="w-56 h-56 rounded-full border-2 border-dashed border-[rgba(156,39,176,0.3)] animate-spin" style={{ animationDuration: "4s" }} />
-                      </div>
-                    )}
-                    {/* D-ID 로딩 중 */}
-                    {didLoading && (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center z-10">
-                        <Loader2 size={40} className="text-[var(--cyan)] animate-spin mb-3" />
-                        <span className="text-sm text-[var(--text-secondary)]">AI 아바타 연결 중...</span>
-                      </div>
-                    )}
-                    {/* 아바타 원형 */}
-                    {!didLoading && (
-                      <div className={`relative w-48 h-48 rounded-full border-4 transition-all duration-500 ${status === "speaking"
-                        ? "border-[var(--green)] shadow-[0_0_40px_rgba(0,255,136,0.5)] scale-105"
-                        : status === "processing"
-                          ? "border-purple-400 shadow-[0_0_20px_rgba(156,39,176,0.3)]"
-                          : status === "listening"
-                            ? "border-[var(--warning)] shadow-[0_0_20px_rgba(255,193,7,0.3)]"
-                            : "border-[var(--cyan)]"
-                        } bg-gradient-to-br from-[#2a4a6b] to-[#1a3050] flex items-center justify-center`}>
-                        {/* 발화 중 이퀄라이저 바 */}
-                        {status === "speaking" ? (
-                          <div className="flex items-end gap-1.5 h-16">
-                            {[0, 1, 2, 3, 4].map(i => (
-                              <div
-                                key={i}
-                                className="w-2.5 bg-gradient-to-t from-[var(--cyan)] to-[var(--green)] rounded-full"
-                                style={{
-                                  animation: `equalizer 0.8s ease-in-out ${i * 0.15}s infinite alternate`,
-                                  height: `${20 + Math.random() * 30}px`,
-                                }}
-                              />
-                            ))}
-                          </div>
-                        ) : status === "processing" ? (
-                          <Loader2 size={48} className="text-purple-300 animate-spin" />
-                        ) : (
-                          <span className="text-6xl">🤖</span>
-                        )}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {/* 상태 라벨 (D-ID/폴백 공통) */}
-                <span className={`absolute bottom-3 left-3 text-xs px-2 py-1 rounded font-medium z-20 ${status === "speaking" ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]"
-                  : status === "processing" ? "bg-[rgba(156,39,176,0.2)] text-purple-300"
-                    : status === "listening" ? "bg-[rgba(255,193,7,0.2)] text-[var(--warning)]"
+                {/* 좌하단: 카메라 상태 뱃지 */}
+                <span className="absolute bottom-3 left-3 text-xs bg-black/60 px-2 py-1 rounded text-white">
+                  {camEnabled ? "📷 카메라 ON" : "카메라 OFF"}
+                </span>
+                {/* 우하단: AI 상태 뱃지 — 면접관이 말하거나 처리 중일 때 표시 */}
+                <span className={`absolute bottom-3 right-3 text-xs px-2 py-1 rounded font-medium ${status === "speaking" ? "bg-[rgba(0,255,136,0.25)] text-[var(--green)]"
+                  : status === "processing" ? "bg-[rgba(156,39,176,0.25)] text-purple-300"
+                    : status === "listening" ? "bg-[rgba(255,193,7,0.25)] text-[var(--warning)]"
                       : "bg-black/60 text-white"
                   }`}>
-                  {status === "speaking" ? "🔊 답변 중..."
-                    : status === "processing" ? "⏳ 생각 중..."
-                      : status === "listening" ? "👂 경청 중..."
-                        : "AI 면접관"}
+                  {status === "speaking" ? "🔊 AI 답변 중..."
+                    : status === "processing" ? "⏳ AI 생각 중..."
+                      : status === "listening" ? "🎤 듣는 중..."
+                        : "대기"}
                 </span>
+              </div>
+
+              {/* 하단 컨트롤 버튼 */}
+              <div className="flex items-center justify-center gap-4 mt-4">
+                <button onClick={toggleMic} title={micEnabled ? "마이크 끄기" : "마이크 켜기"} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${micEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
+                  }`}>
+                  {micEnabled ? <Mic size={20} /> : <MicOff size={20} />}
+                </button>
+                <button onClick={toggleCam} title={camEnabled ? "카메라 끄기" : "카메라 켜기"} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${camEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
+                  }`}>
+                  {camEnabled ? <Camera size={20} /> : <CameraOff size={20} />}
+                </button>
+                <button onClick={submitAnswer} disabled={!sttText.trim() || status !== "listening"} title="답변 제출"
+                  className="btn-gradient !rounded-full w-12 h-12 flex items-center justify-center disabled:opacity-40">
+                  <SkipForward size={20} />
+                </button>
+                <button onClick={endInterview} title="면접 종료" className="w-12 h-12 rounded-full bg-[rgba(244,67,54,0.8)] text-white flex items-center justify-center hover:bg-[rgba(244,67,54,1)] transition">
+                  <PhoneOff size={20} />
+                </button>
               </div>
             </div>
 
-            {/* 채팅/비디오 */}
+            {/* ══ 오른쪽: 대화창 ══ */}
             <div className="glass-card flex flex-col">
-              {/* 사용자 비디오 (작게) */}
-              <div className="rounded-xl overflow-hidden bg-black h-32 mb-3 relative">
-                <video ref={interviewVideoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-                <span className="absolute bottom-2 right-2 text-xs bg-black/60 px-2 py-0.5 rounded text-white">
-                  {camEnabled ? "카메라 ON" : "카메라 OFF"}
-                </span>
-              </div>
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                <Volume2 size={16} className="text-[var(--cyan)]" /> AI 면접관 대화
+              </h3>
 
               {/* 채팅 로그 */}
-              <div className="flex-1 overflow-y-auto space-y-3 mb-3 min-h-[200px] max-h-[400px] pr-2">
+              <div className="flex-1 overflow-y-auto space-y-3 mb-3 min-h-[300px] max-h-[520px] pr-2">
                 {messages.map((m, i) => (
                   <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div className={`max-w-[85%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${m.role === "user"
@@ -733,30 +587,11 @@ function InterviewPageInner() {
 
               {/* STT 인식 텍스트 */}
               {status === "listening" && (
-                <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3 mb-3">
+                <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3">
                   <p className="text-xs text-[var(--warning)] mb-1">🎤 음성 인식 중...</p>
                   <p className="text-sm">{sttText || "말씀해주세요..."}</p>
                 </div>
               )}
-
-              {/* 컨트롤 */}
-              <div className="flex items-center justify-center gap-4">
-                <button onClick={toggleMic} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${micEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
-                  }`}>
-                  {micEnabled ? <Mic size={20} /> : <MicOff size={20} />}
-                </button>
-                <button onClick={toggleCam} className={`w-12 h-12 rounded-full flex items-center justify-center transition ${camEnabled ? "bg-[rgba(0,255,136,0.2)] text-[var(--green)]" : "bg-[rgba(255,82,82,0.2)] text-[var(--danger)]"
-                  }`}>
-                  {camEnabled ? <Camera size={20} /> : <CameraOff size={20} />}
-                </button>
-                <button onClick={submitAnswer} disabled={!sttText.trim() || status !== "listening"}
-                  className="btn-gradient !rounded-full w-12 h-12 flex items-center justify-center disabled:opacity-40">
-                  <SkipForward size={20} />
-                </button>
-                <button onClick={endInterview} className="w-12 h-12 rounded-full bg-[rgba(244,67,54,0.8)] text-white flex items-center justify-center hover:bg-[rgba(244,67,54,1)] transition">
-                  <PhoneOff size={20} />
-                </button>
-              </div>
             </div>
           </div>
         </main>
