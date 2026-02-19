@@ -144,9 +144,9 @@ async def init_schema():
         """)
         logger.info("✓ job_policy_snapshots table created/verified")
         
-        # Create sessions table
+        # Create interviews table (Playbook/ERD 기준: sessions -> interviews)
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS sessions (
+            CREATE TABLE IF NOT EXISTS interviews (
                 session_id VARCHAR(255) PRIMARY KEY,
                 user_id VARCHAR(255),
                 job_id VARCHAR(255) REFERENCES jobs(job_id),
@@ -164,25 +164,25 @@ async def init_schema():
                 updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         """)
-        logger.info("✓ sessions table created/verified")
+        logger.info("\u2713 interviews table created/verified")
         
-        # Create reports table
+        # Create evaluation_scores table (Playbook/ERD 기준: reports -> evaluation_scores)
         await conn.execute("""
-            CREATE TABLE IF NOT EXISTS reports (
+            CREATE TABLE IF NOT EXISTS evaluation_scores (
                 report_id VARCHAR(255) PRIMARY KEY,
-                session_id VARCHAR(255) REFERENCES sessions(session_id),
+                session_id VARCHAR(255) REFERENCES interviews(session_id),
                 report_data JSONB NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
         """)
-        logger.info("✓ reports table created/verified")
+        logger.info("\u2713 evaluation_scores table created/verified")
         
         # Create indexes
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_job_id ON sessions(job_id);")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);")
-        await conn.execute("CREATE INDEX IF NOT EXISTS idx_reports_session_id ON reports(session_id);")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_interviews_job_id ON interviews(job_id);")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_interviews_status ON interviews(status);")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_interviews_user_id ON interviews(user_id);")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_evaluation_scores_session_id ON evaluation_scores(session_id);")
         
         logger.info("✓ Indexes created/verified")
         
@@ -192,7 +192,11 @@ async def init_schema():
         await conn.close()
 
 async def verify_schema():
-    """Verify schema was created correctly"""
+    """
+    Verify schema was created correctly.
+    Fail-Fast: 테이블 존재뿐 아니라 필수 컬럼 존재까지 검증한다.
+    테이블이 존재하더라도 컬럼이 기대와 다르면 즉시 FAIL을 반환한다.
+    """
     conn = await asyncpg.connect(
         host=host,
         port=int(port),
@@ -202,28 +206,48 @@ async def verify_schema():
     )
     
     try:
-        # Check tables
+        # 1. 테이블 존재 확인
         tables = await conn.fetch("""
             SELECT table_name 
             FROM information_schema.tables 
             WHERE table_schema = 'public' 
-            AND table_name IN ('jobs', 'job_policy_snapshots', 'sessions', 'reports')
+            AND table_name IN ('jobs', 'job_policy_snapshots', 'interviews', 'evaluation_scores')
             ORDER BY table_name;
         """)
         
         table_names = [row['table_name'] for row in tables]
         logger.info(f"Tables found: {table_names}")
         
-        expected = ['job_policy_snapshots', 'jobs', 'reports', 'sessions']
-        if set(table_names) == set(expected):
-            logger.info("✓ All required tables exist")
-            return True
-        else:
+        expected = ['evaluation_scores', 'job_policy_snapshots', 'jobs', 'interviews']
+        if set(table_names) != set(expected):
             logger.error(f"✗ Missing tables: {set(expected) - set(table_names)}")
             return False
+        logger.info("✓ All required tables exist")
+
+        # 2. Fail-Fast: 필수 컬럼 존재 검증
+        REQUIRED_COLUMNS = {
+            'interviews': {'session_id', 'user_id', 'job_id', 'status', 'mode', 'created_at', 'updated_at'},
+            'evaluation_scores': {'report_id', 'session_id', 'report_data', 'created_at'},
+        }
+        for tbl, required_cols in REQUIRED_COLUMNS.items():
+            col_rows = await conn.fetch("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema='public' AND table_name=$1
+            """, tbl)
+            actual_cols = {r['column_name'] for r in col_rows}
+            missing = required_cols - actual_cols
+            if missing:
+                logger.error(f"✗ Fail-Fast: [{tbl}] 필수 컬럼 누락 - {missing}")
+                logger.error("  init_db.py를 재실행하거나 DB 스키마를 수동 확인하십시오.")
+                return False
+            logger.info(f"✓ [{tbl}] 필수 컬럼 확인 완료")
+
+        logger.info("✓ Schema verification complete (tables + columns)")
+        return True
             
     finally:
         await conn.close()
+
 
 async def main():
     logger.info("=== PostgreSQL Schema Initialization ===")

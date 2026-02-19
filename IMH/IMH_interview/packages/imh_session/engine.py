@@ -26,7 +26,8 @@ class InterviewSessionEngine:
         state_repo: SessionStateRepository,
         history_repo: SessionHistoryRepository,
         question_generator: QuestionGenerator,
-        qbank_service: QuestionBankService
+        qbank_service: QuestionBankService,
+        pg_state_repo: Optional[SessionStateRepository] = None  # TASK-029: PG Authority for Hydration
     ):
         self.session_id = session_id
         self.config = config
@@ -34,6 +35,7 @@ class InterviewSessionEngine:
         self.history_repo = history_repo
         self.question_generator = question_generator
         self.qbank_service = qbank_service
+        self.pg_state_repo = pg_state_repo  # Cold storage for Hydration
         
         # Initialize Policy
         self.policy = get_policy(self.config.mode)
@@ -42,15 +44,41 @@ class InterviewSessionEngine:
         self.context = self._load_or_initialize_context()
 
     def _load_or_initialize_context(self) -> SessionContext:
-        """Load from Hot Storage or create new."""
+        """
+        Load from Hot Storage (Redis/Memory). On miss, Hydrate from PG Authority.
+        TASK-029: Redis Miss -> PG Hydration guarantees PostgreSQL as Authority.
+        """
+        # 1. Try Hot Storage (Redis/Memory - fast path)
         existing = self.state_repo.get_state(self.session_id)
         if existing:
             return existing
+
+        # 2. Hot Storage Miss: Try PG Authority (Hydration)
+        if self.pg_state_repo is not None:
+            try:
+                pg_context = self.pg_state_repo.get_state(self.session_id)
+                if pg_context:
+                    logger.info(
+                        "Hydration: Restored session %s from PostgreSQL Authority.",
+                        self.session_id
+                    )
+                    # Write-through to Hot Storage so next call is fast
+                    self.state_repo.save_state(self.session_id, pg_context)
+                    return pg_context
+            except Exception as e:
+                logger.warning(
+                    "Hydration failed for session %s: %s. Initializing fresh context.",
+                    self.session_id, e
+                )
+
+        # 3. No existing data anywhere: create new context
+        logger.info("No existing state found for session %s. Initializing fresh context.", self.session_id)
         return SessionContext(
             session_id=self.session_id,
-            job_id=self.config.job_id or "UNKNOWN", 
+            job_id=self.config.job_id or "UNKNOWN",
             status=SessionStatus.APPLIED
         )
+
 
     def _get_next_question(self) -> SessionQuestion:
         """

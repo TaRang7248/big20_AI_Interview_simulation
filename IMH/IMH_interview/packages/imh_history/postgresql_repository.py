@@ -97,10 +97,10 @@ class PostgreSQLHistoryRepository(HistoryRepository):
             if report.raw_debug_info and "_session_id" in report.raw_debug_info:
                 session_id = report.raw_debug_info["_session_id"]
             
-            # Insert into reports table
+            # Insert into evaluation_scores table (Playbook/ERD 기준: reports -> evaluation_scores)
             await conn.execute(
                 """
-                INSERT INTO reports (report_id, session_id, report_data, created_at)
+                INSERT INTO evaluation_scores (report_id, session_id, report_data, created_at)
                 VALUES ($1, $2, $3, $4)
                 """,
                 interview_id,
@@ -139,7 +139,7 @@ class PostgreSQLHistoryRepository(HistoryRepository):
         conn = await self._get_connection()
         try:
             row = await conn.fetchrow(
-                "SELECT report_data FROM reports WHERE report_id = $1",
+                "SELECT report_data FROM evaluation_scores WHERE report_id = $1",
                 interview_id
             )
             
@@ -176,7 +176,7 @@ class PostgreSQLHistoryRepository(HistoryRepository):
             rows = await conn.fetch(
                 """
                 SELECT report_id, report_data, created_at
-                FROM reports
+                FROM evaluation_scores
                 ORDER BY created_at DESC
                 """
             )
@@ -210,12 +210,36 @@ class PostgreSQLHistoryRepository(HistoryRepository):
     
     def update_interview_status(self, session_id: str, status: Any) -> None:
         """
-        Implementation of SessionHistoryRepository.update_interview_status.
-        
-        Contract: Logs status transitions but does NOT persist intermediate states.
-        This maintains compatibility with FileHistoryRepository behavior.
+        Update interview status in PostgreSQL (Authority).
+
+        Contract: Persists the given status to the interviews table.
+        This is a real DB UPDATE that enforces the PostgreSQL Authority principle.
         """
-        logger.info(f"[PostgreSQLHistoryRepo] Status update: {session_id} -> {status}")
+        import asyncio
+        # Convert Enum to string if needed
+        status_value = status.value if hasattr(status, 'value') else str(status)
+        loop = self._get_event_loop()
+        loop.run_until_complete(self._async_update_interview_status(session_id, status_value))
+
+    async def _async_update_interview_status(self, session_id: str, status_value: str) -> None:
+        """Async implementation of update_interview_status."""
+        conn = await self._get_connection()
+        try:
+            await conn.execute(
+                """
+                UPDATE interviews
+                SET status = $1::session_status, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = $2
+                """,
+                status_value,
+                session_id
+            )
+            logger.info("[PostgreSQLHistoryRepo] Status persisted: %s -> %s", session_id, status_value)
+        except Exception as e:
+            logger.exception("[PostgreSQLHistoryRepo] Failed to update status %s: %s", session_id, e)
+            raise
+        finally:
+            await conn.close()
     
     def save_interview_result(self, session_id: str, result_data: Any) -> None:
         """

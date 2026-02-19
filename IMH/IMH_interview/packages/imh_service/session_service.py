@@ -126,7 +126,8 @@ class SessionService:
             state_repo=self.state_repo,
             history_repo=self.history_repo,
             question_generator=self.question_generator,
-            qbank_service=self.qbank_service
+            qbank_service=self.qbank_service,
+            pg_state_repo=self.postgres_state_repo  # TASK-029: PG Hydration
         )
         
         # 3. Start Session (State Transition: APPLIED -> IN_PROGRESS)
@@ -190,7 +191,8 @@ class SessionService:
                     state_repo=self.state_repo,
                     history_repo=self.history_repo,
                     question_generator=self.question_generator,
-                    qbank_service=self.qbank_service
+                    qbank_service=self.qbank_service,
+                    pg_state_repo=self.postgres_state_repo  # TASK-029: PG Hydration
                 )
                 
                 # Force context to be the loaded one (Engine does this in init)

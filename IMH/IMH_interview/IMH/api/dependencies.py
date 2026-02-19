@@ -9,6 +9,7 @@ from packages.imh_session.infrastructure.memory_repo import MemorySessionReposit
 from packages.imh_session.infrastructure.dual_repo import DualSessionStateRepository
 from packages.imh_session.repository import SessionStateRepository, SessionHistoryRepository
 from packages.imh_history.repository import FileHistoryRepository
+from packages.imh_history.postgresql_repository import PostgreSQLHistoryRepository
 from packages.imh_service.concurrency import ConcurrencyManager
 from packages.imh_service.session_service import SessionService
 from packages.imh_service.admin_query import AdminQueryService
@@ -80,8 +81,15 @@ def get_session_state_repository() -> SessionStateRepository:
 @lru_cache
 def get_session_history_repository() -> SessionHistoryRepository:
     """
-    Singleton History Repository (File-based).
+    Singleton History Repository (PostgreSQL Authority).
+    TASK-029: FileHistoryRepository replaced by PostgreSQLHistoryRepository.
+    Fallback to FileHistoryRepository if PG is not configured.
     """
+    config = get_config()
+    if config.POSTGRES_CONNECTION_STRING:
+        dsn = config.POSTGRES_CONNECTION_STRING.replace("postgresql+asyncpg://", "postgresql://")
+        return PostgreSQLHistoryRepository(conn_config={'dsn': dsn})
+    # Fallback for local dev without PG
     return FileHistoryRepository()
 
 @lru_cache

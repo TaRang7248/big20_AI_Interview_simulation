@@ -98,7 +98,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
             # Upsert session
             await conn.execute(
                 """
-                INSERT INTO sessions (
+                INSERT INTO interviews (
                     session_id, user_id, job_id, status, mode,
                     job_policy_snapshot, session_config_snapshot,
                     questions_history, answers_history,
@@ -172,7 +172,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
                        job_policy_snapshot, session_config_snapshot,
                        questions_history, answers_history,
                        applied_at, started_at, completed_at, evaluated_at
-                FROM sessions
+                FROM interviews
                 WHERE session_id = $1
                 """,
                 session_id
@@ -265,7 +265,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
             
             await conn.execute(
                 """
-                UPDATE sessions
+                UPDATE interviews
                 SET status = $1::session_status, updated_at = CURRENT_TIMESTAMP
                 WHERE session_id = $2
                 """,
@@ -307,7 +307,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
                        job_policy_snapshot, session_config_snapshot,
                        questions_history, answers_history,
                        applied_at, started_at, completed_at, evaluated_at
-                FROM sessions
+                FROM interviews
                 WHERE job_id = $1
                 ORDER BY created_at DESC
                 """,
