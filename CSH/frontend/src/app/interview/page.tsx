@@ -441,17 +441,12 @@ function InterviewPageInner() {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     interventionApi.endTurn(sessionId, answer).catch(() => { });
 
-    // 평가 — fire-and-forget (백그라운드 실행, 다음 질문 생성을 블로킹하지 않음)
-    // evaluate()는 LLM 호출이므로 60초+ 소요 가능 → await 없이 비동기 실행
+    // ⚡ 평가는 /api/chat 내부 워크플로우에서 자동 처리됨 (Celery 오프로드 또는 직접 평가)
+    // 별도 /api/evaluate 호출 제거 — 동일 Ollama GPU 리소스 경합으로 질문 생성 지연 방지
+    // (이전: interviewApi.evaluate() fire-and-forget → Ollama 큐 점유 → chat 응답 지연)
     setStatus("processing");
-    interviewApi.evaluate({
-      session_id: sessionId,
-      question: currentQuestion,
-      answer,
-      question_number: questionNum,
-    }).catch((err) => console.warn("평가 백그라운드 오류 (무시):", err));
 
-    // 다음 질문 or 종료 (evaluate 완료를 기다리지 않고 즉시 실행)
+    // 다음 질문 or 종료
     if (questionNum >= totalQuestions) {
       endInterview();
     } else {

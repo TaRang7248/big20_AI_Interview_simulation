@@ -105,9 +105,12 @@ from security import (
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
+# 면접 LLM 최대 생성 토큰 수 — 무한 생성 방지 (질문은 200~500토큰이면 충분)
+DEFAULT_LLM_NUM_PREDICT = int(os.getenv("LLM_NUM_PREDICT", "2048"))
 # 면접 LLM 호출 타임아웃 (초) — GTX 1660 VRAM 압박 시 무기한 hang 방지
-LLM_TIMEOUT_SEC = int(os.getenv("LLM_TIMEOUT_SEC", "120"))
+# 60초 내 응답 없으면 폴백 질문으로 전환하여 사용자 대기 시간 최소화
+LLM_TIMEOUT_SEC = int(os.getenv("LLM_TIMEOUT_SEC", "60"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # 소셜 로그인 설정
@@ -1491,10 +1494,13 @@ class AIInterviewer:
         if LLM_AVAILABLE:
             try:
                 # 평가용 LLM (낮은 temperature, think=None으로 thinking mode 비활성화)
+                # num_predict: 최대 생성 토큰 수 제한 → 불필요한 장문 생성 방지
+                # num_ctx: 4096으로 축소 → VRAM 절약 (8192 → 4096: ~1.5GB 절약)
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=0.3,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
+                    num_predict=DEFAULT_LLM_NUM_PREDICT,
                     think=None,  # qwen3 thinking 비활성화 → 속도 2-5배 향상
                 )
                 # 질문 생성용 LLM (높은 temperature, think=None으로 thinking mode 비활성화)
@@ -1502,9 +1508,12 @@ class AIInterviewer:
                     model=DEFAULT_LLM_MODEL,
                     temperature=DEFAULT_LLM_TEMPERATURE,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
+                    num_predict=DEFAULT_LLM_NUM_PREDICT,
                     think=None,  # qwen3 thinking 비활성화 → 속도 2-5배 향상
                 )
-                print(f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}")
+                print(
+                    f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}, num_ctx={DEFAULT_LLM_NUM_CTX}, num_predict={DEFAULT_LLM_NUM_PREDICT}"
+                )
             except Exception as e:
                 print(f"❌ LLM 초기화 실패: {e}")
 
