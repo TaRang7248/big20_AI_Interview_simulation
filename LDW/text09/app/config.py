@@ -44,6 +44,7 @@ DATA_FOLDER = 'data'
 
 # Google Gemini API Key
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Ensure directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)

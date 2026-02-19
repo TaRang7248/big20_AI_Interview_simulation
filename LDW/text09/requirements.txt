@@ -73,3 +73,7 @@ ruff
 
 # --- TTS ---
 edge-tts
+
+# --- STT / OpenAI ---
+openai
+python-Levenshtein
