@@ -192,9 +192,11 @@ def transcribe_with_gemini(audio_path):
         prompt = """
         이 오디오 파일은 면접 지원자의 답변입니다. 
         들리는 내용을 '그대로' 전사해 주세요.
-        특히 '음...', '어...', '그...' 같은 비언어적 표현이나 추임새도 삭제하지 말고 들리는 대로 모두 적어주세요.
+        추임새('음...', '어...')가 있다면 들리는 대로 적어주세요.
+        
+        [가장 중요한 규칙]
+        만약 사람의 목소리가 전혀 들리지 않거나 침묵/백색소음만 있다면, 절대 내용을 지어내지 말고 오직 "답변 없음" 이라고만 출력하세요.
         문법 교정이나 요약을 하지 마세요.
-        오직 전사 텍스트만 출력하세요.
         """
         response = model.generate_content([prompt, audio_file])
         return response.text.strip()
@@ -211,7 +213,7 @@ def transcribe_with_whisper(audio_path):
                 file=audio_file,
                 language="ko",
                 temperature=0.0,
-                prompt="이것은 한국어 면접 답변입니다. '음', '어' 같은 추임새를 그대로 포함해서 전사해주세요."
+                prompt="이것은 한국어 면접 답변입니다. 사람의 목소리가 없다면 지어내지 마세요. 추임새가 있다면 포함해서 전사해주세요."
             )
         return transcript.text.strip()
     except Exception as e:
@@ -281,6 +283,17 @@ def transcribe_audio(original_audio_path):
     # 2. Analyze Features
     analysis = analyze_audio_features(processed_path, y, sr)
     
+    # 🌟 추가된 VAD(Voice Activity Detection) 방어 로직
+    duration = librosa.get_duration(y=y, sr=sr) if y is not None else 0
+    # 전체 오디오 길이 중 침묵 비중이 95% 이상이거나, 지속적인 목소리가 없다면 STT 생략
+    if duration > 0 and (analysis.get("silence_duration", 0) / duration > 0.95):
+        logger.info("오디오의 대부분이 침묵입니다. STT를 건너뛰고 '답변 없음' 처리합니다.")
+        return {
+            "text": "답변 없음",
+            "analysis": analysis,
+            "debug_info": {"skipped_due_to_silence": True}
+        }
+
     # 3. STT
     gemini_res = transcribe_with_gemini(processed_path)
     whisper_res = transcribe_with_whisper(processed_path)
