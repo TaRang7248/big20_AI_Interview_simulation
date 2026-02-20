@@ -12,6 +12,7 @@ from openai import OpenAI
 import google.generativeai as genai
 from parselmouth.praat import call
 from ..config import logger, GOOGLE_API_KEY, OPENAI_API_KEY
+from .vad_service import calculate_average_rms, check_vad_activity
 
 # Configure GenAI
 if GOOGLE_API_KEY:
@@ -192,11 +193,12 @@ def transcribe_with_gemini(audio_path):
         prompt = """
         이 오디오 파일은 면접 지원자의 답변입니다. 
         들리는 내용을 '그대로' 전사해 주세요.
-        추임새('음...', '어...')가 있다면 들리는 대로 적어주세요.
+        들리는 내용을 마음대로 생략하지 마시고 똑같이 들리는 대로 적어주세요.
         
         [가장 중요한 규칙]
-        만약 사람의 목소리가 전혀 들리지 않거나 침묵/백색소음만 있다면, 절대 내용을 지어내지 말고 오직 "답변 없음" 이라고만 출력하세요.
-        문법 교정이나 요약을 하지 마세요.
+        1. 만약 사람의 목소리가 전혀 들리지 않거나 침묵/백색소음만 있다면, 절대 내용을 지어내지 말고 오직 "답변 없음" 이라고만 출력하세요.
+        2. 문법 교정이나 요약을 하지 마세요.
+        3. 내용을 마음대로 만들지 마세요.
         """
         response = model.generate_content(
             [prompt, audio_file],
@@ -216,7 +218,7 @@ def transcribe_with_whisper(audio_path):
                 file=audio_file,
                 language="ko",
                 temperature=0.0,
-                prompt="이것은 한국어 면접 답변입니다. 사람의 목소리가 없다면 지어내지 마세요. 추임새가 있다면 포함해서 전사해주세요.",
+                prompt="이것은 한국어 면접 답변입니다. 사람의 목소리가 없다면 지어내지 마세요. 들리는 내용대로 똑같이 적어주세요. 들리는 내용을 마음대로 생략하지 마시고 똑같이 들리는 대로 적어주세요.",
                 timeout=30
             )
         return transcript.text.strip()
@@ -280,6 +282,25 @@ def transcribe_audio(original_audio_path):
     """
     if not os.path.exists(original_audio_path):
         return {"text": "파일 없음", "analysis": {}}
+
+    # 0. RMS & VAD Check (Pre-filtering)
+    rms_mean = calculate_average_rms(original_audio_path)
+    if rms_mean < 0.002: # RMS Threshold
+        logger.info(f"RMS too low ({rms_mean:.5f}). Treating as silence.")
+        return {
+            "text": "답변 없음",
+            "analysis": {"rms_mean": rms_mean},
+            "debug_info": {"skipped_due_to_rms": True}
+        }
+        
+    vad_ratio = check_vad_activity(original_audio_path)
+    if vad_ratio < 0.05: # Speech ratio < 5%
+        logger.info(f"VAD speech ratio too low ({vad_ratio:.2f}). Treating as silence.")
+        return {
+            "text": "답변 없음",
+            "analysis": {"vad_ratio": vad_ratio},
+            "debug_info": {"skipped_due_to_vad": True}
+        }
 
     # 1. Preprocess
     processed_path, y, sr = preprocess_audio(original_audio_path)

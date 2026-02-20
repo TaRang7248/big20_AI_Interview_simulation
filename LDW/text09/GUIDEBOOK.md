@@ -162,6 +162,7 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 - **STT 교차 검증 시스템 도입**: **Google Gemini (Multimodal)**와 **OpenAI Whisper**를 동시에 사용하여 음성 인식 정확도를 획기적으로 높였습니다. 두 모델의 인식 결과가 **95% 이상 일치(Levenshtein Distance)**할 경우에만 Gemini 결과를 채택하고, 그렇지 않을 경우 더 안정적인 Whisper 결과를 1순위로 사용하여 환각(Hallucination) 현상을 최소화했습니다.
 - **비디오 심층 분석 통합**: `uploads/audio` 폴더에 저장된 `.webm` 영상 파일을 면접 종료 시 자동으로 스캔하여 **OpenCV**, **MoveNet Thunder**, **DeepFace**로 정밀 분석합니다. 프레임 단위로 감정과 자세를 분석하여 최종 태도/인성 평가에 반영합니다.
 - **오디오 심층 분석 시스템 (Audio Deep Analysis)** **[NEW]**: 지원자의 목소리 데이터를 정밀 분석하여 비언어적 요소를 평가에 반영합니다.
+    - **초고속 무음 감지 (RMS & VAD)**: 전체 오디오의 에너지(RMS)와 사람 목소리 비율(WebRTC VAD)을 0.01초 내에 분석하여, 의미 없는 침묵이나 백색 소음만 있는 경우 즉시 "답변 없음"으로 처리합니다. 불필요한 STT 비용을 절감하고 빠른 피드백을 제공합니다.
     - **무음(Silence) 길이 측정**: 답변 도중의 침묵 시간을 측정하여 당황 여부를 판단합니다.
     - **Noise Reduction & Normalization**: `noisereduce`로 화이트 노이즈를 제거하고, 오디오 볼륨을 일정 수준으로 증폭하여 인식률을 극대화합니다.
     - **성량 및 자신감 (RMS Energy)**: `Librosa`를 활용해 목소리 크기의 변화를 분석하여 자신감을 측정합니다.
