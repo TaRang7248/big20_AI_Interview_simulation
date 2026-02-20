@@ -136,8 +136,7 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 │       ├── stt_service.py       # 음성 인식 (Gemini Multimodal 적용) ★ [NEW]
 │       ├── tts_service.py       # 음성 합성
 │       └── video_analysis_service.py # MoveNet, DeepFace 영상 분석 로직
-├── static/                  # CSS, JS, 이미지 등 정적 파일
-├── templates/               # HTML 템플릿 파일
+├── static/                  # CSS, JS, HTML 등 정적 파일 (index.html, app.js, styles.css)
 ├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
 ├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
 ├── scripts/                 # 유틸리티 스크립트 (모델 다운로드, 환경 점검 등)
@@ -179,11 +178,42 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
     - `FFmpeg`가 설치되지 않은 환경에서도 서버가 중단되지 않도록 예외 처리(Fallback) 로직을 추가했습니다.
     - `check_env.py`를 통해 사용자가 손쉽게 실행 환경을 진단할 수 있습니다.
 - **오디오 로딩 및 처리 오류 수정 (Critical Fix)** **[NEW]**:
-    - **포맷 호환성 문제 해결**: `soundfile` 라이브러리가 `.webm` 저장을 지원하지 않아 발생하는 "No format specified" 오류를 해결하기 위해, 전처리된 중간 파일 포맷을 `.wav`로 변경했습니다.
-    - **오디오 로딩 안정성 강화**: `librosa.load`가 실패할 경우 `soundfile`로 직접 읽기를 시도하는 2중 안전장치(Fallback)를 구현하여 오디오 파일 로딩 성공률을 높였습니다.
-    - **FFmpeg 경로 자동 감지**: `C:\ffmpeg\bin` 경로를 자동으로 시스템 경로에 추가하여, FFmpeg 의존성이 있는 라이브러리들이 정상 작동하도록 보장합니다.
-- **무한 로딩 방지 시스템 도입 (Critical Update)** **[NEW]**:
-    - **API 타임아웃 적용**: Google Gemini 및 OpenAI API 호출 시 30초 타임아웃을 강제 적용하여, 네트워크 지연으로 인해 화면이 무한정 멈추는 현상을 원천 차단했습니다.
-    - **예외 처리 강화**: 답변 분석 중 예상치 못한 오류가 발생하더라도 사용자에게 명확한 에러 메시지를 표시하고, 다음 질문으로 안전하게 넘어갈 수 있도록 복구 로직을 구현했습니다.
+
+---
+
+## 8. 데이터 백업 및 복원 (데이터 이관)
+
+본 시뮬레이션은 데이터베이스에 저장된 면접 기록, 사용자 정보 등을 파일로 저장(내보내기)하고, 이를 다른 컴퓨터나 환경으로 복원(가져오기)할 수 있는 스크립트를 제공합니다.
+
+### 8.1 데이터 내보내기 (Export)
+현재 실행 중인 컨테이너 또는 로컬 데이터베이스의 데이터를 JSON 파일로 저장합니다.
+
+1. **실행 방법**:
+   ```bash
+   python scripts/export_db.py
+   ```
+2. **결과**:
+   - `data/interview_db_backup.json` 파일이 생성됩니다.
+   - 이 파일에는 사용자 정보, 면접 기록, 채점 결과 등이 포함됩니다.
+   - **주의**: 업로드된 파일(이력서, 오디오 등)은 `uploads` 폴더에 별도로 저장되므로, 이 폴더를 수동으로 복사해야 완벽한 백업이 가능합니다.
+
+### 8.2 데이터 가져오기 (Import)
+백업된 JSON 데이터를 새로운 데이터베이스에 복원합니다.
+
+1. **준비 사항**:
+   - `data/interview_db_backup.json` 파일을 새로운 환경의 `data` 폴더에 위치시킵니다.
+   - 데이터베이스가 실행 중이어야 합니다.
+2. **실행 방법**:
+   ```bash
+   python scripts/import_db.py
+   ```
+3. **결과**:
+   - 기존 데이터를 유지하면서 백업된 데이터를 추가합니다.
+   - 중복된 데이터(Primary Key 기준)는 무시하고 새로운 데이터만 추가됩니다 (ON CONFLICT DO NOTHING).
+
+### 8.3 데이터 이관 시 주의사항
+- **파일 이동**: 다른 컴퓨터로 이관할 경우, `data/interview_db_backup.json` 파일뿐만 아니라 `uploads/` 폴더 전체를 함께 이동시키는 것을 권장합니다.
+- **환경 변수**: `scripts/.env` 또는 프로젝트 루트의 `.env` 파일 설정(DB 접속 정보 등)이 올바른지 확인하세요.
+
 
 
