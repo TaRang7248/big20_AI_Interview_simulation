@@ -198,7 +198,10 @@ def transcribe_with_gemini(audio_path):
         만약 사람의 목소리가 전혀 들리지 않거나 침묵/백색소음만 있다면, 절대 내용을 지어내지 말고 오직 "답변 없음" 이라고만 출력하세요.
         문법 교정이나 요약을 하지 마세요.
         """
-        response = model.generate_content([prompt, audio_file])
+        response = model.generate_content(
+            [prompt, audio_file],
+            request_options={"timeout": 30}
+        )
         return response.text.strip()
     except Exception as e:
         logger.error(f"Gemini STT Error: {e}")
@@ -213,7 +216,8 @@ def transcribe_with_whisper(audio_path):
                 file=audio_file,
                 language="ko",
                 temperature=0.0,
-                prompt="이것은 한국어 면접 답변입니다. 사람의 목소리가 없다면 지어내지 마세요. 추임새가 있다면 포함해서 전사해주세요."
+                prompt="이것은 한국어 면접 답변입니다. 사람의 목소리가 없다면 지어내지 마세요. 추임새가 있다면 포함해서 전사해주세요.",
+                timeout=30
             )
         return transcript.text.strip()
     except Exception as e:

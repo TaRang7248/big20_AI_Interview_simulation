@@ -26,20 +26,29 @@ def get_model():
 
 def generate_content_with_retry(model, prompt, generation_config=None, max_retries=3):
     """
-    Helper function to generate content with retry logic for rate limits.
+    Helper function to generate content with retry logic for rate limits and timeouts.
     """
+    # Timeout settings (30 seconds for normal requests)
+    request_options = {"timeout": 30}
+
     for attempt in range(max_retries):
         try:
-            response = model.generate_content(prompt, generation_config=generation_config)
+            response = model.generate_content(
+                prompt, 
+                generation_config=generation_config,
+                request_options=request_options
+            )
             return response
         except ResourceExhausted:
-            wait_time = (2 ** attempt) + 1  # Exponential backoff + jitter-ish
+            wait_time = (2 ** attempt) + 1
             logger.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
         except Exception as e:
-            # If it's a blocked prompt or other safety issue, we might want to catch it specifically,
-            # but for now, re-raising is okay or handle gracefully.
-            raise e
+            logger.error(f"GenAI Error (Attempt {attempt+1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                raise e
+            time.sleep(1) # Short wait for other errors
+    
     raise ResourceExhausted("Max retries exceeded")
 
 def clean_json_string(json_str):

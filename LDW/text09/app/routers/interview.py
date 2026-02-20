@@ -249,7 +249,16 @@ async def submit_answer(
     except Exception as e:
         logger.error(f"Answer Submission Error: {e}")
         if conn: conn.close()
-        return {"success": False, "message": f"오류 발생: {str(e)}"}
+        # Return a valid JSON even on error so frontend loading stops
+        return {
+            "success": False, 
+            "message": f"시스템 오류가 발생했습니다. (Error: {str(e)})",
+            "next_question": "오류가 발생하여 다음 질문으로 넘어갑니다.",
+            "audio_url": None,
+            "transcript": "오류 발생",
+            "interview_finished": False,
+            "session_name": "ErrorSession"
+        }
 
 @router.post("/upload/resume")
 async def upload_resume(resume: UploadFile = File(...), id_name: str = Form(...), job_title: str = Form(...)):
