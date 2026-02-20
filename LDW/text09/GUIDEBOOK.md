@@ -175,9 +175,10 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 - **오디오 처리 안정성 강화** **[NEW]**: 
     - `FFmpeg`가 설치되지 않은 환경에서도 서버가 중단되지 않도록 예외 처리(Fallback) 로직을 추가했습니다.
     - `check_env.py`를 통해 사용자가 손쉽게 실행 환경을 진단할 수 있습니다.
-- **오디오 로딩 오류 수정 (Hotfix)** **[NEW]**:
-    - "Failed to load audio for analysis" 오류 해결을 위해 FFmpeg 자동 경로(`C:\ffmpeg\bin`) 주입 로직을 추가했습니다.
-    - `stt_service.py`에 오디오 전처리 실패 시 상세 로그를 남기도록 개선하여 디버깅을 용이하게 했습니다.
-    - `server.py`를 리팩토링하여 불필요한 코드를 제거하고 서버 실행 안정성을 높였습니다.
+- **오디오 로딩 및 처리 오류 수정 (Critical Fix)** **[NEW]**:
+    - **포맷 호환성 문제 해결**: `soundfile` 라이브러리가 `.webm` 저장을 지원하지 않아 발생하는 "No format specified" 오류를 해결하기 위해, 전처리된 중간 파일 포맷을 `.wav`로 변경했습니다.
+    - **오디오 로딩 안정성 강화**: `librosa.load`가 실패할 경우 `soundfile`로 직접 읽기를 시도하는 2중 안전장치(Fallback)를 구현하여 오디오 파일 로딩 성공률을 높였습니다.
+    - **FFmpeg 경로 자동 감지**: `C:\ffmpeg\bin` 경로를 자동으로 시스템 경로에 추가하여, FFmpeg 의존성이 있는 라이브러리들이 정상 작동하도록 보장합니다.
+    - **서버 최적화**: `server.py`를 리팩토링하여 서버 실행 및 브라우저 자동 실행 기능에만 집중하도록 경량화했습니다.
 
 

@@ -35,11 +35,26 @@ def preprocess_audio(input_path):
     try:
         # Load audio
         # NOTE: librosa.load might fail if ffmpeg is not installed, especially for webm
-        y, sr = librosa.load(input_path, sr=None)
-        
+        # explicit sr=None to preserve sampling rate
+        try:
+            y, sr = librosa.load(input_path, sr=None)
+        except Exception as load_err:
+            logger.warning(f"Librosa load failed: {load_err}. Trying soundfile direct read...")
+            try:
+                data, samplerate = sf.read(input_path)
+                y = data.T if data.ndim > 1 else data
+                sr = samplerate
+            except Exception as sf_err:
+                logger.error(f"Soundfile read also failed: {sf_err}")
+                raise load_err
+
         # 1. Noise Reduction
         # Prop_decrease=0.8 means 80% noise reduction (aggressive but preserves speech)
-        y_reduced = nr.reduce_noise(y=y, sr=sr, prop_decrease=0.8)
+        try:
+            y_reduced = nr.reduce_noise(y=y, sr=sr, prop_decrease=0.8)
+        except Exception as nr_err:
+            logger.warning(f"Noise reduction failed: {nr_err}. Using original audio.")
+            y_reduced = y
         
         # 2. Normalization
         # Normalize to -3dB
@@ -50,13 +65,14 @@ def preprocess_audio(input_path):
             y_norm = y_reduced
             
         # Save processed file
-        base, ext = os.path.splitext(input_path)
-        output_path = f"{base}_processed{ext}"
+        # CHANGE: Use .wav for processed file to avoid soundfile format errors with .webm
+        base, _ = os.path.splitext(input_path)
+        output_path = f"{base}_processed.wav"
+        
+        # Explicitly specify format/subtype if needed, but WAV is usually safe default
         sf.write(output_path, y_norm, sr)
         
         logger.info(f"Audio preprocessed: {output_path}")
-        return output_path, y_norm, sr
-    except Exception as e:
         return output_path, y_norm, sr
     except Exception as e:
         logger.error(f"Preprocessing Critical Error: {e}")
