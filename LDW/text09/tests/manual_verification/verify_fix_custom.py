@@ -8,6 +8,9 @@ import soundfile as sf
 import warnings
 warnings.filterwarnings("ignore")
 
+# Add project root to path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

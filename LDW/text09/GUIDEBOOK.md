@@ -43,12 +43,12 @@ pip install -r requirements.txt
 1. [FFmpeg 다운로드](https://www.gyan.dev/ffmpeg/builds/) 후 압축 해제
 2. `bin` 폴더가 포함된 폴더를 `C:\ffmpeg` 로 이동 (즉, `C:\ffmpeg\bin\ffmpeg.exe` 가 되도록 설정)
 3. **[자동 설정]** 본 시뮬레이션은 `C:\ffmpeg\bin` 경로를 자동으로 감지하여 시스템 경로에 추가합니다. 별도의 환경 변수 설정 없이도 `C:\ffmpeg` 위치에만 넣어두면 작동합니다.
-4. 설치 확인: 포함된 `verify_ffmpeg_fix.py`를 실행하여 `[Success]` 메시지가 나오는지 확인하세요.
+4. 설치 확인: 포함된 `tests/manual_verification/verify_ffmpeg_fix.py`를 실행하여 `[Success]` 메시지가 나오는지 확인하세요.
 
 ### 1-2단계: 환경 점검
 설치가 잘 되었는지 확인하기 위해 검증 스크립트를 실행합니다.
 ```bash
-python check_env.py
+python scripts/check_env.py
 ```
 
 ### 2단계: 서버 실행
@@ -140,11 +140,15 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── templates/               # HTML 템플릿 파일
 ├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
 ├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
-├── check_env.py             # [NEW] 실행 환경(라이브러리, FFmpeg) 점검 스크립트
-├── verify_fix.py            # [NEW] 오디오 처리 로직 검증 스크립트
-├── scripts/                 # 유틸리티 스크립트 (모델 다운로드 등)
+├── scripts/                 # 유틸리티 스크립트 (모델 다운로드, 환경 점검 등)
+│   ├── check_env.py         # [Moved] 실행 환경(라이브러리, FFmpeg) 점검 스크립트
+│   └── export_db.py         # [Moved] DB 백업 스크립트
 ├── models/                  # AI 모델 저장소
 ├── tests/                   # 테스트 코드
+│   ├── manual_verification/ # [NEW] 기능별 단위 검증 스크립트 모음
+│   │   ├── verify_fix.py    # 오디오 처리 로직 검증
+│   │   ├── verify_stt_pipeline.py
+│   │   └── ...
 │   └── test_gemini_integration.py # Gemini 연동 검증 스크립트
 ├── Dockerfile               # 도커 이미지 빌드 설정 파일
 └── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
@@ -157,7 +161,7 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 - **음성 인식(STT) 강화**: Gemini Multimodal 기능을 활용하여 음성 파일의 유효성을 검사하고, 인식 실패 시 재시도하거나 명확한 에러 메시지를 반환하도록 개선했습니다.
 - **질문 생성 로직 개선**: Gemini 2.0 Flash의 JSON 출력 안정성을 확보하기 위해 마크다운 정리 로직(`clean_json_string`)과 재시도 메커니즘을 추가했습니다.
 - **Rate Limit 대응**: 무료 등급 사용 시 발생할 수 있는 할당량 초과(429 Error)에 대비하여 지수 백오프(Exponential Backoff) 기반의 재시도 로직을 구현했습니다.
-- **테스트 스크립트 추가**: `scripts/test_stt_gemini.py` 및 `scripts/test_llm_gemini.py`를 통해 각 기능을 독립적으로 검증할 수 있습니다.
+- **테스트 스크립트 정리**: `scripts/check_env.py` 및 `tests/manual_verification/` 하위 스크립트를 통해 각 기능을 독립적으로 검증할 수 있습니다.
 - **오디오 파일 저장 개선**: 면접 답변 음성 파일의 이름을 `YYYY-MM-DD-HH-MM-SS-{면접세션명}.webm` 형식으로 저장하여, 언제 어떤 면접에서 녹음된 파일인지 쉽게 식별할 수 있도록 개선했습니다.
 - **STT 교차 검증 시스템 도입**: **Google Gemini (Multimodal)**와 **OpenAI Whisper**를 동시에 사용하여 음성 인식 정확도를 획기적으로 높였습니다. 두 모델의 인식 결과가 **95% 이상 일치(Levenshtein Distance)**할 경우에만 Gemini 결과를 채택하고, 그렇지 않을 경우 더 안정적인 Whisper 결과를 1순위로 사용하여 환각(Hallucination) 현상을 최소화했습니다.
 - **비디오 심층 분석 통합**: `uploads/audio` 폴더에 저장된 `.webm` 영상 파일을 면접 종료 시 자동으로 스캔하여 **OpenCV**, **MoveNet Thunder**, **DeepFace**로 정밀 분석합니다. 프레임 단위로 감정과 자세를 분석하여 최종 태도/인성 평가에 반영합니다.

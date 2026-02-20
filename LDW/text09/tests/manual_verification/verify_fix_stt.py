@@ -5,7 +5,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 # Add parent directory to path
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 # Mock configurations/dependencies to avoid loading actual models
 with patch('app.services.stt_service.genai') as mock_genai, \
