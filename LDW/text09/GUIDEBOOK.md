@@ -141,15 +141,13 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
 ├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
 ├── scripts/                 # 유틸리티 스크립트 (모델 다운로드, 환경 점검 등)
-│   ├── check_env.py         # [Moved] 실행 환경(라이브러리, FFmpeg) 점검 스크립트
-│   └── export_db.py         # [Moved] DB 백업 스크립트
+│   ├── check_env.py         # 실행 환경(라이브러리, FFmpeg) 점검 스크립트
+│   ├── export_db.py         # DB 백업 스크립트
+│   └── ...                  # 기타 마이그레이션 및 관리 스크립트
 ├── models/                  # AI 모델 저장소
 ├── tests/                   # 테스트 코드
-│   ├── manual_verification/ # [NEW] 기능별 단위 검증 스크립트 모음
-│   │   ├── verify_fix.py    # 오디오 처리 로직 검증
-│   │   ├── verify_stt_pipeline.py
-│   │   └── ...
-│   └── test_gemini_integration.py # Gemini 연동 검증 스크립트
+│   ├── manual_verification/ # 기능별 단위 검증 스크립트 모음
+│   └── ...                  # API 및 통합 테스트
 ├── Dockerfile               # 도커 이미지 빌드 설정 파일
 └── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
 ```
