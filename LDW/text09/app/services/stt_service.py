@@ -218,10 +218,28 @@ def transcribe_with_whisper(audio_path):
                 file=audio_file,
                 language="ko",
                 temperature=0.0,
-                prompt="이것은 한국어 면접 답변입니다. 사람의 목소리가 없다면 지어내지 마세요. 들리는 내용대로 똑같이 적어주세요. 들리는 내용을 마음대로 생략하지 마시고 똑같이 들리는 대로 적어주세요.",
+                prompt="이것은 한국어 면접 답변입니다. 사람의 목소리가 없다면 지어내지 마세요. 들리는 내용대로 똑같이 적어주세요.",
                 timeout=30
             )
-        return transcript.text.strip()
+        text = transcript.text.strip()
+        
+        # Whisper Hallucination Filter
+        hallucinations = [
+            "이것은 한국어 면접 답변입니다",
+            "사람의 목소리가 없다면 지어내지 마세요",
+            "들리는 내용대로 똑같이 적어주세요",
+            "MBC 뉴스",
+            "시청해주셔서 감사합니다",
+            "구독과 좋아요",
+            "9시 뉴스"
+        ]
+        
+        for h in hallucinations:
+            if h in text:
+                logger.info(f"Whisper Hallucination detected: {text}")
+                return None # Treat as silence
+                
+        return text
     except Exception as e:
         logger.error(f"Whisper STT Error: {e}")
         return None
@@ -266,6 +284,10 @@ def select_best_transcript(gemini_text, whisper_text, audio_context_prompt=""):
         
     except Exception:
         # Fallback to longer one
+        # BUT check if one is "답변 없음" or None (effectively)
+        if not gemini_text: return whisper_text
+        if not whisper_text: return gemini_text
+        
         return gemini_text if len(gemini_text) > len(whisper_text) else whisper_text
 
 # ---------------------------------------------------------
