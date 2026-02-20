@@ -20,6 +20,7 @@
 - **Python 버전**: Python 3.10 이상 권장
 - **브라우저**: Chrome, Edge 등 최신 웹 브라우저
 - **웹캠**: 영상 분석을 위한 필수 하드웨어
+- **FFmpeg**: 오디오/비디오 처리를 위한 필수 라이브러리 (미설치 시 일부 분석 기능 제한)
 
 ---
 
@@ -35,6 +36,19 @@ venv\Scripts\activate
 
 # 필수 패키지 설치
 pip install -r requirements.txt
+```
+
+### 1-1단계: FFmpeg 설치 (필수)
+`librosa` 및 오디오 분석 기능을 위해 **FFmpeg**가 필요합니다.
+1. [FFmpeg 다운로드](https://www.gyan.dev/ffmpeg/builds/) 후 압축 해제
+2. `bin` 폴더가 포함된 폴더를 `C:\ffmpeg` 로 이동 (즉, `C:\ffmpeg\bin\ffmpeg.exe` 가 되도록 설정)
+3. **[자동 설정]** 본 시뮬레이션은 `C:\ffmpeg\bin` 경로를 자동으로 감지하여 시스템 경로에 추가합니다. 별도의 환경 변수 설정 없이도 `C:\ffmpeg` 위치에만 넣어두면 작동합니다.
+4. 설치 확인: 포함된 `verify_ffmpeg_fix.py`를 실행하여 `[Success]` 메시지가 나오는지 확인하세요.
+
+### 1-2단계: 환경 점검
+설치가 잘 되었는지 확인하기 위해 검증 스크립트를 실행합니다.
+```bash
+python check_env.py
 ```
 
 ### 2단계: 서버 실행
@@ -126,6 +140,8 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── templates/               # HTML 템플릿 파일
 ├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
 ├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
+├── check_env.py             # [NEW] 실행 환경(라이브러리, FFmpeg) 점검 스크립트
+├── verify_fix.py            # [NEW] 오디오 처리 로직 검증 스크립트
 ├── scripts/                 # 유틸리티 스크립트 (모델 다운로드 등)
 ├── models/                  # AI 모델 저장소
 ├── tests/                   # 테스트 코드
@@ -145,5 +161,23 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 - **오디오 파일 저장 개선**: 면접 답변 음성 파일의 이름을 `YYYY-MM-DD-HH-MM-SS-{면접세션명}.webm` 형식으로 저장하여, 언제 어떤 면접에서 녹음된 파일인지 쉽게 식별할 수 있도록 개선했습니다.
 - **STT 교차 검증 시스템 도입**: **Google Gemini (Multimodal)**와 **OpenAI Whisper**를 동시에 사용하여 음성 인식 정확도를 획기적으로 높였습니다. 두 모델의 인식 결과가 **95% 이상 일치(Levenshtein Distance)**할 경우에만 Gemini 결과를 채택하고, 그렇지 않을 경우 더 안정적인 Whisper 결과를 1순위로 사용하여 환각(Hallucination) 현상을 최소화했습니다.
 - **비디오 심층 분석 통합**: `uploads/audio` 폴더에 저장된 `.webm` 영상 파일을 면접 종료 시 자동으로 스캔하여 **OpenCV**, **MoveNet Thunder**, **DeepFace**로 정밀 분석합니다. 프레임 단위로 감정과 자세를 분석하여 최종 태도/인성 평가에 반영합니다.
+- **오디오 심층 분석 시스템 (Audio Deep Analysis)** **[NEW]**: 지원자의 목소리 데이터를 정밀 분석하여 비언어적 요소를 평가에 반영합니다.
+    - **무음(Silence) 길이 측정**: 답변 도중의 침묵 시간을 측정하여 당황 여부를 판단합니다.
+    - **Noise Reduction & Normalization**: `noisereduce`로 화이트 노이즈를 제거하고, 오디오 볼륨을 일정 수준으로 증폭하여 인식률을 극대화합니다.
+    - **성량 및 자신감 (RMS Energy)**: `Librosa`를 활용해 목소리 크기의 변화를 분석하여 자신감을 측정합니다.
+    - **목소리 떨림 (Pitch Jitter & Shimmer)**: `Parselmouth`를 사용하여 목소리의 미세한 떨림과 진폭 변동을 수치화해 긴장도를 분석합니다.
+    - **말하기 속도 (Speech Rate)**: 전사된 글자 수와 시간을 비교하여 말이 너무 빠르거나 느린지 판단합니다.
+- **STT 전사 로직 고도화** **[NEW]**:
+    - `Whisper`와 `Gemini` 모두 **Temperature 0.0**으로 설정하여 일관성을 확보했습니다.
+    - "음...", "어..." 같은 텍스트를 일부러 보존하도록 프롬프트를 강화하여 비언어적 습관까지 파악할 수 있게 했습니다.
+    - **스마트 선택 로직**: 두 STT 모델의 결과 유사도가 낮을 경우(< 95%), LLM이 오디오 맥락상 더 자연스러운 텍스트를 스스로 판단하여 선택합니다.
+    - **안정성 강화 (Bug Fix)**: 오디오 전처리 과정에서 오류가 발생하더라도 면접이 중단되지 않도록 예외 처리 로직을 강화했습니다. 특히 `librosa` 라이브러리의 오디오 길이 분석 시 발생할 수 있는 충돌을 방지하여 안정적인 답변 제출이 가능합니다.
+- **오디오 처리 안정성 강화** **[NEW]**: 
+    - `FFmpeg`가 설치되지 않은 환경에서도 서버가 중단되지 않도록 예외 처리(Fallback) 로직을 추가했습니다.
+    - `check_env.py`를 통해 사용자가 손쉽게 실행 환경을 진단할 수 있습니다.
+- **오디오 로딩 오류 수정 (Hotfix)** **[NEW]**:
+    - "Failed to load audio for analysis" 오류 해결을 위해 FFmpeg 자동 경로(`C:\ffmpeg\bin`) 주입 로직을 추가했습니다.
+    - `stt_service.py`에 오디오 전처리 실패 시 상세 로그를 남기도록 개선하여 디버깅을 용이하게 했습니다.
+    - `server.py`를 리팩토링하여 불필요한 코드를 제거하고 서버 실행 안정성을 높였습니다.
 
 

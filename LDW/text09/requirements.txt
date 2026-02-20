@@ -52,6 +52,9 @@ easyocr
 # --- Audio / STT pipeline helpers ---
 soundfile
 librosa
+noisereduce
+praat-parselmouth
+numpy
 deepgram-sdk
 pyaudio
 

@@ -146,8 +146,18 @@ async def submit_answer(
         with open(audio_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
             
-        # 3. STT (Whisper)
-        applicant_answer = transcribe_audio(audio_path)
+        # 3. STT (Whisper + Gemini + Analysis)
+        stt_result = transcribe_audio(audio_path)
+        
+        # Handle new dict return format
+        if isinstance(stt_result, dict):
+            applicant_answer = stt_result.get("text", "")
+            audio_analysis = stt_result.get("analysis", {})
+            logger.info(f"Audio Analysis: {audio_analysis}")
+        else:
+            # Fallback for legacy return
+            applicant_answer = str(stt_result)
+            audio_analysis = None
         
         # 4. Determine Question Phase
         c.execute("SELECT COUNT(*) FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
@@ -185,7 +195,8 @@ async def submit_answer(
             next_phase, 
             resume_summary, 
             ref_questions,
-            history_questions  # Pass history
+            history_questions,  # Pass history
+            audio_analysis=audio_analysis # Pass analysis
         )
 
         # --- NEW: Append Video Analysis Summary ---
