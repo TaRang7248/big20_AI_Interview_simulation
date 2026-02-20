@@ -16,8 +16,8 @@ export default function LoginPage_yyr() {
                 <div className="flex gap-2 mb-6">
                     <button
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-bold border ${mode === "login"
-                                ? "bg-gray-900 text-white border-gray-900"
-                                : "bg-white text-gray-700 border-gray-200"
+                            ? "bg-gray-900 text-white border-gray-900"
+                            : "bg-white text-gray-700 border-gray-200"
                             }`}
                         onClick={() => setMode("login")}
                     >
@@ -26,8 +26,8 @@ export default function LoginPage_yyr() {
 
                     <button
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-bold border ${mode === "signup"
-                                ? "bg-gray-900 text-white border-gray-900"
-                                : "bg-white text-gray-700 border-gray-200"
+                            ? "bg-gray-900 text-white border-gray-900"
+                            : "bg-white text-gray-700 border-gray-200"
                             }`}
                         onClick={() => setMode("signup")}
                     >

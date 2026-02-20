@@ -24,12 +24,13 @@ export default function AdminPage_yyr() {
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 space-y-3">
                     <h2 className="text-lg font-bold text-gray-900">빠른 링크</h2>
 
-                    <Link
-                        to={`/admin/results/${sampleThreadId}`}
+                    <button
+                        type="button"
+                        onClick={() => window.open(`/result.html?session_id=1`, "_blank", "noopener,noreferrer")}
                         className="inline-block px-4 py-2 rounded-lg bg-blue-600 text-white font-bold hover:bg-blue-700"
                     >
-                        샘플 결과 보기
-                    </Link>
+                        샘플 결과 보기(레이더)
+                    </button>
 
                     <div className="text-xs text-gray-500">
                         나중에 여기에 “최근 thread 목록”, “검색”, “통계”, “사용자별 히스토리”를 붙이면 됨.

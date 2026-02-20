@@ -58,8 +58,8 @@ export default function ResultRoutePage_yyr() {
             <div className="min-h-screen bg-gray-100 flex items-center justify-center p-6">
                 <div className="text-center space-y-3">
                     <p className="text-red-600 font-semibold">{errorMsg}</p>
-                    <Link to="/" className="text-blue-600 font-bold hover:underline">
-                        ← 메인으로 돌아가기
+                    <Link to="/interview" className="text-blue-600 font-bold hover:underline">
+                        ← 면접 화면으로 돌아가기
                     </Link>
                 </div>
             </div>
@@ -75,8 +75,8 @@ export default function ResultRoutePage_yyr() {
                         <p className="text-sm text-gray-500 mt-1">thread_id: {threadId}</p>
                     </div>
 
-                    <Link to="/" className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-bold hover:bg-black">
-                        메인으로
+                    <Link to="/interview" className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-bold hover:bg-black">
+                        면접으로
                     </Link>
                 </div>
 

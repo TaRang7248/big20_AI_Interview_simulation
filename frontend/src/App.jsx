@@ -4,6 +4,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 
 import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
 import LoginPage_yyr from "./pages_yyr/LoginPage_yyr";
+import AdminPage_yyr from "./pages_yyr/AdminPage_yyr";
 
 import axios from 'axios';
 import WebcamView from './components/WebcamView';
@@ -11,19 +12,6 @@ import AudioRecorder from './components/AudioRecorder';
 import { FaFileUpload, FaCheckCircle, FaChartBar, FaTimes } from 'react-icons/fa';
 import ResultPage from "./pages_yyr/ResultPage_yyr";
 import RequireAuth_yyr from "./pages_yyr/RequireAuth_yyr";
-
-// 2.19 16:29PM까지의 import
-// import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
-// import React, { useState, useEffect, useRef } from 'react';
-// import { Routes, Route } from "react-router-dom";
-// // import { Routes, Route, useParams } from "react-router-dom"; // ✅ 추가 (2.19추가) -> ResultRoute파일생성으로다시삭제
-// import axios from 'axios';
-// import WebcamView from './components/WebcamView';
-// import AudioRecorder from './components/AudioRecorder';
-// import { FaFileUpload, FaCheckCircle, FaChartBar, FaTimes } from 'react-icons/fa'; // 아이콘 추가
-// import ResultPage from "./pages_yyr/ResultPage_yyr"; // yyr추가
-// import LoginPage_yyr from "./pages_yyr/LoginPage_yyr"; // ✅ 추가 (2.19추가)
-// import { Routes, Route, Navigate } from "react-router-dom"; // ✅ 추가 (2.19추가)
 
 // 백엔드 주소
 // NOTE:
@@ -133,26 +121,6 @@ function App() {
     }
   };
 
-  // // [신규] 리포트 생성 및 조회 함수
-  // const handleEndInterview = async () => {
-  //   if (!window.confirm("면접을 종료하고 결과를 확인하시겠습니까?")) return;
-
-  //   setLoadingReport(true);
-  //   setShowReport(true); // 모달 열기
-
-  //   try {
-  //     // 리포트 생성 API 호출
-  //     const response = await axios.post(`${API_BASE_URL}/report/${SESSION_ID}`);
-  //     setReportData(response.data);
-  //   } catch (error) {
-  //     console.error("리포트 생성 실패:", error);
-  //     alert("리포트를 불러오는 중 오류가 발생했습니다.");
-  //     setShowReport(false);
-  //   } finally {
-  //     setLoadingReport(false);
-  //   }
-  // };
-
   // [신규] 리포트 생성 및 조회 함수
   const handleEndInterview = async () => {
     if (!window.confirm("면접을 종료하고 결과를 확인하시겠습니까?")) return;
@@ -190,9 +158,14 @@ function App() {
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage_yyr />} />
+      <Route path="/admin" element={<AdminPage_yyr />} />
       {/* ✅ B: 단독 결과 페이지 (주소로 접근) */}
       <Route
         path="/result/:threadId"
+        element={<ResultRoutePage_yyr />}
+      />
+      <Route
+        path="/admin/result/:threadId"
         element={<ResultRoutePage_yyr />}
       />
       {/* ✅ A: 기존 메인 화면 (모달 포함) */}
