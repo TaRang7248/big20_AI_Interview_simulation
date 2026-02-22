@@ -15,7 +15,7 @@ from langchain_core.messages import HumanMessage
 
 # 프로젝트 모듈 임포트
 from YJH.agents.interview_graph import app as interview_graph
-from YJH.services.voice_service import transcribe_audio
+from YYR.services.voice_service import transcribe_audio
 from YJH.services.tts_service import generate_audio
 from YJH.database import get_db, SessionLocal
 # [수정] EvaluationReport 모델 추가 임포트
@@ -248,7 +248,7 @@ async def create_report_endpoint(thread_id: str):
 if __name__ == "__main__":
     import uvicorn
     # 모든 IP 허용, 포트 8001
-    uvicorn.run("YJH.main_yjh:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run("YYR.main_yjh:app", host="0.0.0.0", port=8001, reload=True)
 
 
 
