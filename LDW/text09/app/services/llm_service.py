@@ -26,20 +26,29 @@ def get_model():
 
 def generate_content_with_retry(model, prompt, generation_config=None, max_retries=3):
     """
-    Helper function to generate content with retry logic for rate limits.
+    Helper function to generate content with retry logic for rate limits and timeouts.
     """
+    # Timeout settings (30 seconds for normal requests)
+    request_options = {"timeout": 30}
+
     for attempt in range(max_retries):
         try:
-            response = model.generate_content(prompt, generation_config=generation_config)
+            response = model.generate_content(
+                prompt, 
+                generation_config=generation_config,
+                request_options=request_options
+            )
             return response
         except ResourceExhausted:
-            wait_time = (2 ** attempt) + 1  # Exponential backoff + jitter-ish
+            wait_time = (2 ** attempt) + 1
             logger.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
             time.sleep(wait_time)
         except Exception as e:
-            # If it's a blocked prompt or other safety issue, we might want to catch it specifically,
-            # but for now, re-raising is okay or handle gracefully.
-            raise e
+            logger.error(f"GenAI Error (Attempt {attempt+1}/{max_retries}): {e}")
+            if attempt == max_retries - 1:
+                raise e
+            time.sleep(1) # Short wait for other errors
+    
     raise ResourceExhausted("Max retries exceeded")
 
 def clean_json_string(json_str):
@@ -180,7 +189,7 @@ def summarize_resume(text):
         logger.error(f"Resume Summary Error: {e}")
         return text[:1000] # Fallback to truncation
 
-def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None, history_questions=None):
+def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None, history_questions=None, audio_analysis=None):
     """
     Evaluates the applicant's answer and generates the next question or closing remark.
     Enhanced to use Resume Summary and Reference Questions from Pool.
@@ -218,8 +227,7 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
             
         ref_context = ""
         if ref_questions:
-            # Join top 3-5 questions
-            ref_questions_list = list(ref_questions) # ensure list
+            ref_questions_list = list(ref_questions)
             # Avoid error if ref_questions has integers or other types
             ref_q_text = "\\n".join([f"- {str(q)}" for q in ref_questions_list[:5]])
             ref_context = f"""
@@ -229,7 +237,6 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
 
         history_context = ""
         if history_questions:
-            # Join previous questions
             history_questions_list = list(history_questions)
             hist_text = "\\n".join([f"- {str(q)}" for q in history_questions_list])
             history_context = f"""
@@ -237,6 +244,20 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
             {hist_text}
             
             ※ 주의: 위 [이미 질문한 내역]에 있는 질문들과 의미가 유사하거나 겹치는 질문은 절대로 다시 하지 마세요. 새로운 관점이나 더 깊이 있는 질문을 해주세요.
+            """
+
+        analysis_context = ""
+        if audio_analysis:
+            analysis_context = f"""
+            [오디오/비언어적 분석 데이터 (참고용)]
+            - 목소리 떨림(Jitter): {audio_analysis.get('pitch_jitter', 0)}% (높을수록 떨림, 1.0% 이상이면 불안정)
+            - 목소리 진폭 변동(Shimmer): {audio_analysis.get('pitch_shimmer', 0)}% (높을수록 성량 불안정, 3.8% 이상이면 불안정)
+            - 말하기 속도: {audio_analysis.get('speech_rate', 0)} 음절/초 (피드백: {audio_analysis.get('speed_feedback', '알수없음')})
+            - 무음(침묵) 시간: {audio_analysis.get('silence_duration', 0)}초
+            - 자신감 점수: {audio_analysis.get('confidence_score', 0)} / 100
+            
+            ※ 평가 시 위 데이터를 참고하여 지원자의 태도(자신감, 긴장도, 전달력)를 구체적으로 평가에 반영해주세요. 
+            예: "목소리 떨림이 감지되어 긴장한 것으로 보이나...", "말하기 속도가 침착하여..."
             """
 
         prompt = f"""
@@ -248,6 +269,7 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         {resume_context}
         {ref_context}
         {history_context}
+        {analysis_context}
 
         [이전 질문]
         {prev_question}
@@ -258,7 +280,8 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         [작업 1] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
         - 만약 답변이 "답변 없음"이라면, "답변을 하지 않았습니다."라고 평가하고 점수를 매우 낮게(0-10점 사이) 책정하세요.
         - 답변이 중단되었거나 불완전하더라도 지금까지 말한 음성 답변만으로 최선을 다해 평가하세요.
-        
+        - [오디오/비언어적 분석 데이터]가 있다면 이를 적극적으로 해석하여 태도 점수에 반영하세요.
+                
         [작업 2] 다음 질문을 생성해주세요.
         - 다음 단계([{next_phase}])에 맞는 질문이어야 합니다.
         - [지원자 이력서 요약]이 있다면, 해당 내용을 검증하거나 구체적인 경험을 묻는 질문을 우선적으로 생성하세요.

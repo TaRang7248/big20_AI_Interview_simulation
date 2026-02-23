@@ -20,6 +20,7 @@
 - **Python 버전**: Python 3.10 이상 권장
 - **브라우저**: Chrome, Edge 등 최신 웹 브라우저
 - **웹캠**: 영상 분석을 위한 필수 하드웨어
+- **FFmpeg**: 오디오/비디오 처리를 위한 필수 라이브러리 (미설치 시 일부 분석 기능 제한)
 
 ---
 
@@ -35,6 +36,19 @@ venv\Scripts\activate
 
 # 필수 패키지 설치
 pip install -r requirements.txt
+```
+
+### 1-1단계: FFmpeg 설치 (필수)
+`librosa` 및 오디오 분석 기능을 위해 **FFmpeg**가 필요합니다.
+1. [FFmpeg 다운로드](https://www.gyan.dev/ffmpeg/builds/) 후 압축 해제
+2. `bin` 폴더가 포함된 폴더를 `C:\ffmpeg` 로 이동 (즉, `C:\ffmpeg\bin\ffmpeg.exe` 가 되도록 설정)
+3. **[자동 설정]** 본 시뮬레이션은 `C:\ffmpeg\bin` 경로를 자동으로 감지하여 시스템 경로에 추가합니다. 별도의 환경 변수 설정 없이도 `C:\ffmpeg` 위치에만 넣어두면 작동합니다.
+4. 설치 확인: 포함된 `tests/manual_verification/verify_ffmpeg_fix.py`를 실행하여 `[Success]` 메시지가 나오는지 확인하세요.
+
+### 1-2단계: 환경 점검
+설치가 잘 되었는지 확인하기 위해 검증 스크립트를 실행합니다.
+```bash
+python scripts/check_env.py
 ```
 
 ### 2단계: 서버 실행
@@ -122,14 +136,17 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 │       ├── stt_service.py       # 음성 인식 (Gemini Multimodal 적용) ★ [NEW]
 │       ├── tts_service.py       # 음성 합성
 │       └── video_analysis_service.py # MoveNet, DeepFace 영상 분석 로직
-├── static/                  # CSS, JS, 이미지 등 정적 파일
-├── templates/               # HTML 템플릿 파일
+├── static/                  # CSS, JS, HTML 등 정적 파일 (index.html, app.js, styles.css)
 ├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
 ├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
-├── scripts/                 # 유틸리티 스크립트 (모델 다운로드 등)
+├── scripts/                 # 유틸리티 스크립트 (모델 다운로드, 환경 점검 등)
+│   ├── check_env.py         # 실행 환경(라이브러리, FFmpeg) 점검 스크립트
+│   ├── export_db.py         # DB 백업 스크립트
+│   └── ...                  # 기타 마이그레이션 및 관리 스크립트
 ├── models/                  # AI 모델 저장소
 ├── tests/                   # 테스트 코드
-│   └── test_gemini_integration.py # Gemini 연동 검증 스크립트
+│   ├── manual_verification/ # 기능별 단위 검증 스크립트 모음
+│   └── ...                  # API 및 통합 테스트
 ├── Dockerfile               # 도커 이미지 빌드 설정 파일
 └── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
 ```
@@ -141,9 +158,62 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 - **음성 인식(STT) 강화**: Gemini Multimodal 기능을 활용하여 음성 파일의 유효성을 검사하고, 인식 실패 시 재시도하거나 명확한 에러 메시지를 반환하도록 개선했습니다.
 - **질문 생성 로직 개선**: Gemini 2.0 Flash의 JSON 출력 안정성을 확보하기 위해 마크다운 정리 로직(`clean_json_string`)과 재시도 메커니즘을 추가했습니다.
 - **Rate Limit 대응**: 무료 등급 사용 시 발생할 수 있는 할당량 초과(429 Error)에 대비하여 지수 백오프(Exponential Backoff) 기반의 재시도 로직을 구현했습니다.
-- **테스트 스크립트 추가**: `scripts/test_stt_gemini.py` 및 `scripts/test_llm_gemini.py`를 통해 각 기능을 독립적으로 검증할 수 있습니다.
+- **테스트 스크립트 정리**: `scripts/check_env.py` 및 `tests/manual_verification/` 하위 스크립트를 통해 각 기능을 독립적으로 검증할 수 있습니다.
 - **오디오 파일 저장 개선**: 면접 답변 음성 파일의 이름을 `YYYY-MM-DD-HH-MM-SS-{면접세션명}.webm` 형식으로 저장하여, 언제 어떤 면접에서 녹음된 파일인지 쉽게 식별할 수 있도록 개선했습니다.
 - **STT 교차 검증 시스템 도입**: **Google Gemini (Multimodal)**와 **OpenAI Whisper**를 동시에 사용하여 음성 인식 정확도를 획기적으로 높였습니다. 두 모델의 인식 결과가 **95% 이상 일치(Levenshtein Distance)**할 경우에만 Gemini 결과를 채택하고, 그렇지 않을 경우 더 안정적인 Whisper 결과를 1순위로 사용하여 환각(Hallucination) 현상을 최소화했습니다.
 - **비디오 심층 분석 통합**: `uploads/audio` 폴더에 저장된 `.webm` 영상 파일을 면접 종료 시 자동으로 스캔하여 **OpenCV**, **MoveNet Thunder**, **DeepFace**로 정밀 분석합니다. 프레임 단위로 감정과 자세를 분석하여 최종 태도/인성 평가에 반영합니다.
+- **오디오 심층 분석 시스템 (Audio Deep Analysis)** **[NEW]**: 지원자의 목소리 데이터를 정밀 분석하여 비언어적 요소를 평가에 반영합니다.
+    - **초고속 무음 감지 (RMS & VAD)**: 전체 오디오의 에너지(RMS)와 사람 목소리 비율(WebRTC VAD)을 0.01초 내에 분석하여, 의미 없는 침묵이나 백색 소음만 있는 경우 즉시 "답변 없음"으로 처리합니다. 불필요한 STT 비용을 절감하고 빠른 피드백을 제공합니다.
+    - **무음(Silence) 길이 측정**: 답변 도중의 침묵 시간을 측정하여 당황 여부를 판단합니다.
+    - **Noise Reduction & Normalization**: `noisereduce`로 화이트 노이즈를 제거하고, 오디오 볼륨을 일정 수준으로 증폭하여 인식률을 극대화합니다.
+    - **성량 및 자신감 (RMS Energy)**: `Librosa`를 활용해 목소리 크기의 변화를 분석하여 자신감을 측정합니다.
+    - **목소리 떨림 (Pitch Jitter & Shimmer)**: `Parselmouth`를 사용하여 목소리의 미세한 떨림과 진폭 변동을 수치화해 긴장도를 분석합니다.
+    - **말하기 속도 (Speech Rate)**: 전사된 글자 수와 시간을 비교하여 말이 너무 빠르거나 느린지 판단합니다.
+- **STT 전사 로직 고도화** **[NEW]**:
+    - `Whisper`와 `Gemini` 모두 **Temperature 0.0**으로 설정하여 일관성을 확보했습니다.
+    - "음...", "어..." 같은 텍스트를 일부러 보존하도록 프롬프트를 강화하여 비언어적 습관까지 파악할 수 있게 했습니다.
+    - **스마트 선택 로직**: 두 STT 모델의 결과 유사도가 낮을 경우(< 95%), LLM이 오디오 맥락상 더 자연스러운 텍스트를 스스로 판단하여 선택합니다.
+    - **안정성 강화 (Bug Fix)**: 오디오 전처리 과정에서 오류가 발생하더라도 면접이 중단되지 않도록 예외 처리 로직을 강화했습니다. 특히 `librosa` 라이브러리의 오디오 길이 분석 시 발생할 수 있는 충돌을 방지하여 안정적인 답변 제출이 가능합니다.
+- **오디오 처리 안정성 강화** **[NEW]**: 
+    - `FFmpeg`가 설치되지 않은 환경에서도 서버가 중단되지 않도록 예외 처리(Fallback) 로직을 추가했습니다.
+    - `check_env.py`를 통해 사용자가 손쉽게 실행 환경을 진단할 수 있습니다.
+- **오디오 로딩 및 처리 오류 수정 (Critical Fix)** **[NEW]**:
+
+---
+
+## 8. 데이터 백업 및 복원 (데이터 이관)
+
+본 시뮬레이션은 데이터베이스에 저장된 면접 기록, 사용자 정보 등을 파일로 저장(내보내기)하고, 이를 다른 컴퓨터나 환경으로 복원(가져오기)할 수 있는 스크립트를 제공합니다.
+
+### 8.1 데이터 내보내기 (Export)
+현재 실행 중인 컨테이너 또는 로컬 데이터베이스의 데이터를 JSON 파일로 저장합니다.
+
+1. **실행 방법**:
+   ```bash
+   python scripts/export_db.py
+   ```
+2. **결과**:
+   - `data/interview_db_backup.json` 파일이 생성됩니다.
+   - 이 파일에는 사용자 정보, 면접 기록, 채점 결과 등이 포함됩니다.
+   - **주의**: 업로드된 파일(이력서, 오디오 등)은 `uploads` 폴더에 별도로 저장되므로, 이 폴더를 수동으로 복사해야 완벽한 백업이 가능합니다.
+
+### 8.2 데이터 가져오기 (Import)
+백업된 JSON 데이터를 새로운 데이터베이스에 복원합니다.
+
+1. **준비 사항**:
+   - `data/interview_db_backup.json` 파일을 새로운 환경의 `data` 폴더에 위치시킵니다.
+   - 데이터베이스가 실행 중이어야 합니다.
+2. **실행 방법**:
+   ```bash
+   python scripts/import_db.py
+   ```
+3. **결과**:
+   - 기존 데이터를 유지하면서 백업된 데이터를 추가합니다.
+   - 중복된 데이터(Primary Key 기준)는 무시하고 새로운 데이터만 추가됩니다 (ON CONFLICT DO NOTHING).
+
+### 8.3 데이터 이관 시 주의사항
+- **파일 이동**: 다른 컴퓨터로 이관할 경우, `data/interview_db_backup.json` 파일뿐만 아니라 `uploads/` 폴더 전체를 함께 이동시키는 것을 권장합니다.
+- **환경 변수**: `scripts/.env` 또는 프로젝트 루트의 `.env` 파일 설정(DB 접속 정보 등)이 올바른지 확인하세요.
+
 
 

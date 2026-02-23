@@ -52,11 +52,15 @@ easyocr
 # --- Audio / STT pipeline helpers ---
 soundfile
 librosa
+noisereduce
+praat-parselmouth
+numpy
 deepgram-sdk
 pyaudio
 
 # --- Speaker diarization / audio analysis (pin은 constraints로 관리) ---
 pyannote-audio
+webrtcvad-wheels
 
 # --- CV / Emotion (선택: 필요 시 사용) ---
 opencv-python

@@ -2,6 +2,18 @@ import os
 import logging
 from dotenv import load_dotenv
 
+# ---------------------------------------------------------
+# FFmpeg Configuration (CRITICAL for Audio Processing)
+# ---------------------------------------------------------
+# Add ffmpeg to PATH immediately to ensure pydub/librosa can find it
+ffmpeg_path = r"C:\ffmpeg\bin"
+if os.path.exists(ffmpeg_path):
+    os.environ["PATH"] += os.pathsep + ffmpeg_path
+    logging.info(f"Added FFmpeg to PATH: {ffmpeg_path}")
+else:
+    logging.warning(f"FFmpeg path not found at: {ffmpeg_path}. Audio processing might fail.")
+
+
 # 로깅 설정
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
