@@ -290,6 +290,11 @@ window.viewJobDetail = async (jobId) => {
             $('#detail-job-created-at').textContent = job.created_at;
             $('#detail-job-deadline').textContent = job.deadline;
             $('#detail-job-content').textContent = job.content;
+            $('#detail-job-qualifications').textContent = job.qualifications || '-';
+            $('#detail-job-preferred').textContent = job.preferred_qualifications || '-';
+            $('#detail-job-benefits').textContent = job.benefits || '-';
+            $('#detail-job-hiring-process').textContent = job.hiring_process || '-';
+            $('#detail-job-number-of-hires').textContent = job.number_of_hires || '-';
             navigateTo('job-detail-page');
         }
     } catch (e) { console.error(e); }
@@ -1159,6 +1164,11 @@ function initAdmin() {
         $('#job-job').value = '';
         $('#job-content').value = '';
         $('#job-deadline').value = '';
+        $('#job-qualifications').value = '';
+        $('#job-preferred').value = '';
+        $('#job-benefits').value = '';
+        $('#job-hiring-process').value = '';
+        $('#job-number-of-hires').value = '';
     });
 
     $('#btn-cancel-job-register').addEventListener('click', () => {
@@ -1183,6 +1193,11 @@ function initAdmin() {
                     job: $('#job-job').value,
                     content: $('#job-content').value,
                     deadline: $('#job-deadline').value,
+                    qualifications: $('#job-qualifications').value,
+                    preferred_qualifications: $('#job-preferred').value,
+                    benefits: $('#job-benefits').value,
+                    hiring_process: $('#job-hiring-process').value,
+                    number_of_hires: $('#job-number-of-hires').value,
                     id_name: AppState.currentUser.id_name
                 })
             });
@@ -1209,6 +1224,11 @@ function initAdmin() {
                     job: $('#edit-job-job').value,
                     content: $('#edit-job-content').value,
                     deadline: $('#edit-job-deadline').value,
+                    qualifications: $('#edit-job-qualifications').value,
+                    preferred_qualifications: $('#edit-job-preferred').value,
+                    benefits: $('#edit-job-benefits').value,
+                    hiring_process: $('#edit-job-hiring-process').value,
+                    number_of_hires: $('#edit-job-number-of-hires').value,
                     id_name: AppState.currentUser.id_name
                 })
             });
@@ -1456,6 +1476,11 @@ window.editJob = (id) => {
     $('#edit-job-job').value = job.job || '';
     $('#edit-job-content').value = job.content || '';
     $('#edit-job-deadline').value = job.deadline || '';
+    $('#edit-job-qualifications').value = job.qualifications || '';
+    $('#edit-job-preferred').value = job.preferred_qualifications || '';
+    $('#edit-job-benefits').value = job.benefits || '';
+    $('#edit-job-hiring-process').value = job.hiring_process || '';
+    $('#edit-job-number-of-hires').value = job.number_of_hires || '';
 
     $('#admin-view-jobs').classList.add('hidden');
     $('#admin-job-edit-page').classList.remove('hidden');

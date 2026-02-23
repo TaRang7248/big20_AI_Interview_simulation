@@ -13,13 +13,13 @@ def get_jobs(user_id: Optional[str] = None):
         c = conn.cursor(cursor_factory=RealDictCursor)
         if user_id:
             query = """
-                SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at 
+                SELECT id, title, job, deadline, content, qualifications, preferred_qualifications, benefits, hiring_process, number_of_hires, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at 
                 FROM interview_announcement 
                 ORDER BY (CASE WHEN id_name = %s THEN 0 ELSE 1 END), created_at DESC
             """
             c.execute(query, (user_id,))
         else:
-            c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
+            c.execute("SELECT id, title, job, deadline, content, qualifications, preferred_qualifications, benefits, hiring_process, number_of_hires, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement ORDER BY created_at DESC")
             
         rows = c.fetchall()
         return {"success": True, "jobs": [dict(row) for row in rows]}
@@ -31,7 +31,7 @@ def get_job_detail(id: int):
     conn = get_db_connection()
     try:
         c = conn.cursor(cursor_factory=RealDictCursor)
-        c.execute("SELECT id, title, job, deadline, content, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement WHERE id = %s", (id,))
+        c.execute("SELECT id, title, job, deadline, content, qualifications, preferred_qualifications, benefits, hiring_process, number_of_hires, id_name, to_char(created_at, 'YYYY-MM-DD') as created_at FROM interview_announcement WHERE id = %s", (id,))
         row = c.fetchone()
         if row:
             return {"success": True, "job": dict(row)}
@@ -46,9 +46,9 @@ def create_job(job: JobCreate):
     try:
         c = conn.cursor()
         c.execute('''
-            INSERT INTO interview_announcement (title, job, deadline, content, id_name)
-            VALUES (%s, %s, %s, %s, %s) RETURNING id
-        ''', (job.title, job.job, job.deadline, job.content, job.id_name))
+            INSERT INTO interview_announcement (title, job, deadline, content, qualifications, preferred_qualifications, benefits, hiring_process, number_of_hires, id_name)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+        ''', (job.title, job.job, job.deadline, job.content, job.qualifications, job.preferred_qualifications, job.benefits, job.hiring_process, job.number_of_hires, job.id_name))
         new_id = c.fetchone()[0]
         conn.commit()
         return {"success": True, "message": "공고가 등록되었습니다.", "id": new_id}
@@ -69,9 +69,9 @@ def update_job(id: int, job: JobUpdate):
         
         c.execute('''
             UPDATE interview_announcement
-            SET title = %s, job = %s, deadline = %s, content = %s
+            SET title = %s, job = %s, deadline = %s, content = %s, qualifications = %s, preferred_qualifications = %s, benefits = %s, hiring_process = %s, number_of_hires = %s
             WHERE id = %s
-        ''', (job.title, job.job, job.deadline, job.content, id))
+        ''', (job.title, job.job, job.deadline, job.content, job.qualifications, job.preferred_qualifications, job.benefits, job.hiring_process, job.number_of_hires, id))
         conn.commit()
         return {"success": True, "message": "공고가 수정되었습니다."}
     finally:

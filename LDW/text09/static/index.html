@@ -329,7 +329,7 @@
                         style="margin-bottom: 20px; border-bottom: 2px solid #eee; padding-bottom: 15px;"></h3>
 
                     <div class="form-group">
-                        <label>직무</label>
+                        <label>직무 (Job)</label>
                         <div id="detail-job-job" style="font-weight: 500;"></div>
                     </div>
 
@@ -344,15 +344,48 @@
                     </div>
 
                     <div class="form-group">
-                        <label>마감일</label>
+                        <label>공고 마감일</label>
                         <div id="detail-job-deadline" style="color: #e74c3c; font-weight: bold;"></div>
                     </div>
 
                     <div class="form-group">
-                        <label>공고 내용</label>
+                        <label>주요업무</label>
                         <div id="detail-job-content"
-                            style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 5px; min-height: 100px;">
+                            style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 5px; min-height: 50px;">
                         </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>자격 요건</label>
+                        <div id="detail-job-qualifications"
+                            style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 5px; min-height: 50px;">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>우대사항</label>
+                        <div id="detail-job-preferred"
+                            style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 5px; min-height: 50px;">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>복리후생</label>
+                        <div id="detail-job-benefits"
+                            style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 5px; min-height: 50px;">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>채용절차</label>
+                        <div id="detail-job-hiring-process"
+                            style="white-space: pre-wrap; background: #f8f9fa; padding: 15px; border-radius: 5px; min-height: 50px;">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>채용인원</label>
+                        <div id="detail-job-number-of-hires" style="font-weight: 500;"></div>
                     </div>
 
                     <div class="actions" style="margin-top: 30px;">
@@ -513,15 +546,35 @@
                                     <input type="text" id="job-title" required>
                                 </div>
                                 <div class="form-group">
-                                    <label>직무 (Job)</label>
+                                    <label>채용 직무</label>
                                     <input type="text" id="job-job" placeholder="예: 백엔드 개발자" required>
                                 </div>
                                 <div class="form-group">
-                                    <label>공고 내용</label>
-                                    <textarea id="job-content" rows="5" required></textarea>
+                                    <label>주요업무</label>
+                                    <textarea id="job-content" rows="3" required></textarea>
                                 </div>
                                 <div class="form-group">
-                                    <label>마감일</label>
+                                    <label>자격 요건</label>
+                                    <textarea id="job-qualifications" rows="3"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>우대사항</label>
+                                    <textarea id="job-preferred" rows="3"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>복리후생</label>
+                                    <textarea id="job-benefits" rows="2"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>채용절차</label>
+                                    <textarea id="job-hiring-process" rows="2"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>채용인원</label>
+                                    <input type="text" id="job-number-of-hires" placeholder="예: 0명">
+                                </div>
+                                <div class="form-group">
+                                    <label>공고 마감일</label>
                                     <input type="date" id="job-deadline" required>
                                 </div>
                                 <button type="submit" class="btn-primary">공고 등록 완료</button>
@@ -541,15 +594,35 @@
                                     <input type="text" id="edit-job-title" required>
                                 </div>
                                 <div class="form-group">
-                                    <label>직무 (Job)</label>
+                                    <label>채용 직무</label>
                                     <input type="text" id="edit-job-job" required>
                                 </div>
                                 <div class="form-group">
-                                    <label>공고 내용</label>
-                                    <textarea id="edit-job-content" rows="5" required></textarea>
+                                    <label>주요업무</label>
+                                    <textarea id="edit-job-content" rows="3" required></textarea>
                                 </div>
                                 <div class="form-group">
-                                    <label>마감일</label>
+                                    <label>자격 요건</label>
+                                    <textarea id="edit-job-qualifications" rows="3"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>우대사항</label>
+                                    <textarea id="edit-job-preferred" rows="3"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>복리후생</label>
+                                    <textarea id="edit-job-benefits" rows="2"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>채용절차</label>
+                                    <textarea id="edit-job-hiring-process" rows="2"></textarea>
+                                </div>
+                                <div class="form-group">
+                                    <label>채용인원</label>
+                                    <input type="text" id="edit-job-number-of-hires">
+                                </div>
+                                <div class="form-group">
+                                    <label>공고 마감일</label>
                                     <input type="date" id="edit-job-deadline" required>
                                 </div>
                                 <button type="submit" class="btn-primary">공고 수정 완료</button>
