@@ -522,6 +522,13 @@ window.startInterviewSetup = (jobId) => {
     $('#setup-job-title').textContent = `[${job.job || '-'}] ${job.title}`;
     $('#resume-upload').value = '';
     $('#resume-status').textContent = '';
+
+    // 미리보기 영역 및 iframe 초기화
+    const previewContainer = $('#resume-preview-container');
+    const previewIframe = $('#resume-preview');
+    if (previewContainer) previewContainer.style.display = 'none';
+    if (previewIframe) previewIframe.src = '';
+
     // $('#btn-start-interview').disabled = true; // Don't disable initially
     navigateTo('interview-setup-page');
 };
@@ -574,6 +581,39 @@ $('#btn-cancel-interview').addEventListener('click', () => navigateTo('applicant
 function initInterview() {
     $('#btn-start-interview').addEventListener('click', handleStartInterview);
     $('#btn-submit-answer').addEventListener('click', handleSubmitAnswer);
+
+    // 이력서 파일 업로드 시 썸네일(미리보기) 표시 기능 추가
+    $('#resume-upload').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        const previewContainer = $('#resume-preview-container');
+        const previewIframe = $('#resume-preview');
+
+        if (file && file.type === 'application/pdf') {
+            const fileURL = URL.createObjectURL(file);
+            previewIframe.src = fileURL + '#toolbar=0&navpanes=0&scrollbar=0'; // 툴바 등 숨김
+            previewContainer.style.display = 'block'; // 썸네일 영역 보이기
+        } else {
+            previewContainer.style.display = 'none';
+            previewIframe.src = '';
+        }
+    });
+
+    // 썸네일 영역 클릭 시 원본 크기 확대 모달 띄우기
+    $('#resume-preview-container').addEventListener('click', () => {
+        const previewIframe = $('#resume-preview');
+        if (previewIframe.src) {
+            // 원본 크기로 띄울 때는 툴바 파라미터 제외 (원래 URL로)
+            const fileURL = previewIframe.src.split('#')[0];
+            $('#zoomed-pdf').src = fileURL;
+            $('#pdf-zoom-modal').classList.remove('hidden');
+        }
+    });
+
+    // 확대 모달 닫기 이벤트
+    $('#close-pdf-zoom').addEventListener('click', () => {
+        $('#pdf-zoom-modal').classList.add('hidden');
+        $('#zoomed-pdf').src = ''; // 메모리 최적화를 위해 src 초기화
+    });
 }
 
 async function handleStartInterview() {
@@ -672,7 +712,7 @@ function startQuestionSequence(question) {
         console.log(`[StartQuestion] Attempting to play audio from: ${audioUrl}`);
         playAudio(audioUrl, () => {
             console.log("[StartQuestion] Audio playback finished.");
-            
+
             // 2. Start Timer & Recording immediately after TTS
             startTimer(120);
             startRecording();
@@ -697,7 +737,7 @@ function startQuestionSequence(question) {
         // Fallback: Start immediately
         startTimer(120);
         startRecording();
-        
+
         // Apply same 10s delay logic for consistency
         const btnSubmit = $('#btn-submit-answer');
         btnSubmit.disabled = true;
@@ -811,7 +851,7 @@ async function captureAndAnalyzeFrame() {
     const video = $('#user-video');
     const canvas = $('#video-capture-canvas');
     if (!video || !canvas) return;
-    
+
     // Check if video is playing
     if (video.paused || video.ended) return;
 
@@ -822,7 +862,7 @@ async function captureAndAnalyzeFrame() {
 
     canvas.toBlob(blob => {
         if (!blob) return;
-        
+
         const formData = new FormData();
         formData.append('interview_number', AppState.interview.interviewNumber);
         formData.append('frame', blob, 'frame.jpg');

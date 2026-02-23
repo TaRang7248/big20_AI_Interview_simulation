@@ -4,8 +4,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>AI 면접 프로그램</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=2">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -365,11 +368,27 @@
             <div class="container setup-container">
                 <h2 id="setup-job-title">공고 제목</h2>
                 <div class="setup-steps">
-                    <div class="step-card">
-                        <h3>1. 이력서 업로드</h3>
-                        <p>면접에 사용할 이력서를 등록해주세요. (PDF 파일만 가능)</p>
-                        <input type="file" id="resume-upload" accept=".pdf">
-                        <div id="resume-status" style="font-size: 0.9em; margin-top: 5px; color: #666;"></div>
+                    <div class="step-card" style="display: flex; gap: 20px;">
+                        <div style="flex: 1;">
+                            <h3>1. 이력서 업로드</h3>
+                            <p>면접에 사용할 이력서를 등록해주세요. (PDF 파일만 가능)</p>
+                            <input type="file" id="resume-upload" accept=".pdf">
+                            <div id="resume-status" style="font-size: 0.9em; margin-top: 5px; color: #666;"></div>
+                        </div>
+                        <!-- 이력서 미리보기 영역 (초기엔 숨김) -->
+                        <div id="resume-preview-container"
+                            style="display: none; position: relative; width: 140px; height: 180px; border: 1px solid #ccc; cursor: pointer; flex-shrink: 0;"
+                            title="클릭하여 확대">
+                            <!-- pointer-events: none으로 iframe 내부 클릭은 막고 감싸는 div의 클릭 이벤트 활용 -->
+                            <iframe id="resume-preview"
+                                style="width: 100%; height: 100%; pointer-events: none; border: none; overflow: hidden;"></iframe>
+                            <div id="resume-preview-overlay"
+                                style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;">
+                                <span
+                                    style="color: white; font-weight: bold; font-size: 14px; text-shadow: 1px 1px 2px black;">클릭하여
+                                    확대</span>
+                            </div>
+                        </div>
                     </div>
                     <div class="step-card">
                         <h3>2. 환경 테스트</h3>
@@ -630,8 +649,17 @@
         <img class="modal-content-img" id="zoomed-image">
     </div>
 
+    <!-- PDF Zoom Modal (이력서 원본 크기 확대) -->
+    <div id="pdf-zoom-modal" class="modal hidden"
+        style="z-index: 3000; display: flex; align-items: center; justify-content: center; background-color: rgba(0,0,0,0.8);">
+        <span id="close-pdf-zoom"
+            style="position: absolute; top: 15px; right: 35px; color: #f1f1f1; font-size: 40px; font-weight: bold; cursor: pointer;">&times;</span>
+        <iframe id="zoomed-pdf"
+            style="width: 80%; height: 90vh; max-width: 1000px; border: none; background: white; border-radius: 8px;"></iframe>
+    </div>
+
     <!-- Logic -->
-    <script src="app.js"></script>
+    <script src="app.js?v=2"></script>
 </body>
 
 </html>
