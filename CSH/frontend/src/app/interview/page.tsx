@@ -61,6 +61,8 @@ function InterviewPageInner() {
   const [questionNum, setQuestionNum] = useState(0);
   const totalQuestions = 5;
   const [sttText, setSttText] = useState("");
+  const [manualInput, setManualInput] = useState("");  // STT 실패 시 수동 텍스트 입력 (폴백)
+  const [sttAvailable, setSttAvailable] = useState(true); // Web Speech API 사용 가능 여부
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [interviewStarted, setInterviewStarted] = useState(false);
@@ -226,9 +228,22 @@ function InterviewPageInner() {
       // 백엔드(uvicorn --reload) 재시작 시 WebSocket 끊김이 발생할 수 있으므로
       // onclose/onerror 핸들러에서 자동 재연결을 시도하여 세션 안정성 보장
       const connectWebSocket = (targetSid: string) => {
-        const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+        // Next.js rewrites는 WebSocket 프로토콜을 프록시하지 못하므로,
+        // WebSocket은 FastAPI 백엔드에 직접 연결해야 합니다.
+        // NEXT_PUBLIC_WS_URL 환경변수가 있으면 사용, 없으면 FastAPI 기본 포트(8000)로 연결
+        const wsBaseUrl = process.env.NEXT_PUBLIC_WS_URL || null;
         const wsToken = sessionStorage.getItem("access_token");
-        const ws = new WebSocket(`${protocol}//${window.location.host}/ws/interview/${targetSid}?token=${encodeURIComponent(wsToken || "")}`);
+        let wsUrl: string;
+        if (wsBaseUrl) {
+          // 환경변수에 지정된 WebSocket URL 사용 (예: ws://localhost:8000)
+          wsUrl = `${wsBaseUrl}/ws/interview/${targetSid}?token=${encodeURIComponent(wsToken || "")}`;
+        } else {
+          // 기본값: 현재 호스트의 포트를 8000으로 교체하여 FastAPI 직접 연결
+          const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+          const host = window.location.hostname;
+          wsUrl = `${protocol}//${host}:8000/ws/interview/${targetSid}?token=${encodeURIComponent(wsToken || "")}`;
+        }
+        const ws = new WebSocket(wsUrl);
 
         // WebSocket 연결 성공 시 재연결 카운터 리셋
         // — 이전 끊김에서 정상 복구된 것이므로 카운터를 초기화
@@ -288,7 +303,18 @@ function InterviewPageInner() {
       setActiveSession(true); // 면접 시작 → Auth 유휴 타임아웃 비활성화
       setSessionId(sid);
 
-      await getNextQuestion(sid, "[START]");
+      // [START] 요청: 첫 인사말 가져오기
+      // 만약 API 실패 시에도 기본 인사말을 표시하여 사용자가 빈 화면을 보지 않도록 함
+      try {
+        await getNextQuestion(sid, "[START]");
+      } catch (err) {
+        console.error("첫 질문 요청 실패, 기본 인사말 표시:", err);
+        const fallbackGreeting = "안녕하세요. 오늘 면접을 진행하게 된 면접관입니다. 먼저 간단한 자기소개를 부탁드립니다.";
+        setCurrentQuestion(fallbackGreeting);
+        setQuestionNum(1);
+        setMessages(prev => [...prev, { role: "ai", text: fallbackGreeting }]);
+        setStatus("listening");
+      }
     } catch (err) {
       console.error("면접 진행 실패:", err);
       toast.error("면접 시작에 실패했습니다.");
@@ -331,14 +357,24 @@ function InterviewPageInner() {
   // ========== 음성 인식 (Web Speech API) ==========
   const initSpeechRecognition = () => {
     const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
-    if (!SR) return;
+    if (!SR) {
+      // Web Speech API 미지원 브라우저 — 텍스트 입력 모드로 전환
+      console.warn("[SpeechRecognition] Web Speech API를 지원하지 않는 브라우저입니다. 텍스트 입력 모드로 전환합니다.");
+      setSttAvailable(false);
+      return;
+    }
     const recognition = new SR();
     recognition.lang = "ko-KR";
     recognition.continuous = true;
     recognition.interimResults = true;
 
+    // 연속 에러 카운터 — 일정 횟수 이상 에러 시 STT를 비활성화하고 텍스트 입력으로 전환
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 3;
+
     // 음성 인식 결과 핸들러 — 최종(final) 결과만 STT 텍스트에 추가
     recognition.onresult = (e: SpeechRecognitionEvent) => {
+      consecutiveErrors = 0; // 정상 결과 수신 시 에러 카운터 리셋
       let final = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) final += e.results[i][0].transcript;
@@ -354,8 +390,23 @@ function InterviewPageInner() {
       // no-speech는 정상 동작 (사용자가 말하지 않은 경우) → 무시
       if (errorType === "no-speech") return;
       console.warn(`[SpeechRecognition] 에러: ${errorType}`);
+
+      // not-allowed(권한 거부) 또는 network(네트워크 불가) → 즉시 텍스트 모드 전환
+      if (errorType === "not-allowed" || errorType === "service-not-allowed") {
+        console.warn("[SpeechRecognition] 마이크 권한이 거부되었습니다. 텍스트 입력 모드로 전환합니다.");
+        setSttAvailable(false);
+        return;
+      }
+
       // aborted는 의도적 중단 → 재시작 불필요
       if (errorType === "aborted") return;
+
+      // 기타 에러 — 연속 에러 카운터 증가
+      consecutiveErrors++;
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+        console.warn(`[SpeechRecognition] 연속 ${MAX_CONSECUTIVE_ERRORS}회 에러 발생. 텍스트 입력 모드로 전환합니다.`);
+        setSttAvailable(false);
+      }
     }) as ((ev: Event) => void);
 
     // 음성 인식 종료 핸들러 — Ref를 통해 최신 state 참조 (stale closure 방지)
@@ -380,6 +431,7 @@ function InterviewPageInner() {
       recognition.start();
     } catch (e) {
       console.warn("[SpeechRecognition] 초기 시작 실패:", e);
+      setSttAvailable(false);
     }
   };
 
@@ -452,9 +504,11 @@ function InterviewPageInner() {
 
   // ========== 답변 제출 ==========
   const submitAnswer = async () => {
-    if (!sttText.trim()) return;
-    const answer = sttText.trim();
+    // STT 텍스트 또는 수동 입력 중 하나를 사용 (STT 우선, 없으면 수동 입력)
+    const answer = (sttText.trim() || manualInput.trim());
+    if (!answer) return;
     setSttText("");
+    setManualInput("");  // 수동 입력도 초기화
     setMessages(prev => [...prev, { role: "user", text: answer }]);
 
     // 개입 타이머 정지
@@ -663,7 +717,7 @@ function InterviewPageInner() {
                   }`}>
                   {camEnabled ? <Camera size={20} /> : <CameraOff size={20} />}
                 </button>
-                <button onClick={submitAnswer} disabled={!sttText.trim() || status !== "listening"} title="답변 제출"
+                <button onClick={submitAnswer} disabled={(!sttText.trim() && !manualInput.trim()) || status !== "listening"} title="답변 제출"
                   className="btn-gradient !rounded-full w-12 h-12 flex items-center justify-center disabled:opacity-40">
                   <SkipForward size={20} />
                 </button>
@@ -694,11 +748,47 @@ function InterviewPageInner() {
                 <div ref={chatEndRef} />
               </div>
 
-              {/* STT 인식 텍스트 */}
+              {/* STT 인식 텍스트 + 수동 텍스트 입력 폴백 */}
               {status === "listening" && (
-                <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3">
-                  <p className="text-xs text-[var(--warning)] mb-1">🎤 음성 인식 중...</p>
-                  <p className="text-sm">{sttText || "말씀해주세요..."}</p>
+                <div className="space-y-2">
+                  {/* STT 활성 시: 실시간 음성 인식 결과 표시 */}
+                  {sttAvailable && (
+                    <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3">
+                      <p className="text-xs text-[var(--warning)] mb-1">🎤 음성 인식 중...</p>
+                      <p className="text-sm">{sttText || "말씀해주세요..."}</p>
+                    </div>
+                  )}
+                  {/* STT 비활성 시: 안내 메시지 */}
+                  {!sttAvailable && (
+                    <div className="bg-[rgba(244,67,54,0.08)] border border-[rgba(244,67,54,0.2)] rounded-xl p-3">
+                      <p className="text-xs text-[var(--danger)] mb-1">⚠️ 음성 인식을 사용할 수 없습니다</p>
+                      <p className="text-xs text-[var(--text-secondary)]">아래 입력창에 답변을 직접 입력해주세요.</p>
+                    </div>
+                  )}
+                  {/* 수동 텍스트 입력 (항상 표시 — STT 보완/대체) */}
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={manualInput}
+                      onChange={(e) => setManualInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        // Enter 키로 답변 제출 (Shift+Enter는 무시)
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          submitAnswer();
+                        }
+                      }}
+                      placeholder={sttAvailable ? "텍스트로도 입력할 수 있습니다..." : "답변을 입력하세요..."}
+                      className="flex-1 bg-[rgba(255,255,255,0.06)] border border-[rgba(255,255,255,0.15)] rounded-xl px-4 py-2.5 text-sm placeholder:text-[var(--text-secondary)] focus:outline-none focus:border-[var(--cyan)] transition"
+                    />
+                    <button
+                      onClick={submitAnswer}
+                      disabled={!sttText.trim() && !manualInput.trim()}
+                      className="btn-gradient px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40 whitespace-nowrap"
+                    >
+                      제출
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

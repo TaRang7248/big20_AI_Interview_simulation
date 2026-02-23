@@ -106,8 +106,10 @@ from security import (
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
-# 면접 LLM 최대 생성 토큰 수 — 무한 생성 방지 (질문은 200~500토큰이면 충분)
-DEFAULT_LLM_NUM_PREDICT = int(os.getenv("LLM_NUM_PREDICT", "2048"))
+# 면접 LLM 최대 생성 토큰 수 — 무한 생성 방지
+# ⚡ 512토큰으로 제한: 면접 질문은 100~300토큰이면 충분하며,
+#    2048 설정은 불필요한 생성 시간을 초래하여 타임아웃의 주요 원인이 됨
+DEFAULT_LLM_NUM_PREDICT = int(os.getenv("LLM_NUM_PREDICT", "512"))
 # 면접 LLM 호출 타임아웃 (초) — GTX 1660 VRAM 압박 시 무기한 hang 방지
 # 60초 내 응답 없으면 폴백 질문으로 전환하여 사용자 대기 시간 최소화
 LLM_TIMEOUT_SEC = int(os.getenv("LLM_TIMEOUT_SEC", "60"))
@@ -128,7 +130,9 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # ========== 비동기 처리를 위한 ThreadPoolExecutor ==========
 # LLM, RAG, DeepFace 등 CPU/IO 바운드 작업을 비블로킹으로 처리
-LLM_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="llm_worker")
+# ⚡ max_workers=2: GTX 1660(6GB VRAM) 환경에서 4개 동시 LLM 호출은
+#    GPU 메모리 경합을 유발하여 전체 응답 속도가 저하됨
+LLM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="llm_worker")
 RAG_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="rag_worker")
 VISION_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="vision_worker")
 
@@ -211,20 +215,17 @@ async def run_llm_async(llm, messages):
     GTX 1660 등 저사양 GPU에서 VRAM 압박 시 LLM이 무기한 hang할 수 있으므로
     asyncio.wait_for로 LLM_TIMEOUT_SEC 초 내에 응답을 강제합니다.
     """
-    for attempt in range(2):
-        try:
-            return await asyncio.wait_for(
-                run_in_executor(LLM_EXECUTOR, llm.invoke, messages),
-                timeout=LLM_TIMEOUT_SEC,
-            )
-        except asyncio.TimeoutError:
-            if attempt == 0:
-                print(f"⏰ [LLM] 타임아웃 ({LLM_TIMEOUT_SEC}초 초과) — 1회 재시도")
-                continue
-            print(
-                f"⏰ [LLM] 재시도 포함 타임아웃 ({LLM_TIMEOUT_SEC}초 x2) — 폴백 응답 반환"
-            )
-            raise TimeoutError(f"LLM 응답 시간 초과 ({LLM_TIMEOUT_SEC}초, 재시도 포함)")
+    # ⚡ 재시도 제거: 타임아웃 후 재시도는 이미 GPU가 과부하 상태이므로
+    #    두 번째 시도도 실패할 확률이 높고, 사용자 대기 시간만 2배(120초)로 늘어남.
+    #    대신 즉시 폴백 질문으로 전환하여 사용자 대기를 최소화함.
+    try:
+        return await asyncio.wait_for(
+            run_in_executor(LLM_EXECUTOR, llm.invoke, messages),
+            timeout=LLM_TIMEOUT_SEC,
+        )
+    except asyncio.TimeoutError:
+        print(f"⏰ [LLM] 타임아웃 ({LLM_TIMEOUT_SEC}초 초과) — 폴백 응답 반환")
+        raise TimeoutError(f"LLM 응답 시간 초과 ({LLM_TIMEOUT_SEC}초)")
 
 
 async def run_rag_async(retriever, query):
@@ -1861,35 +1862,59 @@ class AIInterviewer:
                 f"📊 [Session {session_id[:8]}] 주제: {current_topic}, 주제내 질문수: {topic_count}, 꼬리질문 필요: {needs_follow_up} ({follow_up_reason})"
             )
 
-            # ========== 3. RAG 컨텍스트 가져오기 (세션별 retriever 우선) - 비동기 ==========
+            # ========== 3. RAG 컨텍스트 병렬 조회 (이력서 + Q&A) ==========
+            # ⚡ 성능 최적화: 두 RAG 검색을 asyncio.gather로 병렬 실행
+            #    순차 실행 대비 대기 시간 ~50% 감소, 각 RAG에 10초 타임아웃 설정
             resume_context = ""
+            qa_reference_context = ""
             session_retriever = session.get("retriever") or self.retriever
-            if session_retriever and user_answer:
+
+            async def _fetch_resume_rag():
+                """이력서 RAG 검색 (타임아웃 10초)"""
+                if not (session_retriever and user_answer):
+                    return ""
                 try:
-                    # ThreadPoolExecutor로 블로킹 RAG 검색을 비동기로 실행
-                    docs = await run_rag_async(session_retriever, user_answer)
+                    docs = await asyncio.wait_for(
+                        run_rag_async(session_retriever, user_answer),
+                        timeout=10,
+                    )
                     if docs:
-                        resume_context = "\n".join([d.page_content for d in docs[:3]])
                         print(f"📚 [RAG] {len(docs)}개 문서에서 컨텍스트 추출 (비동기)")
+                        return "\n".join([d.page_content for d in docs[:3]])
+                except asyncio.TimeoutError:
+                    print("⏰ [RAG] 이력서 검색 타임아웃 (10초) — 컨텍스트 없이 진행")
                 except Exception as e:
                     print(f"⚠️ RAG 검색 오류: {e}")
+                return ""
 
-            # ========== 3-1. 면접 Q&A 참조 데이터 검색 (모범 답변 참고용) ==========
-            qa_reference_context = ""
-            if RAG_AVAILABLE and user_answer and getattr(self, "qa_rag", None):
+            async def _fetch_qa_rag():
+                """Q&A 참조 RAG 검색 (타임아웃 10초)"""
+                if not (
+                    RAG_AVAILABLE and user_answer and getattr(self, "qa_rag", None)
+                ):
+                    return ""
                 try:
-                    qa_docs = await run_in_executor(
-                        RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2
+                    qa_docs = await asyncio.wait_for(
+                        run_in_executor(
+                            RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2
+                        ),
+                        timeout=10,
                     )
                     if qa_docs:
-                        qa_reference_context = "\n".join(
-                            [d.page_content for d in qa_docs[:2]]
-                        )
                         print(
                             f"📖 [Q&A RAG] {len(qa_docs)}개 참조 문서에서 모범 답변 추출"
                         )
+                        return "\n".join([d.page_content for d in qa_docs[:2]])
+                except asyncio.TimeoutError:
+                    print("⏰ [Q&A RAG] 참조 검색 타임아웃 (10초) — 참조 없이 진행")
                 except Exception as e:
                     print(f"⚠️ Q&A 참조 데이터 검색 오류 (무시): {e}")
+                return ""
+
+            # 두 RAG를 동시에 실행 — GPU/DB 부하 분산 및 대기 시간 최소화
+            resume_context, qa_reference_context = await asyncio.gather(
+                _fetch_resume_rag(), _fetch_qa_rag()
+            )
 
             # ========== 4. 대화 기록을 LangChain 메시지로 변환 ==========
             chat_history = session.get("chat_history", [])
@@ -1919,12 +1944,27 @@ class AIInterviewer:
                 )
 
             # Memory에서 대화 기록 가져오기 (있으면)
+            # ⚡ 성능 최적화: 최근 3턴(6메시지)만 포함하여 컨텍스트 윈도우 절약
+            #    num_ctx=4096에서 전체 히스토리를 넣으면 5번째 질문쯤 ~3,900토큰에 도달하여
+            #    토큰 처리 속도가 급락하고 타임아웃이 발생함
+            MAX_HISTORY_MESSAGES = 6  # 3턴 = assistant 3개 + user 3개
             memory_messages = self.get_memory_messages(session_id)
             if memory_messages:
-                messages.extend(memory_messages)
+                # 최근 3턴만 사용하여 컨텍스트 윈도우 절약
+                recent_memory = (
+                    memory_messages[-MAX_HISTORY_MESSAGES:]
+                    if len(memory_messages) > MAX_HISTORY_MESSAGES
+                    else memory_messages
+                )
+                messages.extend(recent_memory)
             else:
-                # Memory가 없으면 수동 chat_history 사용
-                for msg in chat_history:
+                # Memory가 없으면 수동 chat_history 사용 — 역시 최근 3턴만
+                recent_history = (
+                    chat_history[-MAX_HISTORY_MESSAGES:]
+                    if len(chat_history) > MAX_HISTORY_MESSAGES
+                    else chat_history
+                )
+                for msg in recent_history:
                     if msg["role"] == "assistant":
                         messages.append(AIMessage(content=msg["content"]))
                     elif msg["role"] == "user":
