@@ -20,6 +20,11 @@ class IMHConfig(BaseSettings):
     # Checkpoint 4: Canary Rollout
     CANARY_ROLLOUT_PERCENTAGE: int = 1 
 
+    # TASK-032: LLM Configuration
+    ACTIVE_LLM_PROVIDER: str = "OLLAMA" # OLLAMA, OPENAI, MOCK
+    OLLAMA_MODEL: str = "exaone3.5:2.4b"
+    OPENAI_MODEL: str = "gpt-4o"
+
     # TASK-027: Redis Configuration
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379

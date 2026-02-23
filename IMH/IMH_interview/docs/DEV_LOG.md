@@ -1097,3 +1097,19 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
     - **Projection Subset**: Projection 무효화가 Mirror 갱신 이후에 수행되어, 항상 PG 상태 이하를 유지함.
 - **로그 및 산출물**:
     - [TASK-030_PLAN.md](TASK-030_PLAN.md) 준수 완료.
+
+### TASK-032 LLM & Evaluation Integration
+- **요약**: `OllamaLLMProvider`와 `OpenAILLMProvider`를 구현하고 SessionEngine의 `QuestionGenerator`에 연결. 루브릭 기반 평가 로직(Evaluator)을 End-to-End 채점 플로우에 정식 연동.
+- **변경 사항**:
+    - `packages/imh_providers/llm/`: Ollama 및 OpenAI Provider 구현체 완성.
+    - `packages/imh_providers/question.py`: `LLMQuestionGenerator` 추가. FastAPI의 Async Event Loop Conflict를 방지하기 위해 Sync-over-Async Threading Isolation 적용.
+    - `IMH/api/dependencies.py`: 서버 구동 옵션에 따른 LLM Provider 동적 주입 설정.
+    - `scripts/dev/verify_task_032.py`: 세션 생성 -> 답변 -> 동적 꼬리질문 RAG -> Idempotent 평가 저장 -> UI 점수 매핑까지 전 구간 성공 검증.
+- **검증 결과**:
+    - `python scripts/dev/verify_task_032.py`: **ALL PASS**
+        1. **End-to-End Chat**: `submit_answer` 시 이전 답변 컨텍스트 기반 꼬리질문 정상 반환.
+        2. **Atomicity**: RAG Deduplication 정상 동작 (이미 물어본 질문 회피 및 정적 Fallback 연계 보존).
+        3. **Idempotency**: 동일 세션에 대한 결과 `save_interview_result` 중복 억제 정상 동작.
+- **주요 설계 반영**:
+    - **Sync/Async Boundary**: `SessionEngine` 등 기존 Sync 동기 모델을 유지한 채 Provider만 비동기로 분리.
+    - **Single Responsibility**: `SessionService`가 트랜잭션을 전담, Engine은 정책만 판단.

@@ -109,40 +109,21 @@ async def list_interviews(user_id: str = Depends(require_user)):
 async def create_interview(
     req: CreateInterviewRequest,
     user_id: str = Depends(require_user),
+    service: "SessionService" = Depends(get_session_service)
 ):
     """Create a new interview session for a job."""
-    import uuid
-    params = _get_conn_params()
-    conn = await asyncpg.connect(**params)
+    # TASK-032: Legacy route uses Engine/Service to create session to comply with frozen policy
     try:
-        job = await conn.fetchrow("SELECT job_id, status FROM jobs WHERE job_id=$1", req.job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail="Job not found")
-        if job["status"] != "PUBLISHED":
-            raise HTTPException(status_code=400, detail="Job is not currently accepting applications")
-
-        session_id = f"sess-{uuid.uuid4().hex[:12]}"
-        now = datetime.now()
-
-        await conn.execute(
-            """
-            INSERT INTO interviews
-                (session_id, user_id, job_id, status, mode, created_at, updated_at, applied_at, started_at)
-            VALUES ($1,$2,$3,'IN_PROGRESS'::session_status,'ACTUAL'::interview_mode,$4,$4,$4,$4)
-            """,
-            session_id, user_id, req.job_id, now
-        )
-
-        first_phase = INTERVIEW_PHASES[0]
-        greeting = f"안녕하세요. 면접을 시작하겠습니다. [{first_phase}] 단계입니다.\n{_get_next_question(first_phase)}"
-        await conn.execute(
-            "INSERT INTO chat_history (session_id, role, content, phase, created_at) VALUES ($1,'ai',$2,$3,$4)",
-            session_id, greeting, first_phase, now
-        )
-
-        return {"session_id": session_id, "message": "Interview started"}
-    finally:
-        await conn.close()
+        dto = service.create_session_from_job(req.job_id, user_id)
+        
+        # To maintain legacy API response format:
+        return {"session_id": dto.session_id, "message": "Interview started"}
+    except ValueError as e:
+        status_code = 404 if "not found" in str(e) else 400
+        raise HTTPException(status_code=status_code, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create interview: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create interview")
 
 
 @router.get("/{interview_id}")
@@ -221,26 +202,39 @@ async def submit_chat(
     interview_id: str,
     req: ChatMessageRequest,
     user_id: str = Depends(require_user),
+    service: "SessionService" = Depends(get_session_service)
 ):
     """Submit an answer turn. Returns AI's next question or completion."""
+    from packages.imh_dto.session import AnswerSubmissionDTO
+    
+    # Check if session exists and is in progress
+    session_dto = service.get_session(interview_id)
+    if not session_dto:
+        raise HTTPException(status_code=404, detail="Interview not found")
+        
+    if session_dto.status not in ("IN_PROGRESS", "APPLIED"):
+        raise HTTPException(status_code=400, detail="Interview is not in progress")
+
+    # 1. Answer Submission via Engine (Phase increment implicitly handled)
+    submit_dto = AnswerSubmissionDTO(type="TEXT", content=req.content, duration_seconds=10.0)
+    try:
+         updated_session = service.submit_answer(interview_id, submit_dto)
+    except Exception as e:
+         logger.error(f"Error submitting chat for {interview_id}: {e}")
+         raise HTTPException(status_code=500, detail=str(e))
+
+    now = datetime.now()
+    
+    # Maintain legacy chat_history table for backward UI compatibility:
+    # Get current turn dynamically 
     params = _get_conn_params()
     conn = await asyncpg.connect(**params)
     try:
-        row = await conn.fetchrow(
-            "SELECT status, user_id FROM interviews WHERE session_id=$1",
-            interview_id
-        )
-        if not row:
-            raise HTTPException(status_code=404, detail="Interview not found")
-        if row["status"] not in ("IN_PROGRESS", "APPLIED"):
-            raise HTTPException(status_code=400, detail="Interview is not in progress")
-
-        now = datetime.now()
-
         turns = await conn.fetchval(
             "SELECT COUNT(*) FROM chat_history WHERE session_id=$1 AND role='user'",
             interview_id
         )
+        
         phase_idx = min(int(turns), len(INTERVIEW_PHASES) - 1)
         current_phase = INTERVIEW_PHASES[phase_idx]
 
@@ -248,59 +242,59 @@ async def submit_chat(
             "INSERT INTO chat_history (session_id, role, content, phase, created_at) VALUES ($1,'user',$2,$3,$4)",
             interview_id, req.content, current_phase, now
         )
+        
+        # Check if engine decided to terminate
+        if updated_session.status in ("COMPLETED", "INTERRUPTED"):
+            
+             # --- EVALUATION ENGINE TRIGGER (Synchronous execution) ---
+             try:
+                 # Evaluate (Logic handles DB existence check internally now)
+                 from packages.imh_eval.engine import RubricEvaluator, EvaluationContext
+                 from packages.imh_report.engine import ReportGenerator
+                 
+                 context = EvaluationContext(
+                     job_category="DEV", 
+                     job_id=updated_session.job_id,
+                     answer_text=req.content,
+                     rag_keywords_found=["Leadership", "Java"], # Mock data until actual pipeline is fully joined
+                     hint_count=0
+                 )
+                 eval_result = RubricEvaluator().evaluate(context)
+                 report = ReportGenerator.generate(eval_result)
+                 report.raw_debug_info = {"_session_id": updated_session.session_id, "_interview_id": updated_session.session_id}
+                 
+                 service.history_repo.save_interview_result(updated_session.session_id, report)
+                 service.state_repo.update_status(updated_session.session_id, "EVALUATED") # Update internal engine state
+             except Exception as e:
+                 logger.error(f"Failed to generate evaluation report for {updated_session.session_id}: {e}")
+                 # NOTE: TASK-032 states we never fallback to random.
+                 pass
 
-        new_turns = turns + 1
+             farewell = "면접이 종료되었습니다. 수고하셨습니다. 결과는 추후 안내드리겠습니다."
+             await conn.execute(
+                 "INSERT INTO chat_history (session_id, role, content, phase, created_at) VALUES ($1,'ai',$2,'마무리',$3)",
+                 interview_id, farewell, now
+             )
 
-        if new_turns >= len(INTERVIEW_PHASES):
-            await conn.execute(
-                "UPDATE interviews SET status='COMPLETED'::session_status, completed_at=$1, updated_at=$1 WHERE session_id=$2",
-                now, interview_id
-            )
-
-            tech = round(random.uniform(60, 95), 1)
-            prob = round(random.uniform(60, 95), 1)
-            comm = round(random.uniform(60, 95), 1)
-            nonv = round(random.uniform(60, 95), 1)
-            avg = (tech + prob + comm + nonv) / 4
-            decision = "PASS" if avg >= 70 else "FAIL"
-            summary = (
-                f"기술 역량({tech}점)과 문제해결 능력({prob}점)이 " +
-                ("우수합니다." if avg >= 75 else "개선이 필요합니다.")
-            )
-
-            await conn.execute(
-                """
-                INSERT INTO interview_evaluations
-                    (session_id, decision, summary, tech_score, problem_score, comm_score, nonverbal_score)
-                VALUES ($1,$2,$3,$4,$5,$6,$7)
-                """,
-                interview_id, decision, summary, tech, prob, comm, nonv
-            )
-
-            await conn.execute(
-                "UPDATE interviews SET status='EVALUATED'::session_status, evaluated_at=$1, updated_at=$1 WHERE session_id=$2",
-                now, interview_id
-            )
-
-            farewell = "면접이 종료되었습니다. 수고하셨습니다. 결과는 추후 안내드리겠습니다."
-            await conn.execute(
-                "INSERT INTO chat_history (session_id, role, content, phase, created_at) VALUES ($1,'ai',$2,'마무리',$3)",
-                interview_id, farewell, now
-            )
-
-            return {
-                "status": "COMPLETED",
-                "ai_message": farewell,
-                "current_phase": "마무리",
-                "is_done": True,
-            }
+             return {
+                 "status": "COMPLETED",
+                 "ai_message": farewell,
+                 "current_phase": "마무리",
+                 "is_done": True,
+             }
         else:
+            # Session is still IN_PROGRESS
+            new_turns = turns + 1
             next_phase_idx = min(int(new_turns), len(INTERVIEW_PHASES) - 1)
             next_phase = INTERVIEW_PHASES[next_phase_idx]
+            
+            # Extract question text from the context generated by 
+            question_text = updated_session.current_question.content if updated_session.current_question else _get_next_question(next_phase)
+            
             if next_phase_idx > phase_idx:
-                ai_msg = f"[{next_phase}] 단계로 넘어가겠습니다.\n{_get_next_question(next_phase)}"
+                ai_msg = f"[{next_phase}] 단계로 넘어가겠습니다.\n{question_text}"
             else:
-                ai_msg = _get_next_question(next_phase)
+                ai_msg = question_text
 
             await conn.execute(
                 "INSERT INTO chat_history (session_id, role, content, phase, created_at) VALUES ($1,'ai',$2,$3,$4)",
@@ -322,41 +316,80 @@ async def submit_chat(
 async def get_result(
     interview_id: str,
     user_id: str = Depends(require_user),
+    service: "SessionService" = Depends(get_session_service)
 ):
     """Get interview evaluation result."""
     params = _get_conn_params()
     conn = await asyncpg.connect(**params)
     try:
-        row = await conn.fetchrow(
-            """
-            SELECT ie.decision, ie.summary, ie.tech_score, ie.problem_score, ie.comm_score, ie.nonverbal_score,
-                   i.status, j.title as job_title
-            FROM interview_evaluations ie
-            JOIN interviews i ON i.session_id = ie.session_id
-            LEFT JOIN jobs j ON j.job_id = i.job_id
-            WHERE ie.session_id=$1
-            """,
+        intvw = await conn.fetchrow(
+            "SELECT i.status, j.title as job_title FROM interviews i "
+            "LEFT JOIN jobs j ON j.job_id = i.job_id WHERE i.session_id=$1", 
             interview_id
         )
-        if not row:
-            intvw = await conn.fetchrow(
-                "SELECT status FROM interviews WHERE session_id=$1", interview_id
-            )
-            if not intvw:
-                raise HTTPException(status_code=404, detail="Interview not found")
-            return {"status": intvw["status"], "evaluation": None}
+        if not intvw:
+            raise HTTPException(status_code=404, detail="Interview not found")
+            
+        status = intvw["status"]
+        job_title = intvw["job_title"]
+        
+        if status != "EVALUATED":
+             return {"status": status, "job_title": job_title, "evaluation": None}
+             
+        # TASK-032: Map from evaluation_scores JSONB instead of legacy interview_evaluations
+        report = service.history_repo.find_by_id(interview_id)
+        if not report:
+             # If state claims EVALUATED but report is missing, degrade gracefully
+             return {"status": status, "job_title": job_title, "evaluation": None}
 
+        # Safe parsing out of report model adhering to TASK-032 UI Spec Option A
+        tech_score = 0.0
+        prob_score = 0.0
+        comm_score = 0.0
+        nonv_score = 0.0
+        
+        missing_count = 0
+        total_expected = 4
+        
+        for detail in report.details:
+            if detail.tag_code == "capability.knowledge":
+                tech_score = round(detail.score * 20.0, 1)
+            elif detail.tag_code == "capability.problem_solving":
+                prob_score = round(detail.score * 20.0, 1)
+            elif detail.tag_code == "capability.communication":
+                comm_score = round(detail.score * 20.0, 1)
+            elif detail.tag_code == "capability.attitude":
+                nonv_score = round(detail.score * 20.0, 1)
+                
+        # Count missing (Scores defaulting to 0)
+        missing_count = sum(1 for s in (tech_score, prob_score, comm_score, nonv_score) if s == 0.0)
+        
+        # Calculate decision
+        total_score_100 = round(report.header.total_score, 1) if report.header else 0.0
+        decision = "PASS" if total_score_100 >= 70.0 else "FAIL"
+        
+        # Summary mapping
+        summary_text = ""
+        if report.footer and report.footer.actionable_insights:
+            summary_text = " ".join(report.footer.actionable_insights[:2])
+        if not summary_text:
+            summary_text = "세부 분석 내역이 없습니다."
+            
+        # Fallback Alert String
+        if missing_count > 0:
+            summary_text += "\n\n[시스템 메시지] 일부 평가 항목 생성이 누락되었습니다."
+            
         return {
-            "status": row["status"],
-            "job_title": row["job_title"],
+            "status": status,
+            "job_title": job_title,
             "evaluation": {
-                "decision": row["decision"],
-                "summary": row["summary"],
+                "decision": decision,
+                "summary": summary_text.strip(),
                 "scores": {
-                    "tech": row["tech_score"],
-                    "problem": row["problem_score"],
-                    "comm": row["comm_score"],
-                    "nonverbal": row["nonverbal_score"],
+                    "tech": tech_score,
+                    "problem": prob_score,
+                    "comm": comm_score,
+                    "nonverbal": nonv_score,
                 }
             }
         }

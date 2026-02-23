@@ -16,3 +16,76 @@ class QuestionGenerator(ABC):
         Must return success=False on failure, never raise exception.
         """
         pass
+
+class LLMQuestionGenerator(QuestionGenerator):
+    """
+    TASK-032: Bridging ILLMProvider to the synchronous SessionEngine Pipeline.
+    """
+    def __init__(self, provider: Any): # provider is ILLMProvider
+        self.provider = provider
+        
+    def generate_question(self, context: Dict[str, Any]) -> QuestionGenerationResult:
+        import asyncio
+        from packages.imh_core.dto import LLMMessageDTO
+        
+        # 1. Build prompt based on context
+        step = context.get("step", 1)
+        job_id = context.get("job_id", "Unknown")
+        history = context.get("question_history", [])
+        
+        system_prompt = (
+            "You are a professional technical interviewer AI. "
+            "Generate ONE concise interview question based on the provided context."
+        )
+        
+        user_prompt = f"Job Category: Developer\nInterview Step: {step}\n"
+        if history:
+            user_prompt += "\nPreviously asked questions (Do NOT repeat these):\n" + "\n".join(f"- {q}" for q in history)
+            
+        user_prompt += "\n\nPlease ask the next interview question. Only output the question text, no conversational filler."
+
+        messages = [LLMMessageDTO(role="user", content=user_prompt)]
+        
+        # 2. Execute Async Provider Synchronously (Thread isolated to avoid event loop conflicts in FastAPI)
+        import threading
+        
+        result_box = []
+        error_box = []
+        
+        def run_in_new_loop():
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                # Assume provider.chat is an async method returning LLMResponseDTO
+                res = loop.run_until_complete(
+                    self.provider.chat(messages=messages, system_prompt=system_prompt)
+                )
+                result_box.append(res)
+                loop.close()
+            except Exception as ex:
+                error_box.append(ex)
+                
+        thread = threading.Thread(target=run_in_new_loop)
+        thread.start()
+        thread.join()
+            
+        if error_box:
+            e = error_box[0]
+            import logging
+            logging.getLogger("imh_providers.llm").error(f"LLM Generation Failed (Tier 1): {e}")
+            return QuestionGenerationResult(
+                content="",
+                metadata={},
+                success=False,
+                error=str(e)
+            )
+            
+        if result_box:
+            response = result_box[0]
+            return QuestionGenerationResult(
+                content=response.content,
+                metadata={"model": getattr(self.provider, "model_name", "unknown"), "usage": response.token_usage},
+                success=True
+            )
+            
+        return QuestionGenerationResult(content="", metadata={}, success=False, error="Unknown thread failure")

@@ -105,10 +105,14 @@
 ## 5. 현재 작업 섹션
 
 ### ACTIVE
-- **TASK-031 (Snapshot Immutability)**: [DONE] L2/L3 Guards implemented & verified.
-- **TASK-032 (Phase 10 Stabilization)**: [Approved Backlog] - R-2 Integrity Hardening.
+- **TASK-033 (End-to-End Stress Test)**: [Approved Backlog] - 실시간 질문 생성 및 동기 평가 부하 검증.
 
-### HOLD
+### DONE
+- **TASK-031 (Snapshot Immutability)**: [DONE] L2/L3 Guards implemented & verified. strict mutability rejection (L2 & L3).
+- **TASK-032 LLM & Evaluation Integration**
+- Goal: `OllamaLLMProvider`와 `OpenAILLMProvider`를 시스템에 연동하고 End-to-End 질문 생성 및 루브릭 평가 파이프라인 정합성 확보.
+- Scope: `packages/imh_providers/llm`, `packages/imh_providers/question.py`, `SessionService` 트랜잭션. RAG Idempotency 및 Threading 고립 적용.
+- Verification: `python scripts/dev/verify_task_032.py` Pass (EXIT 0 with Threaded Idempotency Proof)
 - TASK-016 (TTS Provider): 스트리밍 아키텍처 연동 고려로 인해 일시 보류.
 
 ---
@@ -122,7 +126,15 @@
     - R-3 (LOW): Snapshot UPSERT 갱신 경로 잔존
     - R-4 (LOW): JSONB 인덱스 미비
     - R-5 (LOW): 평가 해상도 제한 (Communication 고정치)
-    - 대응: R-1, R-2, R-3은 안정화 패치(TASK-030~032)로 해소 예정.
+    - **안정화 작업 완료**: 
+    - TASK-030 (Authority First) DONE
+    - TASK-031 (Snapshot Immutable) DONE
+    - TASK-032 (LLM & Evaluation Integration) DONE
+  - PostgreSQL Authority 선행 보장 및 원자성 강화 완료 (TASK-030)
+  - Redis Runtime and Cache Layer 및 통계/관측 계층 구축 완료
+  - LLM Provider 통합 및 동기 평가 엔진 연동 완료 (TASK-032)
+- **향후 계획**:
+  - TASK-033 부하 테스트 및 안정성 검증 후 외부 운영 가능 상태로 전환
 1.  **상태 표기**: 문서 내의 모든 상태는 DONE, ACTIVE, BACKLOG, HOLD, LOCKED, DISABLED 중 하나를 사용한다.
 2. **이모지 금지**: 어떠한 상황에서도 문서 내에 이모지를 사용하지 않는다.
 3. **PASS 기준**: Verification 결과는 반드시 `scripts/verify_task_xxx.py Pass` 형식으로 명시한다.

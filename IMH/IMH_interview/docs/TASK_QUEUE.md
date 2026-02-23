@@ -265,10 +265,18 @@
 
 ---
 
+### TASK-032 LLM & Evaluation Integration
+- Goal: `OllamaLLMProvider`와 `OpenAILLMProvider`를 시스템에 연동하고 End-to-End 질문 생성 및 루브릭 평가 파이프라인 정합성 확보.
+- Scope: `packages/imh_providers/llm`, `packages/imh_providers/question.py`, `SessionService` 트랜잭션. RAG Idempotency 및 Threading 고립 적용.
+- Verification: `python scripts/dev/verify_task_032.py` Pass (EXIT 0 with Threaded Idempotency Proof)
 
 ---
 
-### 2.2 Phase 10 Stabilization (BACKLOG)
+## 2.2 Phase 10 Stabilization (ACTIVE)
+
+### TASK-033 End-to-End Stress Test & Latency Optimization
+- Goal: LLM 질문 생성 및 동기 평가 흐름의 동시성 부하 및 지연시간 최적화.
+- Status: BACKLOG (Ready to Start)
 
 ---
 
@@ -293,13 +301,18 @@
 - Goal: 세션 스냅샷 데이터가 생성 이후 어떠한 경로로도 수정되지 않도록 DB 레벨 제약 강화 (R-3 대응)
 - Scope: `PostgreSQLSessionRepository` UPSERT SQL 및 schema 정의
 - Verification: python scripts/verify_task_031.py Pass
+- Status: DONE
 
----
-## HOLD
-
-### TASK-016 TTS Provider (Text → Speech)
-- Goal: 질문 또는 피드백 음성 출력을 위한 TTS Provider 계층 준비
-- Scope: TTS Provider 인터페이스 정의 및 Mock 기반 파이프라인 구축
-- 보류 사유: Phase 10 완료 후 안정성 데이터 확보 이후 재개 예정
-- 재개 조건: TASK-028 완료 및 스트리밍 아키텍처 범위 고정 이후
+--  - **안정화 작업 완료**: 
+    - TASK-030 (Authority First) DONE
+    - TASK-031 (Snapshot Immutable) DONE
+    - TASK-032 (LLM & Evaluation Integration) DONE
+  - PostgreSQL Authority 선행 보장 및 원자성 강화 완료 (TASK-030)
+  - Redis Runtime and Cache Layer 및 통계/관측 계층 구축 완료
+  - LLM Provider 통합 및 동기 평가 엔진 연동 완료 (TASK-032)
+- **향후 계획**:
+  - TASK-033 부하 테스트 및 안정성 검증 후 외부 운영 가능 상태로 전환
+범위 고정 이후
 - Status: HOLD
+
+</content>

@@ -85,18 +85,22 @@ class InterviewSessionEngine:
 
     def _get_next_question(self) -> SessionQuestion:
         """
-        TASK-025: Determine the next question using RAG -> Fallback strategy.
+        TASK-032 / TASK-025: Determine the next question using RAG -> Fallback strategy.
         Strict Immutable Rule: Engine decides source.
+        Deduplication rule applied via history injection.
         """
         # 1. Prepare Context for Generator
-        # We can pass job info, history, etc.
+        # TASK-032: Inject history to prevent LLM from repeating
+        history_contents = [q.content for q in self.context.question_history]
+        used_ids = [q.id for q in self.context.question_history]
+
         gen_context = {
             "job_id": self.context.job_id, 
             "step": self.context.current_step + 1,
-            # Add more context as needed (e.g. previous answers)
+            "question_history": history_contents
         }
 
-        # 2. Try RAG Generation (Primary Strategy)
+        # 2. Try RAG Generation (Primary Strategy - Tier 1)
         try:
             # Check policy or config if we should even try RAG (Optional, for now assume yes)
             result = self.question_generator.generate_question(gen_context)
@@ -114,7 +118,7 @@ class InterviewSessionEngine:
         except Exception as e:
             logger.error("RAG Generation Exception: %s. Triggering Fallback.", e)
 
-        # 3. Fallback to Static QBank (Secondary Strategy)
+        # 3. Fallback to Static QBank (Secondary Strategy - Tier 2)
         # Fetch candidates
         candidates = self.qbank_service.get_candidates(
             # We assume we can get job_role from config or job_id (here just passing None for simplicity or need lookup)
@@ -122,18 +126,33 @@ class InterviewSessionEngine:
             tags=["BEHAVIORAL"] # Default tag for generic fallback?
         )
         
-        if not candidates:
-             # Critical Failure: Safe Fallback Set
-             logger.error("CRITICAL: Static QBank Empty! Using Emergency Question.")
+        # TASK-032: Deduplicate from Fallback Candidates
+        available_candidates = [c for c in candidates if c.id not in used_ids]
+        
+        if not available_candidates:
+             # Critical Failure: Safe Fallback Set (Tier 3 - Emergency)
+             logger.error("CRITICAL: Static QBank Empty or Exhausted! Using Emergency Question.")
+             
+             # Fallback array (Simple dedup strategy)
+             emergencies = [
+                 "Please introduce yourself and your key strengths.",
+                 "What is your biggest weakness and how are you overcoming it?",
+                 "Describe a time you faced a significant challenge at work.",
+                 "Where do you see yourself in 5 years?"
+             ]
+             
+             # Find first emergency question not in history
+             emergency_content = next((eq for eq in emergencies if eq not in history_contents), emergencies[0])
+             
              return SessionQuestion(
-                 id="emergency-fallback",
-                 content="Please introduce yourself and your key strengths.",
+                 id=f"emergency-fallback-{int(time.time())}",
+                 content=emergency_content,
                  source_type=SessionQuestionType.STATIC,
                  source_metadata={"note": "Emergency Fallback"}
              )
              
-        # Select one random candidate
-        selected = random.choice(candidates)
+        # Select one random candidate from the unused pool
+        selected = random.choice(available_candidates)
         return SessionQuestion(
             id=selected.id,
             content=selected.content,

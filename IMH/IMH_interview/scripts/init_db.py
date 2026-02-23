@@ -170,7 +170,7 @@ async def init_schema():
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS evaluation_scores (
                 report_id VARCHAR(255) PRIMARY KEY,
-                session_id VARCHAR(255) REFERENCES interviews(session_id),
+                session_id VARCHAR(255) UNIQUE REFERENCES interviews(session_id),
                 report_data JSONB NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             );

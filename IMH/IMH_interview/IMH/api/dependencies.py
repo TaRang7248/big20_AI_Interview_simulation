@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import AsyncGenerator, Optional
+from typing import Optional
 from packages.imh_session.infrastructure.postgresql_repo import PostgreSQLSessionRepository
 from packages.imh_service.canary import CanaryManager
 
@@ -21,7 +21,7 @@ from packages.imh_qbank.redis_repository import RedisCandidateRepository
 from packages.imh_qbank.cached_repository import CachedQuestionRepository
 from packages.imh_qbank.repository_interface import QuestionRepository
 from packages.imh_qbank.service import QuestionBankService
-from packages.imh_providers.question import QuestionGenerator
+from packages.imh_providers.question import QuestionGenerator, LLMQuestionGenerator
 from packages.imh_providers.mock_question import MockQuestionGenerator
 import os
 
@@ -32,11 +32,33 @@ def get_config() -> IMHConfig:
     return IMHConfig.load()
 
 @lru_cache
+def get_llm_provider() -> "ILLMProvider":
+    """
+    Singleton LLM Provider Factory (TASK-032).
+    Instantiates Ollama, OpenAI, or Mock based on configuration.
+    """
+    config = get_config()
+    provider_type = config.ACTIVE_LLM_PROVIDER.upper()
+    
+    if provider_type == "OLLAMA":
+        from packages.imh_providers.llm.ollama import OllamaLLMProvider
+        return OllamaLLMProvider(model_name=config.OLLAMA_MODEL)
+    elif provider_type == "OPENAI":
+        from packages.imh_providers.llm.openai import OpenAILLMProvider
+        return OpenAILLMProvider(model_name=config.OPENAI_MODEL)
+    else:
+        from packages.imh_providers.llm.mock import MockLLMProvider
+        return MockLLMProvider(config=config)
+
+
+@lru_cache
 def get_question_generator() -> QuestionGenerator:
     """
-    Singleton Question Generator (Mock for now).
+    Singleton Question Generator.
+    TASK-032: Returns a real generator backed by the configured LLM provider.
     """
-    return MockQuestionGenerator(latency=0.5)
+    provider = get_llm_provider()
+    return LLMQuestionGenerator(provider=provider)
 
 # --- Repositories (Persistence) ---
 

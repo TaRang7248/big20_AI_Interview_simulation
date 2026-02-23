@@ -96,21 +96,40 @@ class PostgreSQLHistoryRepository(HistoryRepository):
             session_id = None
             if report.raw_debug_info and "_session_id" in report.raw_debug_info:
                 session_id = report.raw_debug_info["_session_id"]
-            
-            # Insert into evaluation_scores table (Playbook/ERD 기준: reports -> evaluation_scores)
-            await conn.execute(
+                
+            # TASK-032 Idempotency: True DB-Level atomic UPSERT
+            # Use ON CONFLICT (session_id) DO UPDATE to guarantee idempotency under concurrent load
+            if session_id:
+                query = """
+                    INSERT INTO evaluation_scores (report_id, session_id, report_data, created_at)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (session_id) DO UPDATE 
+                    SET report_data = EXCLUDED.report_data
+                    RETURNING report_id;
                 """
-                INSERT INTO evaluation_scores (report_id, session_id, report_data, created_at)
-                VALUES ($1, $2, $3, $4)
-                """,
-                interview_id,
-                session_id,  # Can be None if not provided
-                json.dumps(report_data),
-                datetime.now()
-            )
-            
-            logger.info(f"Report saved: {interview_id}")
-            return interview_id
+                result_id = await conn.fetchval(
+                    query,
+                    interview_id,
+                    session_id,
+                    json.dumps(report_data),
+                    datetime.now()
+                )
+                logger.info(f"Report saved (Upsert): {result_id}")
+                return result_id
+            else:
+                # Fallback for reports without session_id (Playground etc)
+                await conn.execute(
+                    """
+                    INSERT INTO evaluation_scores (report_id, session_id, report_data, created_at)
+                    VALUES ($1, $2, $3, $4)
+                    """,
+                    interview_id,
+                    None,
+                    json.dumps(report_data),
+                    datetime.now()
+                )
+                logger.info(f"Report saved: {interview_id}")
+                return interview_id
             
         except Exception as e:
             logger.exception(f"Failed to save report: {e}")

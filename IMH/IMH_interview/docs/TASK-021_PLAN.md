@@ -76,7 +76,7 @@ sequenceDiagram
 
     Note over User, Admin: [Phase 3: 종료 및 평가 (Completion)]
     System->>SessionState: 세션 종료 처리 (COMPLETED)
-    System->>EvalEngine: 5. 평가 요청 (비동기 트리거)
+    System->>EvalEngine: 5. 평가 요청 (동기 트리거)
     EvalEngine->>SessionState: 6. 세션 데이터 로드 (답변+문맥)
     EvalEngine->>SessionState: 7. 평가 기준 로드 (Instance Snapshot 참조)
     EvalEngine->>SessionState: 평가 결과(Result) 저장
