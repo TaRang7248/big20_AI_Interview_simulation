@@ -25,30 +25,31 @@ import time
 import traceback
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, TypedDict, Annotated, Sequence, Literal
-from operator import add
+from typing import Dict, List, Optional, TypedDict
 
-# ── LangGraph ──
-from langgraph.graph import StateGraph, END, START
 from langgraph.checkpoint.memory import MemorySaver
 
+# ── LangGraph ──
+from langgraph.graph import END, START, StateGraph
 
 # ========================================================================== #
 #                            Phase & State 정의                               #
 # ========================================================================== #
 
+
 class InterviewPhase(str, Enum):
     """면접 단계 열거형"""
-    IDLE = "idle"                      # 초기 상태 (세션 생성 직후)
-    GREETING = "greeting"              # 인사 / 자기소개 요청
+
+    IDLE = "idle"  # 초기 상태 (세션 생성 직후)
+    GREETING = "greeting"  # 인사 / 자기소개 요청
     GENERATE_QUESTION = "generate_question"  # LLM 질문 생성
-    WAIT_ANSWER = "wait_answer"        # 사용자 답변 대기
+    WAIT_ANSWER = "wait_answer"  # 사용자 답변 대기
     PROCESS_ANSWER = "process_answer"  # 답변 수신 후 전처리
-    EVALUATE = "evaluate"              # 답변 평가 (병렬: 평가 + 감정)
-    ROUTE_NEXT = "route_next"          # 다음 단계 라우팅
-    FOLLOW_UP = "follow_up"            # 꼬리질문 생성
-    COMPLETE = "complete"              # 면접 종료 + 보고서 생성
-    ERROR = "error"                    # 오류 복구
+    EVALUATE = "evaluate"  # 답변 평가 (병렬: 평가 + 감정)
+    ROUTE_NEXT = "route_next"  # 다음 단계 라우팅
+    FOLLOW_UP = "follow_up"  # 꼬리질문 생성
+    COMPLETE = "complete"  # 면접 종료 + 보고서 생성
+    ERROR = "error"  # 오류 복구
 
 
 class WorkflowState(TypedDict, total=False):
@@ -56,18 +57,18 @@ class WorkflowState(TypedDict, total=False):
 
     # ── 세션 식별 ──
     session_id: str
-    phase: str                  # InterviewPhase 값
+    phase: str  # InterviewPhase 값
 
     # ── 입력 / 출력 ──
-    user_input: str             # 현재 턴의 사용자 입력
-    response: str               # AI 면접관 응답 (최종 출력)
+    user_input: str  # 현재 턴의 사용자 입력
+    response: str  # AI 면접관 응답 (최종 출력)
 
     # ── 질문 추적 ──
-    question_count: int         # 현재까지 질문 수 (1부터)
-    max_questions: int          # 최대 질문 수 (기본 5)
-    current_topic: str          # 현재 질문 주제
-    topic_question_count: int   # 해당 주제 내 질문 수
-    topic_history: List[Dict]   # 주제 변경 이력
+    question_count: int  # 현재까지 질문 수 (1부터)
+    max_questions: int  # 최대 질문 수 (기본 5)
+    current_topic: str  # 현재 질문 주제
+    topic_question_count: int  # 해당 주제 내 질문 수
+    topic_history: List[Dict]  # 주제 변경 이력
 
     # ── 꼬리질문 ──
     follow_up_mode: bool
@@ -75,25 +76,25 @@ class WorkflowState(TypedDict, total=False):
     needs_follow_up: bool
 
     # ── 평가 ──
-    last_evaluation: Optional[Dict]     # 직전 답변 평가 결과
-    evaluations: List[Dict]             # 누적 평가
+    last_evaluation: Optional[Dict]  # 직전 답변 평가 결과
+    evaluations: List[Dict]  # 누적 평가
     pending_eval_task_id: Optional[str]  # Celery 평가 태스크 ID
 
     # ── 감정 ──
-    last_emotion: Optional[Dict]        # 직전 감정 분석 결과 (DeepFace)
-    emotion_history: List[Dict]         # 감정 변화 이력
-    emotion_adaptive_mode: str          # "normal" | "encouraging" | "challenging"
+    last_emotion: Optional[Dict]  # 직전 감정 분석 결과 (DeepFace)
+    emotion_history: List[Dict]  # 감정 변화 이력
+    emotion_adaptive_mode: str  # "normal" | "encouraging" | "challenging"
 
     # ── 음성 감정 (Hume Prosody) ──
-    last_prosody: Optional[Dict]        # 직전 Prosody 분석 결과
-    prosody_history: List[Dict]         # Prosody 변화 이력
+    last_prosody: Optional[Dict]  # 직전 Prosody 분석 결과
+    prosody_history: List[Dict]  # Prosody 변화 이력
 
     # ── 대화 기록 ──
     chat_history: List[Dict]
-    memory_messages: list       # LangChain 메시지 리스트
+    memory_messages: list  # LangChain 메시지 리스트
 
     # ── 감사 / 추적 ──
-    trace: List[Dict]           # [{node, timestamp, duration_ms, details}]
+    trace: List[Dict]  # [{node, timestamp, duration_ms, details}]
     error_info: Optional[str]
 
     # ── 외부 연결 플래그 ──
@@ -105,6 +106,7 @@ class WorkflowState(TypedDict, total=False):
 # ========================================================================== #
 #                          Trace / Audit Helpers                              #
 # ========================================================================== #
+
 
 def _trace_entry(node: str, details: str = "", duration_ms: float = 0) -> Dict:
     """감사 추적 엔트리 생성"""
@@ -119,6 +121,7 @@ def _trace_entry(node: str, details: str = "", duration_ms: float = 0) -> Dict:
 # ========================================================================== #
 #                            Node 함수 정의                                    #
 # ========================================================================== #
+
 
 class InterviewNodes:
     """
@@ -153,10 +156,13 @@ class InterviewNodes:
         if session:
             chat_history = session.get("chat_history", [])
             chat_history.append({"role": "assistant", "content": greeting_msg})
-            self._state_mgr.update_session(session_id, {
-                "chat_history": chat_history,
-                "question_count": 1,
-            })
+            self._state_mgr.update_session(
+                session_id,
+                {
+                    "chat_history": chat_history,
+                    "question_count": 1,
+                },
+            )
 
         elapsed = (time.perf_counter() - t0) * 1000
         trace = ws.get("trace", [])
@@ -195,11 +201,13 @@ class InterviewNodes:
 
         elapsed = (time.perf_counter() - t0) * 1000
         trace = ws.get("trace", [])
-        trace.append(_trace_entry(
-            "process_answer",
-            f"답변 길이={len(user_input)}자, 이전질문 존재={bool(previous_question)}",
-            elapsed,
-        ))
+        trace.append(
+            _trace_entry(
+                "process_answer",
+                f"답변 길이={len(user_input)}자, 이전질문 존재={bool(previous_question)}",
+                elapsed,
+            )
+        )
 
         return {
             "phase": InterviewPhase.PROCESS_ANSWER.value,
@@ -243,28 +251,53 @@ class InterviewNodes:
                     try:
                         # 동적 import (순환 방지)
                         from celery_tasks import evaluate_answer_task
+
                         task = evaluate_answer_task.delay(
                             session_id, previous_question, user_input, ""
                         )
                         pending_task_id = task.id
                         # 태스크 ID를 세션에 저장
                         pending_tasks = session.get("pending_eval_tasks", [])
-                        pending_tasks.append({
-                            "task_id": task.id,
+                        pending_tasks.append(
+                            {
+                                "task_id": task.id,
+                                "question": previous_question,
+                                "answer": user_input,
+                                "submitted_at": time.time(),
+                            }
+                        )
+                        self._state_mgr.update_session(
+                            session_id,
+                            {
+                                "pending_eval_tasks": pending_tasks,
+                            },
+                        )
+                    except Exception as e:
+                        print(f"⚠️ [Workflow] Celery 평가 오프로드 실패: {e}")
+                # Celery 불가 시 → 인라인 평가 스킵 (LLM 이중 호출 방지)
+                # 평가는 면접 종료 후 collect_celery_evaluations 또는
+                # start_interview_completion_workflow에서 일괄 처리
+                elif previous_question and self._interviewer.llm:
+                    # evaluate_answer를 여기서 호출하면 generate_question과 합쳐
+                    # LLM 2회 순차 호출 → 응답 시간 2배 증가 (GPU 경합)
+                    # 대신 세션에 pending 정보만 기록하고 스킵
+                    pending_tasks = session.get("pending_eval_tasks", [])
+                    pending_tasks.append(
+                        {
+                            "task_id": f"deferred_{time.time()}",
                             "question": previous_question,
                             "answer": user_input,
                             "submitted_at": time.time(),
-                        })
-                        self._state_mgr.update_session(session_id, {
-                            "pending_eval_tasks": pending_tasks,
-                        })
-                    except Exception as e:
-                        print(f"⚠️ [Workflow] Celery 평가 오프로드 실패: {e}")
-                # Celery 불가 시 로컬 평가
-                elif previous_question and self._interviewer.llm:
-                    eval_result = await self._interviewer.evaluate_answer(
-                        session_id, previous_question, user_input
+                            "deferred": True,  # Celery 미사용, 나중에 일괄 평가 표시
+                        }
                     )
+                    self._state_mgr.update_session(
+                        session_id,
+                        {
+                            "pending_eval_tasks": pending_tasks,
+                        },
+                    )
+                    print("📋 [Workflow] 평가 지연 저장 (Celery 미가용, LLM 경합 방지)")
             except Exception as e:
                 print(f"⚠️ [Workflow] 평가 오류: {e}")
 
@@ -299,6 +332,7 @@ class InterviewNodes:
             # ── 양쪽 다 있을 때: 멀티모달 가중 융합 (Prosody 60% + DeepFace 40%) ──
             try:
                 from hume_prosody_service import get_prosody_service
+
                 svc = get_prosody_service()
                 if svc:
                     prosody_indicators = prosody_result.get("interview_indicators", {})
@@ -307,7 +341,9 @@ class InterviewNodes:
                         deepface_emotion=emotion_result,
                         prosody_weight=0.5,
                     )
-                    emotion_adaptive_mode = fusion.get("emotion_adaptive_mode", "normal")
+                    emotion_adaptive_mode = fusion.get(
+                        "emotion_adaptive_mode", "normal"
+                    )
                     multimodal_fusion = fusion
             except Exception:
                 # 융합 실패 시 Prosody 단독 사용
@@ -328,18 +364,22 @@ class InterviewNodes:
         # 감정 이력 업데이트
         emotion_history = ws.get("emotion_history", [])
         if emotion_result:
-            emotion_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "emotion": emotion_result,
-            })
+            emotion_history.append(
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "emotion": emotion_result,
+                }
+            )
 
         # Prosody 이력 업데이트
         prosody_history = ws.get("prosody_history", [])
         if prosody_result:
-            prosody_history.append({
-                "timestamp": datetime.now().isoformat(),
-                "prosody": prosody_result,
-            })
+            prosody_history.append(
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "prosody": prosody_result,
+                }
+            )
 
         # 평가 누적
         evaluations = ws.get("evaluations", [])
@@ -348,15 +388,17 @@ class InterviewNodes:
 
         elapsed = (time.perf_counter() - t0) * 1000
         trace = ws.get("trace", [])
-        trace.append(_trace_entry(
-            "evaluate",
-            f"celery_task={pending_task_id or 'N/A'}, "
-            f"emotion={emotion_adaptive_mode}, "
-            f"prosody={prosody_result.get('dominant_indicator') if prosody_result else 'N/A'}, "
-            f"fusion={'yes' if multimodal_fusion else 'no'}, "
-            f"eval_score={eval_result.get('total_score') if eval_result else 'pending'}",
-            elapsed,
-        ))
+        trace.append(
+            _trace_entry(
+                "evaluate",
+                f"celery_task={pending_task_id or 'N/A'}, "
+                f"emotion={emotion_adaptive_mode}, "
+                f"prosody={prosody_result.get('dominant_indicator') if prosody_result else 'N/A'}, "
+                f"fusion={'yes' if multimodal_fusion else 'no'}, "
+                f"eval_score={eval_result.get('total_score') if eval_result else 'pending'}",
+                elapsed,
+            )
+        )
 
         return {
             "phase": InterviewPhase.EVALUATE.value,
@@ -386,7 +428,9 @@ class InterviewNodes:
         user_input = ws.get("user_input", "")
 
         session = self._state_mgr.get_session(session_id)
-        question_count = ws.get("question_count", session.get("question_count", 1) if session else 1)
+        question_count = ws.get(
+            "question_count", session.get("question_count", 1) if session else 1
+        )
         max_questions = ws.get("max_questions", 5)
 
         # ── 꼬리질문 판단 ──
@@ -402,8 +446,7 @@ class InterviewNodes:
             if topic_count >= 2:
                 needs_follow_up = False
                 follow_up_reason = "주제 전환 필요"
-                
-                
+
         # LangGraph의 노드(Node) 내부에서 실행되는 로직으로, 사용자의 감정 상태에 따라 그래프의 흐름(다음 동작)을 결정하는 오케스트레이션의 핵심 로직
         # ── 감정 기반 적응 (조건부 분기 확장) ──
         emotion_mode = ws.get("emotion_adaptive_mode", "normal")
@@ -414,12 +457,14 @@ class InterviewNodes:
 
         elapsed = (time.perf_counter() - t0) * 1000
         trace = ws.get("trace", [])
-        trace.append(_trace_entry(
-            "route_next",
-            f"q={question_count}/{max_questions}, follow_up={needs_follow_up}, "
-            f"emotion_mode={emotion_mode}, reason={follow_up_reason}",
-            elapsed,
-        ))
+        trace.append(
+            _trace_entry(
+                "route_next",
+                f"q={question_count}/{max_questions}, follow_up={needs_follow_up}, "
+                f"emotion_mode={emotion_mode}, reason={follow_up_reason}",
+                elapsed,
+            )
+        )
 
         return {
             "phase": InterviewPhase.ROUTE_NEXT.value,
@@ -447,9 +492,12 @@ class InterviewNodes:
         if emotion_mode != "normal" and session:
             # 일시적 프롬프트 보강 → generate_llm_question 내부에서 활용하도록
             # 세션에 emotion_adaptive_mode 저장
-            self._state_mgr.update_session(session_id, {
-                "emotion_adaptive_mode": emotion_mode,
-            })
+            self._state_mgr.update_session(
+                session_id,
+                {
+                    "emotion_adaptive_mode": emotion_mode,
+                },
+            )
 
         # ── LLM 질문 생성 (기존 AIInterviewer 로직 활용) ──
         question = await self._interviewer.generate_llm_question(session_id, user_input)
@@ -464,17 +512,21 @@ class InterviewNodes:
         # 주제 추적 업데이트
         if user_input and user_input not in ("[START]", "[NEXT]"):
             is_follow_up = ws.get("follow_up_mode", False)
-            self._interviewer.update_topic_tracking(session_id, user_input, is_follow_up)
+            self._interviewer.update_topic_tracking(
+                session_id, user_input, is_follow_up
+            )
 
         session = self._state_mgr.get_session(session_id)
 
         elapsed = (time.perf_counter() - t0) * 1000
         trace = ws.get("trace", [])
-        trace.append(_trace_entry(
-            "generate_question",
-            f"질문 길이={len(question)}자, emotion_mode={emotion_mode}, q_count={new_q_count}",
-            elapsed,
-        ))
+        trace.append(
+            _trace_entry(
+                "generate_question",
+                f"질문 길이={len(question)}자, emotion_mode={emotion_mode}, q_count={new_q_count}",
+                elapsed,
+            )
+        )
 
         return {
             "response": question,
@@ -512,11 +564,13 @@ class InterviewNodes:
 
         elapsed = (time.perf_counter() - t0) * 1000
         trace = ws.get("trace", [])
-        trace.append(_trace_entry(
-            "follow_up",
-            f"꼬리질문 생성, 길이={len(question)}자, reason={ws.get('follow_up_reason', '')}",
-            elapsed,
-        ))
+        trace.append(
+            _trace_entry(
+                "follow_up",
+                f"꼬리질문 생성, 길이={len(question)}자, reason={ws.get('follow_up_reason', '')}",
+                elapsed,
+            )
+        )
 
         return {
             "response": question,
@@ -536,17 +590,22 @@ class InterviewNodes:
         t0 = time.perf_counter()
         session_id = ws["session_id"]
 
-        closing_msg = "면접이 종료되었습니다. 수고하셨습니다. 결과 보고서를 확인해주세요."
+        closing_msg = (
+            "면접이 종료되었습니다. 수고하셨습니다. 결과 보고서를 확인해주세요."
+        )
 
         # 서버 세션 업데이트
         session = self._state_mgr.get_session(session_id)
         if session:
             chat_history = session.get("chat_history", [])
             chat_history.append({"role": "assistant", "content": closing_msg})
-            self._state_mgr.update_session(session_id, {
-                "chat_history": chat_history,
-                "status": "completed",
-            })
+            self._state_mgr.update_session(
+                session_id,
+                {
+                    "chat_history": chat_history,
+                    "status": "completed",
+                },
+            )
 
         # 백그라운드 리포트 워크플로우 시작
         try:
@@ -558,6 +617,7 @@ class InterviewNodes:
         if self._event_bus:
             try:
                 from events import EventType as AppEventType
+
                 await self._event_bus.publish(
                     AppEventType.SESSION_ENDED,
                     session_id=session_id,
@@ -569,7 +629,9 @@ class InterviewNodes:
 
         elapsed = (time.perf_counter() - t0) * 1000
         trace = ws.get("trace", [])
-        trace.append(_trace_entry("complete", "면접 종료 + 리포트 워크플로우 시작", elapsed))
+        trace.append(
+            _trace_entry("complete", "면접 종료 + 리포트 워크플로우 시작", elapsed)
+        )
 
         return {
             "response": closing_msg,
@@ -588,7 +650,13 @@ class InterviewNodes:
         fallback_msg = "죄송합니다. 일시적인 오류가 발생했습니다. 다시 시도해 주세요."
 
         trace = ws.get("trace", [])
-        trace.append(_trace_entry("error_recovery", f"오류: {error_info}", (time.perf_counter() - t0) * 1000))
+        trace.append(
+            _trace_entry(
+                "error_recovery",
+                f"오류: {error_info}",
+                (time.perf_counter() - t0) * 1000,
+            )
+        )
 
         return {
             "response": fallback_msg,
@@ -600,6 +668,7 @@ class InterviewNodes:
 # ========================================================================== #
 #                         Edge 라우팅 함수                                     #
 # ========================================================================== #
+
 
 def route_after_process(state: WorkflowState) -> str:
     """process_answer 후 → evaluate 로 이동"""
@@ -657,6 +726,7 @@ def route_initial(state: WorkflowState) -> str:
 # ========================================================================== #
 #                     InterviewWorkflow — 그래프 빌더                          #
 # ========================================================================== #
+
 
 class InterviewWorkflow:
     """
@@ -804,7 +874,9 @@ class InterviewWorkflow:
             "current_topic": current_topic,
             "topic_question_count": topic_question_count,
             "topic_history": session.get("topic_history", []) if session else [],
-            "follow_up_mode": session.get("follow_up_mode", False) if session else False,
+            "follow_up_mode": session.get("follow_up_mode", False)
+            if session
+            else False,
             "follow_up_reason": "",
             "needs_follow_up": False,
             "last_evaluation": None,
@@ -847,14 +919,16 @@ class InterviewWorkflow:
         # ── 실행 추적 저장 ──
         if session_id not in self._execution_traces:
             self._execution_traces[session_id] = []
-        self._execution_traces[session_id].append({
-            "turn": len(self._execution_traces[session_id]) + 1,
-            "user_input": user_input[:100],
-            "phase": result.get("phase", "unknown"),
-            "response_preview": result.get("response", "")[:100],
-            "trace": result.get("trace", []),
-            "timestamp": datetime.now().isoformat(),
-        })
+        self._execution_traces[session_id].append(
+            {
+                "turn": len(self._execution_traces[session_id]) + 1,
+                "user_input": user_input[:100],
+                "phase": result.get("phase", "unknown"),
+                "response_preview": result.get("response", "")[:100],
+                "trace": result.get("trace", []),
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
 
         return result
 
@@ -883,11 +957,13 @@ class InterviewWorkflow:
         results = []
         try:
             for cp in self._checkpointer.list(config, limit=limit):
-                results.append({
-                    "checkpoint_id": cp.get("id"),
-                    "timestamp": cp.get("ts"),
-                    "metadata": cp.get("metadata", {}),
-                })
+                results.append(
+                    {
+                        "checkpoint_id": cp.get("id"),
+                        "timestamp": cp.get("ts"),
+                        "metadata": cp.get("metadata", {}),
+                    }
+                )
         except Exception as e:
             print(f"⚠️ 체크포인트 목록 조회 실패: {e}")
         return results
@@ -963,16 +1039,32 @@ class InterviewWorkflow:
                 {"id": "error_recovery", "description": "오류 복구"},
             ],
             "edges": [
-                {"from": "START", "to": "greeting", "condition": "user_input == '[START]'"},
-                {"from": "START", "to": "generate_question", "condition": "user_input == '[NEXT]'"},
+                {
+                    "from": "START",
+                    "to": "greeting",
+                    "condition": "user_input == '[START]'",
+                },
+                {
+                    "from": "START",
+                    "to": "generate_question",
+                    "condition": "user_input == '[NEXT]'",
+                },
                 {"from": "START", "to": "process_answer", "condition": "일반 답변"},
                 {"from": "greeting", "to": "END", "condition": None},
                 {"from": "process_answer", "to": "evaluate", "condition": "정상"},
                 {"from": "process_answer", "to": "error_recovery", "condition": "오류"},
                 {"from": "evaluate", "to": "route_next", "condition": "정상"},
                 {"from": "evaluate", "to": "error_recovery", "condition": "오류"},
-                {"from": "route_next", "to": "complete", "condition": "question_count >= max_questions"},
-                {"from": "route_next", "to": "follow_up", "condition": "needs_follow_up && topic_count < 2"},
+                {
+                    "from": "route_next",
+                    "to": "complete",
+                    "condition": "question_count >= max_questions",
+                },
+                {
+                    "from": "route_next",
+                    "to": "follow_up",
+                    "condition": "needs_follow_up && topic_count < 2",
+                },
                 {"from": "route_next", "to": "generate_question", "condition": "그 외"},
                 {"from": "generate_question", "to": "END", "condition": None},
                 {"from": "follow_up", "to": "END", "condition": None},
@@ -996,10 +1088,14 @@ class InterviewWorkflow:
 _workflow_instance: Optional[InterviewWorkflow] = None
 
 
-def init_workflow(server_state, interviewer_instance, event_bus=None) -> InterviewWorkflow:
+def init_workflow(
+    server_state, interviewer_instance, event_bus=None
+) -> InterviewWorkflow:
     """워크플로우 인스턴스를 초기화하고 반환"""
     global _workflow_instance
-    _workflow_instance = InterviewWorkflow(server_state, interviewer_instance, event_bus)
+    _workflow_instance = InterviewWorkflow(
+        server_state, interviewer_instance, event_bus
+    )
     return _workflow_instance
 
 
