@@ -209,6 +209,32 @@ def sanitize_user_input(text: str) -> str:
     return " ".join(compact_tokens).strip()
 
 
+import re as _re  # strip_think_tokens 에서 사용
+
+
+def strip_think_tokens(text: str) -> str:
+    """qwen3 모델의 <think>...</think> 내부 추론 블록을 제거합니다.
+
+    qwen3:4b 에서 think=False 설정에도 불구하고 일부 Ollama/langchain_ollama
+    버전에서는 <think>블록</think>이 응답에 포함될 수 있습니다.
+    이를 제거하지 않으면 면접관이 내부 추론 내용을 그대로 말하게 되어
+    "엉뚱한 답변"으로 보이는 현상이 발생합니다.
+
+    Examples
+    --------
+    >>> strip_think_tokens('<think>이 지원자에게 경험을 물어보자</think>프로젝트 경험에 대해 말씀해주세요.')
+    '프로젝트 경험에 대해 말씀해주세요.'
+    >>> strip_think_tokens('정상적인 질문입니다.')
+    '정상적인 질문입니다.'
+    """
+    # 1) <think>...</think> 블록 전체 제거 (멀티라인 포함)
+    cleaned = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL)
+    # 2) 닫히지 않은 <think>... (응답 끝까지) 제거
+    cleaned = _re.sub(r"<think>.*$", "", cleaned, flags=_re.DOTALL)
+    # 3) 잔여 공백 정리
+    return cleaned.strip()
+
+
 async def run_llm_async(llm, messages):
     """LLM invoke를 비동기로 실행 (이벤트 루프 블로킹 방지 + 타임아웃)
 
@@ -2005,17 +2031,29 @@ class AIInterviewer:
             # ========== 7. LLM 호출 - 비동기 ==========
             # ThreadPoolExecutor로 블로킹 LLM 호출을 비동기로 실행
             response = await run_llm_async(self.question_llm, messages)
-            next_question = response.content.strip()
+            # ── qwen3 <think> 토큰 제거 ──
+            # think=False 설정에도 일부 버전에서 <think>블록</think>이 포함될 수 있음
+            # 제거하지 않으면 LLM 내부 추론이 면접관 발화로 노출됨 ("엉뚱한 답변" 원인)
+            next_question = strip_think_tokens(response.content)
+
+            # ── 빈 응답 방어 ──
+            # <think> 블록만 있고 실제 질문이 없는 경우 폴백 질문 사용
+            if not next_question:
+                print("⚠️ [LLM] <think> 제거 후 빈 응답 → 폴백 질문 사용")
+                fallback = [
+                    "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
+                    "구체적인 예시를 들어 설명해주실 수 있나요?",
+                    "그 결과는 어땠나요?",
+                    "다른 프로젝트 경험도 공유해주시겠어요?",
+                    "마지막으로 하고 싶은 말씀이 있으신가요?",
+                ]
+                next_question = fallback[min(question_count, len(fallback) - 1)]
 
             # ========== 8. 주제 추적 업데이트 ==========
             self.update_topic_tracking(session_id, user_answer, needs_follow_up)
 
-            # 질문 카운트 증가 (꼬리질문이 아닐 때만)
-            if not needs_follow_up:
-                state.update_session(session_id, {"question_count": question_count + 1})
-            else:
-                # 꼬리질문도 카운트에 포함 (총 질문 수 제한을 위해)
-                state.update_session(session_id, {"question_count": question_count + 1})
+            # 질문 카운트 증가 (꼬리질문 포함, 총 질문 수 제한을 위해)
+            state.update_session(session_id, {"question_count": question_count + 1})
 
             return next_question
 
@@ -2135,19 +2173,27 @@ class AIInterviewer:
                     llm_available=LLM_AVAILABLE,
                 )
                 response_text = result.get("response", "")
+                # ── qwen3 <think> 토큰 제거 (워크플로우 경로) ──
+                if response_text:
+                    response_text = strip_think_tokens(response_text)
                 if response_text:
                     return response_text
                 # response가 빈 경우 폴백
+                # ⚠️ 주의: LangGraph 내부에서 이미 chat_history에 user 답변이
+                #    저장되었으므로, 절차적 폴백에서 중복 저장하지 않도록 플래그 설정
                 print("⚠️ [Workflow] 응답이 비어있음 → 절차적 로직으로 폴백")
             except Exception as e:
                 print(f"⚠️ [Workflow] 실행 오류 → 절차적 로직으로 폴백: {e}")
 
         # ========== 절차적 폴백 경로 (기존 로직) ==========
+        # LangGraph가 실패/빈 응답일 때만 진입합니다.
+        # LangGraph의 process_answer 노드가 이미 chat_history에 유저 답변을
+        # 저장했을 수 있으므로, 중복 저장을 방지하기 위해 체크합니다.
         session = state.get_session(session_id)
         if not session:
             return "세션을 찾을 수 없습니다."
 
-        # 대화 기록 업데이트
+        # 대화 기록 가져오기
         chat_history = session.get("chat_history", [])
 
         # 특수 메시지 처리: [START] - 첫 번째 질문 반환 (자기소개)
@@ -2171,9 +2217,18 @@ class AIInterviewer:
             return next_question
 
         # 일반 답변 처리
-        # 사용자 답변 저장
-        chat_history.append({"role": "user", "content": user_input})
-        state.update_session(session_id, {"chat_history": chat_history})
+        # ── 이중 저장 방지: LangGraph process_answer 노드가 이미 저장했는지 확인 ──
+        # chat_history 마지막 항목이 동일한 유저 답변이면 중복 추가 스킵
+        already_saved = (
+            chat_history
+            and chat_history[-1].get("role") == "user"
+            and chat_history[-1].get("content") == user_input
+        )
+        if not already_saved:
+            chat_history.append({"role": "user", "content": user_input})
+            state.update_session(session_id, {"chat_history": chat_history})
+        else:
+            print("ℹ️ [Fallback] 유저 답변 이미 저장됨 → 중복 추가 스킵")
 
         # LLM으로 다음 질문 생성과 백그라운드 평가를 처리
         # 이전 질문 가져오기 (평가용)
