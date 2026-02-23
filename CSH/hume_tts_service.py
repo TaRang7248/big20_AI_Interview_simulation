@@ -187,98 +187,111 @@ class HumeTTSService:
         return b"".join(audio_chunks)
 
     async def generate_speech_simple(
-        self, text: str, output_file: Optional[str] = None, use_token_auth: bool = True
+        self, text: str, output_file: Optional[str] = None
     ) -> Optional[str]:
         """
         간단한 TTS 생성 (REST API 사용)
 
-        Hume AI의 TTS REST API를 사용하여 텍스트를 음성으로 변환
-        OAuth2 토큰 인증 또는 API 키 인증을 지원합니다.
+        Hume AI의 Octave TTS REST API를 사용하여 텍스트를 음성으로 변환합니다.
+        인증은 X-Hume-Api-Key 헤더 방식만 지원됩니다.
+        (OAuth2 Bearer 토큰은 TTS 엔드포인트에서 403 에러를 반환하므로 사용하지 않습니다)
 
         Args:
             text: 변환할 텍스트
             output_file: 저장할 파일 경로 (선택)
-            use_token_auth: True면 OAuth2 토큰 인증, False면 API 키 인증
 
         Returns:
             저장된 파일 경로 또는 None
         """
+        import json as _json  # JSON 응답 파싱용
+
         import aiohttp  # 비동기(Async) 방식으로 HTTP 통신(웹 요청)을 처리해주는 라이브러리
 
         print(f"🔊 [Hume TTS] 음성 생성 중... (텍스트 길이: {len(text)})")
 
-        # Hume AI TTS REST API 엔드포인트
-        url = "https://api.hume.ai/v0/evi/tts"
+        # ========== Hume Octave TTS REST API 엔드포인트 ==========
+        # ⚠️ 주의: /v0/evi/tts 는 EVI(음성 대화) 전용이며 TTS와는 별도 서비스임
+        # Octave TTS는 /v0/tts (non-streaming JSON) 또는 /v0/tts/file (파일 다운로드) 사용
+        url = "https://api.hume.ai/v0/tts"
 
-        if use_token_auth and HUME_SECRET_KEY:
-            # OAuth2 토큰 인증 사용
-            access_token = await get_hume_access_token()
-            if not access_token:
-                print("❌ 토큰 인증 실패, API 키 인증으로 폴백합니다.")
-                if not self.api_key:
-                    print("❌ HUME_API_KEY도 설정되지 않았습니다.")
-                    return None
-                headers = {
-                    "X-Hume-Api-Key": self.api_key,
-                    "Content-Type": "application/json",
-                }
-            else:
-                headers = {
-                    "Authorization": f"Bearer {access_token}",
-                    "Content-Type": "application/json",
-                }
-                print("🔐 토큰 인증 사용 중")
-        else:
-            # API 키 인증 사용
-            if not self.api_key:
-                print("❌ HUME_API_KEY가 필요합니다.")
-                return None
-            headers = {
-                "X-Hume-Api-Key": self.api_key,
-                "Content-Type": "application/json",
-            }
-        # 전송 데이터(Payload) 구성
+        # ========== 인증 헤더 구성 ==========
+        # Hume TTS는 X-Hume-Api-Key 헤더 인증만 지원함
+        # OAuth2 Bearer 토큰을 보내면 403 Forbidden ("Credentials were invalid for this resource")
+        if not self.api_key:
+            print("❌ HUME_API_KEY가 필요합니다. .env 파일에 추가해주세요.")
+            return None
+
+        headers = {
+            "X-Hume-Api-Key": self.api_key,
+            "Content-Type": "application/json",
+        }
+
+        # ========== 전송 데이터(Payload) 구성 — Octave utterances 형식 ==========
+        # Hume Octave TTS API는 'utterances' 배열 형식을 사용
+        # 각 utterance에는 text, voice(name + provider), description(선택) 등이 포함됨
+        voice_name = (
+            self.voice_config.voice_name if hasattr(self, "voice_config") else "ITO"
+        )
         payload = {
-            "text": text,
-            "voice": {
-                "name": "ITO"  # Hume 기본 음성
-            },
+            "utterances": [
+                {
+                    "text": text,
+                    "voice": {
+                        "name": voice_name,  # Hume 기본 음성 (ITO)
+                        "provider": "HUME_AI",  # 필수: 음성 제공자 명시
+                    },
+                }
+            ],
         }
 
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(url, headers=headers, json=payload) as response:
                     if response.status == 200:
-                        audio_data = await response.read()
+                        # ========== 응답 파싱 — Octave TTS JSON 응답 형식 ==========
+                        # /v0/tts 엔드포인트는 JSON으로 응답하며, 구조는 다음과 같음:
+                        # {
+                        #   "request_id": "...",
+                        #   "generations": [
+                        #     {
+                        #       "generation_id": "...",
+                        #       "duration": 1.23,
+                        #       "file_size": 12345,
+                        #       "encoding": "mp3",
+                        #       "audio": "<base64 인코딩된 전체 오디오>",
+                        #       "snippets": [...]
+                        #     }
+                        #   ]
+                        # }
+                        resp_text = await response.text()
+                        resp_data = _json.loads(resp_text)
 
-                        if output_file:
-                            with open(output_file, "wb") as f:
-                                f.write(audio_data)
-                            print(f"💾 [Hume TTS] 저장 완료: {output_file}")
-                            return output_file
-                        else:
-                            # 임시 파일로 저장
-                            temp_file = "hume_tts_output.mp3"
-                            with open(temp_file, "wb") as f:
-                                f.write(audio_data)
-                            return temp_file
+                        # generations 배열에서 첫 번째 생성 결과의 오디오 추출
+                        generations = resp_data.get("generations", [])
+                        if not generations:
+                            print("❌ [Hume TTS] 응답에 generations 데이터가 없습니다.")
+                            return None
+
+                        # generation 최상위의 'audio' 필드에서 base64 오디오 직접 추출
+                        # (snippets는 list of list 구조라 audio 필드가 없음)
+                        audio_b64 = generations[0].get("audio", "")
+                        if not audio_b64:
+                            print("❌ [Hume TTS] 오디오 데이터를 추출할 수 없습니다.")
+                            return None
+
+                        audio_data = base64.b64decode(audio_b64)
+
+                        # 파일로 저장
+                        save_path = output_file or "hume_tts_output.mp3"
+                        with open(save_path, "wb") as f:
+                            f.write(audio_data)
+
+                        print(
+                            f"💾 [Hume TTS] 저장 완료: {save_path} ({len(audio_data)} bytes)"
+                        )
+                        return save_path
                     else:
                         error_text = await response.text()
-                        # OAuth2 토큰 인증이 리소스 권한(403/401) 문제로 실패하면
-                        # API Key 인증으로 1회 폴백 재시도
-                        if (
-                            use_token_auth
-                            and response.status in (401, 403)
-                            and self.api_key
-                        ):
-                            print(
-                                f"⚠️ Hume 토큰 인증 실패({response.status}) — API Key 인증으로 재시도합니다."
-                            )
-                            return await self.generate_speech_simple(
-                                text=text,
-                                output_file=output_file,
-                                use_token_auth=False,
-                            )
                         print(f"❌ Hume TTS API 오류 ({response.status}): {error_text}")
                         return None
 
@@ -297,6 +310,8 @@ class HumeInterviewerVoice:
     def __init__(self):
         self.tts_service = HumeTTSService()
         self.voice_config = HumeVoiceConfig()
+        # TTS 서비스에 음성 설정 공유 (음성 이름 등)
+        self.tts_service.voice_config = self.voice_config
         self._is_speaking = False
 
     @property
@@ -412,18 +427,14 @@ def create_tts_router():
     # 서비스가 정상적으로 작동하고 있는지, 설정은 제대로 되어 있는지 확인하는 상태 점검용 엔드포인트
     @router.get("/status")
     async def status():
-        """TTS 서비스 상태 확인"""
-        # 토큰 인증 가능 여부 확인
-        token_auth_available = bool(HUME_API_KEY and HUME_SECRET_KEY)
-
+        """찰 TTS 서비스 상태 확인"""
         return {
-            "service": "Hume AI TTS",
+            "service": "Hume AI Octave TTS",
             "api_key_configured": bool(HUME_API_KEY),
-            "secret_key_configured": bool(HUME_SECRET_KEY),
-            "token_auth_available": token_auth_available,
             "config_id_configured": bool(HUME_CONFIG_ID),
             "is_speaking": interviewer_voice.is_speaking,
-            "auth_method": "OAuth2 Token" if token_auth_available else "API Key",
+            "auth_method": "X-Hume-Api-Key",
+            "endpoint": "/v0/tts",
         }
 
     @router.get("/test-token")
