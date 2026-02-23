@@ -32,14 +32,14 @@ from langgraph.checkpoint.memory import MemorySaver
 # ── LangGraph ──
 from langgraph.graph import END, START, StateGraph
 
-# ── qwen3 <think> 토큰 제거 유틸리티 ──
+# ── Thinking 모델 추론 토큰 제거 유틸리티 (EXAONE Deep: <thought>, qwen3: <think>) ──
 # integrated_interview_server.py에 정의된 strip_think_tokens를 import합니다.
 # 순환 import 방지를 위해 lazy import 패턴을 사용합니다.
 _strip_think_tokens = None
 
 
 def _get_strip_think_tokens():
-    """strip_think_tokens를 지연 로드 (순환 import 방지)"""
+    """스트립 함수를 지연 로드 (순환 import 방지)"""
     global _strip_think_tokens
     if _strip_think_tokens is None:
         try:
@@ -49,10 +49,14 @@ def _get_strip_think_tokens():
         except ImportError:
             import re as _re
 
-            # 폴백: 직접 구현
+            # 폴백: 직접 구현 (EXAONE Deep <thought> + qwen3 <think> 모두 지원)
             def _fallback(text: str) -> str:
                 cleaned = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL)
                 cleaned = _re.sub(r"<think>.*$", "", cleaned, flags=_re.DOTALL)
+                cleaned = _re.sub(
+                    r"<thought>.*?</thought>", "", cleaned, flags=_re.DOTALL
+                )
+                cleaned = _re.sub(r"<thought>.*$", "", cleaned, flags=_re.DOTALL)
                 return cleaned.strip()
 
             _strip_think_tokens = _fallback
@@ -529,22 +533,22 @@ class InterviewNodes:
         # ── LLM 질문 생성 (기존 AIInterviewer 로직 활용) ──
         question = await self._interviewer.generate_llm_question(session_id, user_input)
 
-        # ── qwen3 <think> 토큰 제거 + 빈 응답 방어 ──
+        # ── thinking 토큰 제거 + 빈 응답 방어 ──
         strip_fn = _get_strip_think_tokens()
         question = strip_fn(question)
         if not question:
             print(
-                "⚠️ [Workflow:generate_question] <think> 제거 후 빈 응답 → 폴백 질문 사용"
+                "⚠️ [Workflow:generate_question] thinking 토큰 제거 후 빈 응답 → LLM 재호출"
             )
-            question_count = session.get("question_count", 1) if session else 1
-            fallback = [
-                "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-                "구체적인 예시를 들어 설명해주실 수 있나요?",
-                "그 결과는 어땠나요?",
-                "다른 프로젝트 경험도 공유해주시겠어요?",
-                "마지막으로 하고 싶은 말씀이 있으신가요?",
-            ]
-            question = fallback[min(question_count, len(fallback) - 1)]
+            # LLM 재호출 시도
+            question = await self._interviewer.generate_llm_question(
+                session_id, user_input
+            )
+            question = strip_fn(question)
+            if not question:
+                raise RuntimeError(
+                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+                )
 
         # 대화 기록 업데이트
         session = self._state_mgr.get_session(session_id)
@@ -596,12 +600,19 @@ class InterviewNodes:
         # LLM 질문 생성 (내부적으로 should_follow_up 정보 활용)
         question = await self._interviewer.generate_llm_question(session_id, user_input)
 
-        # ── qwen3 <think> 토큰 제거 + 빈 응답 방어 ──
+        # ── thinking 토큰 제거 + 빈 응답 방어 ──
         strip_fn = _get_strip_think_tokens()
         question = strip_fn(question)
         if not question:
-            print("⚠️ [Workflow:follow_up] <think> 제거 후 빈 응답 → 폴백 꼬리질문 사용")
-            question = "조금 더 구체적으로 설명해주실 수 있나요? 예를 들어 수치나 결과를 포함해서요."
+            print("⚠️ [Workflow:follow_up] thinking 토큰 제거 후 빈 응답 → LLM 재호출")
+            question = await self._interviewer.generate_llm_question(
+                session_id, user_input
+            )
+            question = strip_fn(question)
+            if not question:
+                raise RuntimeError(
+                    "LLM이 유효한 꼬리질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+                )
 
         session = self._state_mgr.get_session(session_id)
         chat_history = session.get("chat_history", [])

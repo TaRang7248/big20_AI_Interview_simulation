@@ -103,7 +103,7 @@ from security import (
 )
 
 # ========== 설정 ==========
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "exaone-deep:2.4b-q8_0")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
 # 면접 LLM 최대 생성 토큰 수 — 무한 생성 방지
@@ -213,24 +213,31 @@ import re as _re  # strip_think_tokens 에서 사용
 
 
 def strip_think_tokens(text: str) -> str:
-    """qwen3 모델의 <think>...</think> 내부 추론 블록을 제거합니다.
+    """Thinking 모델(EXAONE Deep, qwen3 등)의 추론 블록을 제거합니다.
 
-    qwen3:4b 에서 think=False 설정에도 불구하고 일부 Ollama/langchain_ollama
-    버전에서는 <think>블록</think>이 응답에 포함될 수 있습니다.
-    이를 제거하지 않으면 면접관이 내부 추론 내용을 그대로 말하게 되어
-    "엉뚱한 답변"으로 보이는 현상이 발생합니다.
+    모델별 태그 차이:
+    - EXAONE Deep: <thought>...</thought> 태그 사용
+    - qwen3: <think>...</think> 태그 사용
+
+    think=False 설정에도 일부 Ollama/langchain_ollama 버전에서는
+    추론 블록이 응답에 포함될 수 있습니다.
+    이를 제거하지 않으면 면접관이 내부 추론을 그대로 말하게 됩니다.
 
     Examples
     --------
-    >>> strip_think_tokens('<think>이 지원자에게 경험을 물어보자</think>프로젝트 경험에 대해 말씀해주세요.')
-    '프로젝트 경험에 대해 말씀해주세요.'
+    >>> strip_think_tokens('<think>추론 내용</think>실제 질문')
+    '실제 질문'
+    >>> strip_think_tokens('<thought>추론 내용</thought>실제 질문')
+    '실제 질문'
     >>> strip_think_tokens('정상적인 질문입니다.')
     '정상적인 질문입니다.'
     """
-    # 1) <think>...</think> 블록 전체 제거 (멀티라인 포함)
+    # 1) <think>...</think> 블록 제거 (qwen3 계열)
     cleaned = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL)
-    # 2) 닫히지 않은 <think>... (응답 끝까지) 제거
     cleaned = _re.sub(r"<think>.*$", "", cleaned, flags=_re.DOTALL)
+    # 2) <thought>...</thought> 블록 제거 (EXAONE Deep 계열)
+    cleaned = _re.sub(r"<thought>.*?</thought>", "", cleaned, flags=_re.DOTALL)
+    cleaned = _re.sub(r"<thought>.*$", "", cleaned, flags=_re.DOTALL)
     # 3) 잔여 공백 정리
     return cleaned.strip()
 
@@ -1589,23 +1596,23 @@ class AIInterviewer:
         # LLM 초기화
         if LLM_AVAILABLE:
             try:
-                # 평가용 LLM (낮은 temperature, think=None으로 thinking mode 비활성화)
+                # 평가용 LLM (낮은 temperature)
                 # num_predict: 최대 생성 토큰 수 제한 → 불필요한 장문 생성 방지
                 # num_ctx: 4096으로 축소 → VRAM 절약 (8192 → 4096: ~1.5GB 절약)
+                # think=True: EXAONE Deep thinking mode 활성화 → 추론 품질 향상
+                #   strip_think_tokens()가 <thought> 블록을 자동 제거하므로 사용자에게 노출되지 않음
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=0.3,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
                     num_predict=DEFAULT_LLM_NUM_PREDICT,
-                    think=False,  # qwen3 thinking 명시적 비활성화 (None은 모델 기본값 유지 → thinking ON)
                 )
-                # 질문 생성용 LLM (높은 temperature, think=False로 thinking mode 명시적 비활성화)
+                # 질문 생성용 LLM (높은 temperature, thinking mode 활성화)
                 self.question_llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=DEFAULT_LLM_TEMPERATURE,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
                     num_predict=DEFAULT_LLM_NUM_PREDICT,
-                    think=False,  # qwen3 thinking 명시적 비활성화 (None은 모델 기본값 유지 → thinking ON)
                 )
                 print(
                     f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}, num_ctx={DEFAULT_LLM_NUM_CTX}, num_predict={DEFAULT_LLM_NUM_PREDICT}"
@@ -1848,16 +1855,11 @@ class AIInterviewer:
             asyncio.create_task(self.start_interview_completion_workflow(session_id))
             return "면접이 종료되었습니다. 수고하셨습니다. 결과 보고서를 확인해주세요."
 
-        # LLM이 없으면 기본 질문 반환
+        # LLM이 없으면 면접 진행 불가 — 에러 반환
         if not self.question_llm:
-            fallback_questions = [
-                "지원하신 포지션에 관심을 갖게 된 계기가 무엇인가요?",
-                "가장 도전적이었던 프로젝트 경험에 대해 말씀해주세요.",
-                "사용하시는 주요 기술 스택에 대해 설명해주세요.",
-                "앞으로의 커리어 목표는 무엇인가요?",
-                "마지막으로 저희 회사에 궁금한 점이 있으신가요?",
-            ]
-            return fallback_questions[min(question_count, len(fallback_questions) - 1)]
+            raise RuntimeError(
+                "LLM 서비스가 초기화되지 않았습니다. Ollama 실행 상태를 확인하세요."
+            )
 
         try:
             # ========== 1. 세션 Memory 초기화/활용 ==========
@@ -2037,17 +2039,16 @@ class AIInterviewer:
             next_question = strip_think_tokens(response.content)
 
             # ── 빈 응답 방어 ──
-            # <think> 블록만 있고 실제 질문이 없는 경우 폴백 질문 사용
+            # <thought>/<think> 블록만 있고 실제 질문이 없는 경우 LLM 재호출
             if not next_question:
-                print("⚠️ [LLM] <think> 제거 후 빈 응답 → 폴백 질문 사용")
-                fallback = [
-                    "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-                    "구체적인 예시를 들어 설명해주실 수 있나요?",
-                    "그 결과는 어땠나요?",
-                    "다른 프로젝트 경험도 공유해주시겠어요?",
-                    "마지막으로 하고 싶은 말씀이 있으신가요?",
-                ]
-                next_question = fallback[min(question_count, len(fallback) - 1)]
+                print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
+                # 재호출 시 temperature를 약간 높여 다른 출력 유도
+                retry_response = await run_llm_async(self.question_llm, messages)
+                next_question = strip_think_tokens(retry_response.content)
+                if not next_question:
+                    raise RuntimeError(
+                        "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+                    )
 
             # ========== 8. 주제 추적 업데이트 ==========
             self.update_topic_tracking(session_id, user_answer, needs_follow_up)
@@ -2059,15 +2060,7 @@ class AIInterviewer:
 
         except Exception as e:
             print(f"LLM 질문 생성 오류: {e}")
-            # 폴백 질문
-            fallback = [
-                "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-                "구체적인 예시를 들어 설명해주실 수 있나요?",
-                "그 결과는 어땠나요?",
-                "다른 프로젝트 경험도 공유해주시겠어요?",
-                "마지막으로 하고 싶은 말씀이 있으신가요?",
-            ]
-            return fallback[min(question_count, len(fallback) - 1)]
+            raise RuntimeError(f"LLM 질문 생성 실패: {e}")
 
     async def evaluate_answer(
         self, session_id: str, question: str, answer: str
@@ -4994,13 +4987,23 @@ async def chat(
             print(f"[GazeTracking] 턴 종료 오류: {e}")
 
     # AI 응답 생성 — LLM 추론 단계 측정 (REQ-N-001)
-    if rid:
-        latency_monitor.start_phase(rid, "llm_inference")
-    response = await interviewer.generate_response(
-        request.session_id, sanitized_message, request.use_rag
-    )
-    if rid:
-        latency_monitor.end_phase(rid, "llm_inference")
+    # LLM 서비스 장애 시 RuntimeError가 전파되므로 503으로 변환
+    try:
+        if rid:
+            latency_monitor.start_phase(rid, "llm_inference")
+        response = await interviewer.generate_response(
+            request.session_id, sanitized_message, request.use_rag
+        )
+        if rid:
+            latency_monitor.end_phase(rid, "llm_inference")
+    except RuntimeError as llm_err:
+        if rid:
+            latency_monitor.end_phase(rid, "llm_inference")
+        print(f"❌ [/api/chat] LLM 서비스 오류: {llm_err}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"LLM 서비스 오류: {llm_err}",
+        )
 
     # 다음 질문을 위한 사용자 턴 시작 (개입 시스템)
     if not response.startswith("면접이 종료"):
