@@ -52,7 +52,8 @@ python scripts/check_env.py
 ```
 
 ### 2단계: 서버 실행
-`server.py` 파일을 실행하면 서버가 구동되고 자동으로 웹 브라우저가 열립니다.
+`server.py` 파일을 실행하면 서버가 구동되고 자동으로 **Chrome 브라우저**가 열립니다.
+(Chrome이 설치되어 있지 않은 경우 시스템 기본 브라우저로 실행됩니다.)
 ```bash
 python server.py
 ```
