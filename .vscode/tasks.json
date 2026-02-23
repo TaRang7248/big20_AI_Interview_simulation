@@ -47,12 +47,30 @@
       }
     },
     {
-      "label": "2. Next.js Frontend",
+      "label": "2-1. Next.js Build",
       "type": "shell",
       "command": "npm.cmd",
       "args": [
         "run",
-        "dev"
+        "build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/CSH/frontend"
+      },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "group": "ai-interview"
+      }
+    },
+    {
+      "label": "2-2. Next.js Production Server",
+      "type": "shell",
+      "command": "npm.cmd",
+      "args": [
+        "run",
+        "start"
       ],
       "options": {
         "cwd": "${workspaceFolder}/CSH/frontend"
@@ -63,7 +81,17 @@
         "reveal": "always",
         "panel": "dedicated",
         "group": "ai-interview"
-      }
+      },
+      "dependsOn": [
+        "2-1. Next.js Build"
+      ]
+    },
+    {
+      "label": "2. Next.js Frontend",
+      "dependsOn": [
+        "2-2. Next.js Production Server"
+      ],
+      "problemMatcher": []
     },
     {
       "label": "3. FastAPI Server",
