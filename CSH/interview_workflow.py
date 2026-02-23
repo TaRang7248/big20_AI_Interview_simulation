@@ -32,14 +32,14 @@ from langgraph.checkpoint.memory import MemorySaver
 # ── LangGraph ──
 from langgraph.graph import END, START, StateGraph
 
-# ── qwen3 <think> 토큰 제거 유틸리티 ──
+# ── Thinking 모델 추론 토큰 제거 유틸리티 (EXAONE Deep: <thought>, qwen3: <think>) ──
 # integrated_interview_server.py에 정의된 strip_think_tokens를 import합니다.
 # 순환 import 방지를 위해 lazy import 패턴을 사용합니다.
 _strip_think_tokens = None
 
 
 def _get_strip_think_tokens():
-    """strip_think_tokens를 지연 로드 (순환 import 방지)"""
+    """스트립 함수를 지연 로드 (순환 import 방지)"""
     global _strip_think_tokens
     if _strip_think_tokens is None:
         try:
@@ -49,10 +49,14 @@ def _get_strip_think_tokens():
         except ImportError:
             import re as _re
 
-            # 폴백: 직접 구현
+            # 폴백: 직접 구현 (EXAONE Deep <thought> + qwen3 <think> 모두 지원)
             def _fallback(text: str) -> str:
                 cleaned = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL)
                 cleaned = _re.sub(r"<think>.*$", "", cleaned, flags=_re.DOTALL)
+                cleaned = _re.sub(
+                    r"<thought>.*?</thought>", "", cleaned, flags=_re.DOTALL
+                )
+                cleaned = _re.sub(r"<thought>.*$", "", cleaned, flags=_re.DOTALL)
                 return cleaned.strip()
 
             _strip_think_tokens = _fallback

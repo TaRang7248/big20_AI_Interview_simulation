@@ -103,7 +103,7 @@ from security import (
 )
 
 # ========== 설정 ==========
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "exaone-deep:2.4b-q8_0")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
 DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
 # 면접 LLM 최대 생성 토큰 수 — 무한 생성 방지
@@ -213,24 +213,31 @@ import re as _re  # strip_think_tokens 에서 사용
 
 
 def strip_think_tokens(text: str) -> str:
-    """qwen3 모델의 <think>...</think> 내부 추론 블록을 제거합니다.
+    """Thinking 모델(EXAONE Deep, qwen3 등)의 추론 블록을 제거합니다.
 
-    qwen3:4b 에서 think=False 설정에도 불구하고 일부 Ollama/langchain_ollama
-    버전에서는 <think>블록</think>이 응답에 포함될 수 있습니다.
-    이를 제거하지 않으면 면접관이 내부 추론 내용을 그대로 말하게 되어
-    "엉뚱한 답변"으로 보이는 현상이 발생합니다.
+    모델별 태그 차이:
+    - EXAONE Deep: <thought>...</thought> 태그 사용
+    - qwen3: <think>...</think> 태그 사용
+
+    think=False 설정에도 일부 Ollama/langchain_ollama 버전에서는
+    추론 블록이 응답에 포함될 수 있습니다.
+    이를 제거하지 않으면 면접관이 내부 추론을 그대로 말하게 됩니다.
 
     Examples
     --------
-    >>> strip_think_tokens('<think>이 지원자에게 경험을 물어보자</think>프로젝트 경험에 대해 말씀해주세요.')
-    '프로젝트 경험에 대해 말씀해주세요.'
+    >>> strip_think_tokens('<think>추론 내용</think>실제 질문')
+    '실제 질문'
+    >>> strip_think_tokens('<thought>추론 내용</thought>실제 질문')
+    '실제 질문'
     >>> strip_think_tokens('정상적인 질문입니다.')
     '정상적인 질문입니다.'
     """
-    # 1) <think>...</think> 블록 전체 제거 (멀티라인 포함)
+    # 1) <think>...</think> 블록 제거 (qwen3 계열)
     cleaned = _re.sub(r"<think>.*?</think>", "", text, flags=_re.DOTALL)
-    # 2) 닫히지 않은 <think>... (응답 끝까지) 제거
     cleaned = _re.sub(r"<think>.*$", "", cleaned, flags=_re.DOTALL)
+    # 2) <thought>...</thought> 블록 제거 (EXAONE Deep 계열)
+    cleaned = _re.sub(r"<thought>.*?</thought>", "", cleaned, flags=_re.DOTALL)
+    cleaned = _re.sub(r"<thought>.*$", "", cleaned, flags=_re.DOTALL)
     # 3) 잔여 공백 정리
     return cleaned.strip()
 
@@ -1589,23 +1596,23 @@ class AIInterviewer:
         # LLM 초기화
         if LLM_AVAILABLE:
             try:
-                # 평가용 LLM (낮은 temperature, think=None으로 thinking mode 비활성화)
+                # 평가용 LLM (낮은 temperature)
                 # num_predict: 최대 생성 토큰 수 제한 → 불필요한 장문 생성 방지
                 # num_ctx: 4096으로 축소 → VRAM 절약 (8192 → 4096: ~1.5GB 절약)
+                # think=True: EXAONE Deep thinking mode 활성화 → 추론 품질 향상
+                #   strip_think_tokens()가 <thought> 블록을 자동 제거하므로 사용자에게 노출되지 않음
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=0.3,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
                     num_predict=DEFAULT_LLM_NUM_PREDICT,
-                    think=False,  # qwen3 thinking 명시적 비활성화 (None은 모델 기본값 유지 → thinking ON)
                 )
-                # 질문 생성용 LLM (높은 temperature, think=False로 thinking mode 명시적 비활성화)
+                # 질문 생성용 LLM (높은 temperature, thinking mode 활성화)
                 self.question_llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=DEFAULT_LLM_TEMPERATURE,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
                     num_predict=DEFAULT_LLM_NUM_PREDICT,
-                    think=False,  # qwen3 thinking 명시적 비활성화 (None은 모델 기본값 유지 → thinking ON)
                 )
                 print(
                     f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}, num_ctx={DEFAULT_LLM_NUM_CTX}, num_predict={DEFAULT_LLM_NUM_PREDICT}"

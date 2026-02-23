@@ -10,27 +10,25 @@
 4. 피드백 및 개선 제안
 """
 
-import os
-import base64
 import json
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
-from datetime import datetime
+import os
+from typing import Dict, List, Optional
 
 # .env 파일에서 환경변수 로드
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # JSON Resilience 유틸리티
-from json_utils import resilient_json_parse, parse_architecture_json
-
 # FastAPI
 from fastapi import APIRouter, HTTPException
+from json_utils import parse_architecture_json, resilient_json_parse
 from pydantic import BaseModel
 
 # Anthropic Claude API
 try:
     import anthropic
+
     CLAUDE_AVAILABLE = True
 except ImportError:
     CLAUDE_AVAILABLE = False
@@ -38,8 +36,9 @@ except ImportError:
 
 # LLM Fallback
 try:
-    from langchain_ollama import ChatOllama
     from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_ollama import ChatOllama
+
     OLLAMA_AVAILABLE = True
 except ImportError:
     OLLAMA_AVAILABLE = False
@@ -48,7 +47,7 @@ except ImportError:
 # ========== 설정 ==========
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "qwen3:4b")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "exaone-deep:2.4b-q8_0")
 DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
 # 다이어그램 분석 전용 비전 모델 (이미지 인식 가능)
 DIAGRAM_VISION_MODEL = "qwen3-vl:4b"
@@ -90,44 +89,57 @@ class ArchitectureProblem(BaseModel):
 PROBLEM_CATEGORIES = {
     "messaging": {
         "name": "메시징/실시간 통신",
-        "keywords": ["채팅", "메시지 큐", "알림", "푸시", "실시간", "WebSocket", "이벤트"],
-        "examples": ["실시간 채팅", "알림 시스템", "이벤트 브로커", "협업 도구"]
+        "keywords": [
+            "채팅",
+            "메시지 큐",
+            "알림",
+            "푸시",
+            "실시간",
+            "WebSocket",
+            "이벤트",
+        ],
+        "examples": ["실시간 채팅", "알림 시스템", "이벤트 브로커", "협업 도구"],
     },
     "ecommerce": {
         "name": "전자상거래/결제",
         "keywords": ["결제", "장바구니", "재고", "주문", "배송", "정산", "쿠폰"],
-        "examples": ["결제 시스템", "재고 관리", "주문 처리", "정산 시스템"]
+        "examples": ["결제 시스템", "재고 관리", "주문 처리", "정산 시스템"],
     },
     "media": {
         "name": "미디어/스트리밍",
         "keywords": ["영상", "음악", "스트리밍", "트랜스코딩", "CDN", "업로드"],
-        "examples": ["영상 플랫폼", "음악 스트리밍", "라이브 방송", "팟캐스트"]
+        "examples": ["영상 플랫폼", "음악 스트리밍", "라이브 방송", "팟캐스트"],
     },
     "social": {
         "name": "소셜/커뮤니티",
         "keywords": ["피드", "팔로우", "좋아요", "댓글", "공유", "타임라인"],
-        "examples": ["소셜 피드", "커뮤니티 플랫폼", "포럼", "리뷰 시스템"]
+        "examples": ["소셜 피드", "커뮤니티 플랫폼", "포럼", "리뷰 시스템"],
     },
     "data": {
         "name": "데이터/분석",
         "keywords": ["분석", "대시보드", "로그", "메트릭", "검색", "추천"],
-        "examples": ["로그 분석", "추천 엔진", "검색 시스템", "데이터 파이프라인"]
+        "examples": ["로그 분석", "추천 엔진", "검색 시스템", "데이터 파이프라인"],
     },
     "infra": {
         "name": "인프라/DevOps",
         "keywords": ["배포", "모니터링", "로깅", "스케줄링", "오케스트레이션"],
-        "examples": ["CI/CD 파이프라인", "모니터링 시스템", "작업 스케줄러", "서비스 메시"]
+        "examples": [
+            "CI/CD 파이프라인",
+            "모니터링 시스템",
+            "작업 스케줄러",
+            "서비스 메시",
+        ],
     },
     "storage": {
         "name": "저장소/파일",
         "keywords": ["파일", "클라우드", "동기화", "백업", "공유"],
-        "examples": ["클라우드 스토리지", "파일 공유", "백업 시스템", "문서 관리"]
+        "examples": ["클라우드 스토리지", "파일 공유", "백업 시스템", "문서 관리"],
     },
     "auth": {
         "name": "인증/보안",
         "keywords": ["로그인", "인증", "권한", "SSO", "OAuth", "토큰"],
-        "examples": ["통합 인증", "권한 관리", "API 게이트웨이", "보안 감사"]
-    }
+        "examples": ["통합 인증", "권한 관리", "API 게이트웨이", "보안 감사"],
+    },
 }
 
 # 난이도별 규모 설정
@@ -136,89 +148,91 @@ DIFFICULTY_SCALES = {
         "users": ["1만", "10만", "100만"],
         "requests": ["초당 100건", "초당 1,000건", "분당 10만건"],
         "time_limit": 10,
-        "complexity": "기본적인 구조 설계"
+        "complexity": "기본적인 구조 설계",
     },
     "medium": {
         "users": ["100만", "1,000만", "1억"],
         "requests": ["초당 1만건", "초당 10만건", "분당 100만건"],
         "time_limit": 15,
-        "complexity": "확장성과 성능을 고려한 설계"
+        "complexity": "확장성과 성능을 고려한 설계",
     },
     "hard": {
         "users": ["1억", "10억", "글로벌"],
         "requests": ["초당 100만건", "초당 1,000만건", "실시간 처리"],
         "time_limit": 20,
-        "complexity": "대규모 분산 시스템 설계"
-    }
+        "complexity": "대규모 분산 시스템 설계",
+    },
 }
 
 
 class ArchitectureProblemGenerator:
     """AI 기반 동적 아키텍처 문제 생성기"""
-    
+
     def __init__(self):
         self.llm = None
         self.claude_client = None
         self.generated_problems_cache: Dict[str, ArchitectureProblem] = {}
         self.problem_counter = 0
-        
+
         # LLM 초기화
         if OLLAMA_AVAILABLE:
             try:
-                self.llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.8, num_ctx=DEFAULT_LLM_NUM_CTX)
-                print(f"✅ 아키텍처 문제 생성기 초기화 (Ollama, ctx={DEFAULT_LLM_NUM_CTX})")
+                self.llm = ChatOllama(
+                    model=DEFAULT_LLM_MODEL,
+                    temperature=0.8,
+                    num_ctx=DEFAULT_LLM_NUM_CTX,
+                )
+                print(
+                    f"✅ 아키텍처 문제 생성기 초기화 (Ollama, ctx={DEFAULT_LLM_NUM_CTX})"
+                )
             except Exception as e:
                 print(f"⚠️ Ollama 초기화 실패: {e}")
-        
+
         if CLAUDE_AVAILABLE and ANTHROPIC_API_KEY:
             self.claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
             print("✅ Claude 문제 생성기 활성화")
-    
+
     def _get_random_category(self) -> str:
         """랜덤 카테고리 선택"""
         import random
+
         return random.choice(list(PROBLEM_CATEGORIES.keys()))
-    
+
     def _get_random_difficulty(self) -> str:
         """랜덤 난이도 선택 (가중치 적용)"""
         import random
+
         # easy: 30%, medium: 50%, hard: 20%
-        return random.choices(
-            ["easy", "medium", "hard"],
-            weights=[0.3, 0.5, 0.2]
-        )[0]
-    
+        return random.choices(["easy", "medium", "hard"], weights=[0.3, 0.5, 0.2])[0]
+
     async def generate_problem(
-        self,
-        category: Optional[str] = None,
-        difficulty: Optional[str] = None
+        self, category: Optional[str] = None, difficulty: Optional[str] = None
     ) -> ArchitectureProblem:
         """AI를 사용해 새로운 아키텍처 문제 생성"""
         import random
-        import json
-        
+
         # 카테고리/난이도 선택
         if not category:
             category = self._get_random_category()
         if not difficulty:
             difficulty = self._get_random_difficulty()
-        
+
         cat_info = PROBLEM_CATEGORIES.get(category, PROBLEM_CATEGORIES["messaging"])
         diff_info = DIFFICULTY_SCALES.get(difficulty, DIFFICULTY_SCALES["medium"])
-        
+
         # 문제 ID 생성
         self.problem_counter += 1
         problem_id = f"gen_{self.problem_counter}_{category}_{difficulty}"
-        
+
         # 프롬프트 생성
         prompt = f"""당신은 시스템 설계 면접관입니다. 아래 조건에 맞는 새로운 아키텍처 설계 문제를 생성하세요.
 
 ## 조건
-- 카테고리: {cat_info['name']}
-- 관련 키워드: {', '.join(cat_info['keywords'])}
-- 난이도: {difficulty.upper()} ({diff_info['complexity']})
-- 예상 사용자/트래픽 규모: {random.choice(diff_info['users'])} 사용자, {random.choice(diff_info['requests'])}
-- 제한 시간: {diff_info['time_limit']}분
+- 카테고리: {cat_info["name"]}
+- 관련 키워드: {", ".join(cat_info["keywords"])}
+- 난이도: {difficulty.upper()} ({diff_info["complexity"]})
+- 예상 사용자/트래픽 규모: {random.choice(diff_info["users"])} 사용자, {random.choice(diff_info["requests"])}
+- 제한 시간: {diff_info["time_limit"]}분
 
 ## 출력 형식 (JSON)
 ```json
@@ -244,7 +258,7 @@ class ArchitectureProblemGenerator:
                 response = self.claude_client.messages.create(
                     model=CLAUDE_MODEL,
                     max_tokens=1024,
-                    messages=[{"role": "user", "content": prompt}]
+                    messages=[{"role": "user", "content": prompt}],
                 )
                 response_text = response.content[0].text
             # Ollama 폴백
@@ -253,93 +267,107 @@ class ArchitectureProblemGenerator:
                 response_text = response.content
             else:
                 # LLM 없으면 기본 문제 반환
-                return self._create_fallback_problem(category, difficulty, problem_id, cat_info, diff_info)
-            
+                return self._create_fallback_problem(
+                    category, difficulty, problem_id, cat_info, diff_info
+                )
+
             # JSON Resilience 파싱
-            data = resilient_json_parse(response_text, fallback=None, expect_type=dict, context="generate_problem")
+            data = resilient_json_parse(
+                response_text,
+                fallback=None,
+                expect_type=dict,
+                context="generate_problem",
+            )
             if data is None:
                 raise ValueError("문제 생성 JSON 파싱 실패")
-            
+
             problem = ArchitectureProblem(
                 id=problem_id,
                 title=data.get("title", "시스템 설계 문제"),
                 description=data.get("description", "시스템을 설계하세요."),
                 requirements=data.get("requirements", ["확장성", "가용성", "성능"]),
-                expected_components=data.get("expected_components", ["서버", "데이터베이스", "캐시"]),
+                expected_components=data.get(
+                    "expected_components", ["서버", "데이터베이스", "캐시"]
+                ),
                 difficulty=difficulty,
                 time_limit=diff_info["time_limit"],
-                category=category
+                category=category,
             )
-            
+
             # 캐시에 저장
             self.generated_problems_cache[problem_id] = problem
-            
+
             return problem
-            
+
         except Exception as e:
             print(f"문제 생성 오류: {e}")
-            return self._create_fallback_problem(category, difficulty, problem_id, cat_info, diff_info)
-    
+            return self._create_fallback_problem(
+                category, difficulty, problem_id, cat_info, diff_info
+            )
+
     def _create_fallback_problem(
         self,
         category: str,
         difficulty: str,
         problem_id: str,
         cat_info: dict,
-        diff_info: dict
+        diff_info: dict,
     ) -> ArchitectureProblem:
         """LLM 실패 시 폴백 문제 생성"""
         import random
-        
+
         example = random.choice(cat_info["examples"])
         scale = random.choice(diff_info["users"])
-        
+
         return ArchitectureProblem(
             id=problem_id,
             title=f"{example} 시스템 설계",
             description=f"""{scale} 사용자를 위한 {example} 시스템을 설계하세요.
-- {cat_info['keywords'][0]}와 {cat_info['keywords'][1]} 기능 구현
-- {diff_info['requests']} 처리 능력 필요
+- {cat_info["keywords"][0]}와 {cat_info["keywords"][1]} 기능 구현
+- {diff_info["requests"]} 처리 능력 필요
 - 고가용성 및 장애 복구 고려
 - 보안 및 데이터 무결성 보장""",
             requirements=[
                 f"{diff_info['complexity']}",
                 "수평적 확장 가능",
                 "99.9% 가용성",
-                "데이터 일관성 보장"
+                "데이터 일관성 보장",
             ],
             expected_components=[
                 "API 게이트웨이",
                 "로드밸런서",
                 "애플리케이션 서버",
                 "데이터베이스",
-                "캐시 레이어"
+                "캐시 레이어",
             ],
             difficulty=difficulty,
             time_limit=diff_info["time_limit"],
-            category=category
+            category=category,
         )
-    
+
     async def get_problem_set(self, count: int = 5) -> List[ArchitectureProblem]:
         """여러 개의 랜덤 문제 세트 생성"""
         problems = []
         used_categories = set()
-        
+
         for _ in range(count):
             # 다양한 카테고리에서 문제 생성
-            available_categories = [c for c in PROBLEM_CATEGORIES.keys() if c not in used_categories]
+            available_categories = [
+                c for c in PROBLEM_CATEGORIES.keys() if c not in used_categories
+            ]
             if not available_categories:
                 available_categories = list(PROBLEM_CATEGORIES.keys())
-            
+
             import random
+
             category = random.choice(available_categories)
             used_categories.add(category)
-            
+
             problem = await self.generate_problem(category=category)
             problems.append(problem)
-        
+
         return problems
-    
+
     def get_cached_problem(self, problem_id: str) -> Optional[ArchitectureProblem]:
         """캐시된 문제 조회"""
         return self.generated_problems_cache.get(problem_id)
@@ -352,60 +380,66 @@ problem_generator = ArchitectureProblemGenerator()
 # ========== Claude Vision + Qwen3-VL 폴백 다이어그램 분석 서비스 ==========
 class DiagramAnalyzer:
     """Claude 3.5 Sonnet을 사용한 다이어그램 분석 (Qwen3-VL:4B 폴백 지원)"""
-    
+
     def __init__(self):
         self.claude_client = None
         self.vision_llm = None
-        
+
         # 1순위: Claude Vision API
         if CLAUDE_AVAILABLE and ANTHROPIC_API_KEY:
             self.claude_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
             print("✅ Claude Vision API 초기화 완료")
         else:
             print("⚠️ Claude API 미설정. Qwen3-VL 폴백 사용")
-        
+
         # 2순위: Qwen3-VL 비전 모델 (폴백)
         if OLLAMA_AVAILABLE:
             try:
                 self.vision_llm = ChatOllama(
                     model=DIAGRAM_VISION_MODEL,
                     temperature=0.3,
-                    num_ctx=DEFAULT_LLM_NUM_CTX
+                    num_ctx=DEFAULT_LLM_NUM_CTX,
                 )
                 print(f"✅ Qwen3-VL 폴백 모델 초기화 완료: {DIAGRAM_VISION_MODEL}")
             except Exception as e:
                 print(f"⚠️ Qwen3-VL 초기화 실패: {e}")
-        
+
         if not self.claude_client and not self.vision_llm:
-            print("⚠️ 다이어그램 분석 서비스 사용 불가: Claude API 또는 Qwen3-VL 모델을 설정해주세요")
-    
+            print(
+                "⚠️ 다이어그램 분석 서비스 사용 불가: Claude API 또는 Qwen3-VL 모델을 설정해주세요"
+            )
+
     async def analyze_diagram(
         self,
         image_base64: str,
         problem: Optional[ArchitectureProblem] = None,
-        user_explanation: Optional[str] = None
+        user_explanation: Optional[str] = None,
     ) -> DiagramAnalysisResult:
         """다이어그램 분석 수행 (우선순위: Claude > Qwen3-VL > 텍스트 폴백)"""
-        
+
         if self.claude_client:
-            return await self._analyze_with_claude(image_base64, problem, user_explanation)
+            return await self._analyze_with_claude(
+                image_base64, problem, user_explanation
+            )
         elif self.vision_llm:
-            return await self._analyze_with_vision(image_base64, problem, user_explanation)
+            return await self._analyze_with_vision(
+                image_base64, problem, user_explanation
+            )
         else:
             return await self._analyze_with_fallback(problem, user_explanation)
-    
+
     async def _analyze_with_vision(
         self,
         image_base64: str,
         problem: Optional[ArchitectureProblem],
-        user_explanation: Optional[str]
+        user_explanation: Optional[str],
     ) -> DiagramAnalysisResult:
         """Qwen3-VL:4B 비전 모델로 다이어그램 분석"""
-        
+
         # 이미지 데이터 정리 (data:image/png;base64, 제거)
         if "," in image_base64:
             image_base64 = image_base64.split(",")[1]
-        
+
         # 프롬프트 구성
         prompt_text = """당신은 시스템 아키텍처 전문가입니다.
 제공된 다이어그램을 분석하고 다음을 평가해주세요:
@@ -446,51 +480,50 @@ class DiagramAnalyzer:
     "detailed_analysis": "전체적인 상세 분석 텍스트"
 }
 ```"""
-        
+
         # 문제 컨텍스트 추가
         if problem:
             prompt_text += f"""\n\n## 문제 정보
 **제목**: {problem.title}
 **설명**: {problem.description}
-**요구사항**: {', '.join(problem.requirements)}
-**예상 컴포넌트**: {', '.join(problem.expected_components)}
+**요구사항**: {", ".join(problem.requirements)}
+**예상 컴포넌트**: {", ".join(problem.expected_components)}
 **난이도**: {problem.difficulty}"""
-        
+
         if user_explanation:
             prompt_text += f"\n\n## 지원자 설명\n{user_explanation}"
-        
+
         prompt_text += "\n\n위 다이어그램을 분석하고 JSON 형식으로 평가해주세요."
-        
+
         try:
             # Qwen3-VL 멀티모달 메시지 구성 (이미지 + 텍스트)
             message = HumanMessage(
                 content=[
                     {
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/png;base64,{image_base64}"}
+                        "image_url": {"url": f"data:image/png;base64,{image_base64}"},
                     },
-                    {
-                        "type": "text",
-                        "text": prompt_text
-                    }
+                    {"type": "text", "text": prompt_text},
                 ]
             )
-            
+
             response = self.vision_llm.invoke([message])
-            
+
             # JSON Resilience 파싱
             response_text = response.content
-            result_data = parse_architecture_json(response_text, context="Qwen3-VL vision")
-            
+            result_data = parse_architecture_json(
+                response_text, context="Qwen3-VL vision"
+            )
+
             # 점수 계산
             eval_data = result_data.get("architecture_evaluation", {})
             overall_score = (
-                eval_data.get("structure_score", 0) +
-                eval_data.get("scalability_score", 0) +
-                eval_data.get("security_score", 0) +
-                eval_data.get("performance_score", 0)
+                eval_data.get("structure_score", 0)
+                + eval_data.get("scalability_score", 0)
+                + eval_data.get("security_score", 0)
+                + eval_data.get("performance_score", 0)
             )
-            
+
             return DiagramAnalysisResult(
                 overall_score=min(100, overall_score),
                 diagram_recognition=result_data.get("diagram_recognition", {}),
@@ -499,28 +532,28 @@ class DiagramAnalyzer:
                 feedback=result_data.get("feedback", []),
                 strengths=result_data.get("strengths", []),
                 weaknesses=result_data.get("weaknesses", []),
-                detailed_analysis=result_data.get("detailed_analysis", "")
+                detailed_analysis=result_data.get("detailed_analysis", ""),
             )
-            
+
         except json.JSONDecodeError as e:
             print(f"Qwen3-VL JSON 파싱 오류: {e}")
             return self._create_error_result("응답 파싱 오류")
         except Exception as e:
             print(f"Qwen3-VL 분석 오류: {e}")
             return await self._analyze_with_fallback(problem, user_explanation)
-    
+
     async def _analyze_with_claude(
         self,
         image_base64: str,
         problem: Optional[ArchitectureProblem],
-        user_explanation: Optional[str]
+        user_explanation: Optional[str],
     ) -> DiagramAnalysisResult:
         """Claude Vision API로 다이어그램 분석 (기본)"""
-        
+
         # 이미지 데이터 정리
         if "," in image_base64:
             image_base64 = image_base64.split(",")[1]
-        
+
         system_prompt = """당신은 시스템 아키텍처 전문가입니다.
 제공된 다이어그램을 분석하고 JSON 형식으로 평가해주세요.
 반드시 아래 JSON 형식으로 응답하세요:
@@ -538,39 +571,59 @@ class DiagramAnalyzer:
     "feedback": [], "detailed_analysis": ""
 }
 ```"""
-        
+
         user_content = []
         if problem:
-            user_content.append({
-                "type": "text",
-                "text": f"## 문제 정보\n**제목**: {problem.title}\n**설명**: {problem.description}\n**요구사항**: {', '.join(problem.requirements)}\n**예상 컴포넌트**: {', '.join(problem.expected_components)}\n**난이도**: {problem.difficulty}"
-            })
-        
-        user_content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": image_base64}
-        })
-        
+            user_content.append(
+                {
+                    "type": "text",
+                    "text": f"## 문제 정보\n**제목**: {problem.title}\n**설명**: {problem.description}\n**요구사항**: {', '.join(problem.requirements)}\n**예상 컴포넌트**: {', '.join(problem.expected_components)}\n**난이도**: {problem.difficulty}",
+                }
+            )
+
+        user_content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": image_base64,
+                },
+            }
+        )
+
         if user_explanation:
-            user_content.append({"type": "text", "text": f"\n## 지원자 설명\n{user_explanation}"})
-        
-        user_content.append({"type": "text", "text": "\n위 다이어그램을 분석하고 JSON 형식으로 평가해주세요."})
-        
+            user_content.append(
+                {"type": "text", "text": f"\n## 지원자 설명\n{user_explanation}"}
+            )
+
+        user_content.append(
+            {
+                "type": "text",
+                "text": "\n위 다이어그램을 분석하고 JSON 형식으로 평가해주세요.",
+            }
+        )
+
         try:
             response = self.claude_client.messages.create(
-                model=CLAUDE_MODEL, max_tokens=4096,
+                model=CLAUDE_MODEL,
+                max_tokens=4096,
                 system=system_prompt,
-                messages=[{"role": "user", "content": user_content}]
+                messages=[{"role": "user", "content": user_content}],
             )
-            
+
             response_text = response.content[0].text
-            result_data = parse_architecture_json(response_text, context="Claude vision")
+            result_data = parse_architecture_json(
+                response_text, context="Claude vision"
+            )
             eval_data = result_data.get("architecture_evaluation", {})
             overall_score = (
-                eval_data.get("structure_score", 0) + eval_data.get("scalability_score", 0) +
-                eval_data.get("security_score", 0) + eval_data.get("performance_score", 0)
+                eval_data.get("structure_score", 0)
+                + eval_data.get("scalability_score", 0)
+                + eval_data.get("security_score", 0)
+                + eval_data.get("performance_score", 0)
             )
-            
+
             return DiagramAnalysisResult(
                 overall_score=min(100, overall_score),
                 diagram_recognition=result_data.get("diagram_recognition", {}),
@@ -579,39 +632,43 @@ class DiagramAnalyzer:
                 feedback=result_data.get("feedback", []),
                 strengths=result_data.get("strengths", []),
                 weaknesses=result_data.get("weaknesses", []),
-                detailed_analysis=result_data.get("detailed_analysis", "")
+                detailed_analysis=result_data.get("detailed_analysis", ""),
             )
         except json.JSONDecodeError as e:
             print(f"Claude JSON 파싱 오류: {e}")
             # Qwen3-VL 폴백 시도
             if self.vision_llm:
-                return await self._analyze_with_vision(image_base64, problem, user_explanation)
+                return await self._analyze_with_vision(
+                    image_base64, problem, user_explanation
+                )
             return self._create_error_result("응답 파싱 오류")
         except Exception as e:
             print(f"Claude API 오류: {e}")
             # Qwen3-VL 폴백 시도
             if self.vision_llm:
-                return await self._analyze_with_vision(image_base64, problem, user_explanation)
+                return await self._analyze_with_vision(
+                    image_base64, problem, user_explanation
+                )
             return await self._analyze_with_fallback(problem, user_explanation)
-    
+
     async def _analyze_with_fallback(
-        self,
-        problem: Optional[ArchitectureProblem],
-        user_explanation: Optional[str]
+        self, problem: Optional[ArchitectureProblem], user_explanation: Optional[str]
     ) -> DiagramAnalysisResult:
         """Ollama를 사용한 폴백 분석 (이미지 없이 텍스트만)"""
-        
+
         if not OLLAMA_AVAILABLE:
             return self._create_error_result("분석 서비스 사용 불가")
-        
+
         try:
-            llm = ChatOllama(model=DEFAULT_LLM_MODEL, temperature=0.3, num_ctx=DEFAULT_LLM_NUM_CTX)
-            
+            llm = ChatOllama(
+                model=DEFAULT_LLM_MODEL, temperature=0.3, num_ctx=DEFAULT_LLM_NUM_CTX
+            )
+
             prompt = f"""시스템 아키텍처 면접에서 지원자가 다이어그램을 제출했습니다.
 
-문제: {problem.title if problem else '자유 설계'}
-설명: {problem.description if problem else '없음'}
-지원자 설명: {user_explanation or '없음'}
+문제: {problem.title if problem else "자유 설계"}
+설명: {problem.description if problem else "없음"}
+지원자 설명: {user_explanation or "없음"}
 
 다이어그램을 직접 볼 수 없지만, 지원자의 설명을 바탕으로 평가해주세요.
 JSON 형식으로 응답하세요:
@@ -629,21 +686,25 @@ JSON 형식으로 응답하세요:
     "feedback": ["Qwen3-VL 비전 모델을 설치하면 다이어그램을 직접 분석할 수 있습니다. (ollama pull qwen3-vl:4b)"],
     "detailed_analysis": "폴백 모드로 분석되었습니다."
 }}"""
-            
+
             response = llm.invoke([HumanMessage(content=prompt)])
-            
+
             try:
                 result_text = response.content
-                result_data = parse_architecture_json(result_text, context="text-only fallback")
-                
+                result_data = parse_architecture_json(
+                    result_text, context="text-only fallback"
+                )
+
                 eval_data = result_data.get("architecture_evaluation", {})
-                overall_score = sum([
-                    eval_data.get("structure_score", 0),
-                    eval_data.get("scalability_score", 0),
-                    eval_data.get("security_score", 0),
-                    eval_data.get("performance_score", 0)
-                ])
-                
+                overall_score = sum(
+                    [
+                        eval_data.get("structure_score", 0),
+                        eval_data.get("scalability_score", 0),
+                        eval_data.get("security_score", 0),
+                        eval_data.get("performance_score", 0),
+                    ]
+                )
+
                 return DiagramAnalysisResult(
                     overall_score=overall_score,
                     diagram_recognition=result_data.get("diagram_recognition", {}),
@@ -652,15 +713,15 @@ JSON 형식으로 응답하세요:
                     feedback=result_data.get("feedback", []),
                     strengths=result_data.get("strengths", []),
                     weaknesses=result_data.get("weaknesses", []),
-                    detailed_analysis=result_data.get("detailed_analysis", "")
+                    detailed_analysis=result_data.get("detailed_analysis", ""),
                 )
             except:
                 return self._create_error_result("폴백 분석 실패")
-                
+
         except Exception as e:
             print(f"폴백 분석 오류: {e}")
             return self._create_error_result(str(e))
-    
+
     def _create_error_result(self, error_msg: str) -> DiagramAnalysisResult:
         """오류 결과 생성"""
         return DiagramAnalysisResult(
@@ -669,20 +730,20 @@ JSON 형식으로 응답하세요:
                 "components": [],
                 "connections": [],
                 "data_flows": [],
-                "error": error_msg
+                "error": error_msg,
             },
             architecture_evaluation={
                 "structure_score": 0,
                 "scalability_score": 0,
                 "security_score": 0,
                 "performance_score": 0,
-                "error": error_msg
+                "error": error_msg,
             },
             component_analysis=[],
             feedback=[f"분석 오류: {error_msg}"],
             strengths=[],
             weaknesses=[],
-            detailed_analysis=f"분석 중 오류가 발생했습니다: {error_msg}"
+            detailed_analysis=f"분석 중 오류가 발생했습니다: {error_msg}",
         )
 
 
@@ -709,7 +770,7 @@ async def get_architecture_problems(count: int = 5):
                 "requirements": p.requirements,
                 "difficulty": p.difficulty,
                 "time_limit": p.time_limit,
-                "category": p.category
+                "category": p.category,
             }
             for p in problems
         ]
@@ -730,20 +791,20 @@ async def get_architecture_problem(problem_id: str):
             "expected_components": problem.expected_components,
             "difficulty": problem.difficulty,
             "time_limit": problem.time_limit,
-            "category": problem.category
+            "category": problem.category,
         }
-    raise HTTPException(status_code=404, detail="문제를 찾을 수 없습니다. 새 문제를 생성하세요.")
+    raise HTTPException(
+        status_code=404, detail="문제를 찾을 수 없습니다. 새 문제를 생성하세요."
+    )
 
 
 @router.post("/generate")
 async def generate_new_problem(
-    category: Optional[str] = None,
-    difficulty: Optional[str] = None
+    category: Optional[str] = None, difficulty: Optional[str] = None
 ):
     """새로운 아키텍처 문제 생성"""
     problem = await problem_generator.generate_problem(
-        category=category,
-        difficulty=difficulty
+        category=category, difficulty=difficulty
     )
     return {
         "id": problem.id,
@@ -753,7 +814,7 @@ async def generate_new_problem(
         "expected_components": problem.expected_components,
         "difficulty": problem.difficulty,
         "time_limit": problem.time_limit,
-        "category": problem.category
+        "category": problem.category,
     }
 
 
@@ -762,38 +823,34 @@ async def get_problem_categories():
     """사용 가능한 문제 카테고리 목록"""
     return {
         "categories": [
-            {
-                "id": cat_id,
-                "name": cat_info["name"],
-                "examples": cat_info["examples"]
-            }
+            {"id": cat_id, "name": cat_info["name"], "examples": cat_info["examples"]}
             for cat_id, cat_info in PROBLEM_CATEGORIES.items()
         ],
-        "difficulties": ["easy", "medium", "hard"]
+        "difficulties": ["easy", "medium", "hard"],
     }
 
 
 @router.post("/analyze")
 async def analyze_diagram(request: DiagramAnalysisRequest):
     """다이어그램 분석 수행"""
-    
+
     # 문제 찾기 (캐시에서)
     problem = None
     if request.problem_context:
         problem = problem_generator.get_cached_problem(request.problem_context)
-    
+
     # 분석 수행
     result = await diagram_analyzer.analyze_diagram(
         image_base64=request.image_data,
         problem=problem,
-        user_explanation=request.user_explanation
+        user_explanation=request.user_explanation,
     )
-    
+
     # 결과 저장
     if request.session_id not in whiteboard_results:
         whiteboard_results[request.session_id] = []
     whiteboard_results[request.session_id].append(result)
-    
+
     return {
         "success": True,
         "result": {
@@ -804,8 +861,8 @@ async def analyze_diagram(request: DiagramAnalysisRequest):
             "feedback": result.feedback,
             "strengths": result.strengths,
             "weaknesses": result.weaknesses,
-            "detailed_analysis": result.detailed_analysis
-        }
+            "detailed_analysis": result.detailed_analysis,
+        },
     }
 
 
@@ -813,12 +870,12 @@ async def analyze_diagram(request: DiagramAnalysisRequest):
 async def get_whiteboard_results(session_id: str):
     """세션별 화이트보드 결과 조회"""
     results = whiteboard_results.get(session_id, [])
-    
+
     if not results:
         return {"results": [], "average_score": 0}
-    
+
     avg_score = sum(r.overall_score for r in results) / len(results)
-    
+
     return {
         "results": [
             {
@@ -826,11 +883,11 @@ async def get_whiteboard_results(session_id: str):
                 "architecture_evaluation": r.architecture_evaluation,
                 "feedback": r.feedback,
                 "strengths": r.strengths,
-                "weaknesses": r.weaknesses
+                "weaknesses": r.weaknesses,
             }
             for r in results
         ],
-        "average_score": round(avg_score)
+        "average_score": round(avg_score),
     }
 
 
@@ -839,18 +896,18 @@ async def get_whiteboard_status():
     """화이트보드 서비스 상태 확인"""
     claude_available = CLAUDE_AVAILABLE and bool(ANTHROPIC_API_KEY)
     vision_fallback = OLLAMA_AVAILABLE  # Qwen3-VL
-    
+
     if claude_available:
         model = CLAUDE_MODEL
     elif vision_fallback:
         model = f"{DIAGRAM_VISION_MODEL} (fallback)"
     else:
         model = f"{DEFAULT_LLM_MODEL} (text-only fallback)"
-    
+
     return {
         "claude_available": claude_available,
         "vision_model": DIAGRAM_VISION_MODEL,
         "vision_fallback": vision_fallback,
         "ollama_available": OLLAMA_AVAILABLE,
-        "model": model
+        "model": model,
     }
