@@ -142,20 +142,89 @@ async def run_in_executor(executor: ThreadPoolExecutor, func, *args, **kwargs):
     return await loop.run_in_executor(executor, func, *args)
 
 
+def sanitize_user_input(text: str) -> str:
+    """사용자 입력 텍스트 정제 (STT 중복 누적 완화)
+
+    - 공백/개행 정규화
+    - 연속 중복 문장 제거
+    - 연속 중복 구문(2~6어절) 제거
+    """
+    if not text:
+        return ""
+
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return ""
+
+    parts = [p.strip() for p in re.split(r"([.!?。！？])", normalized) if p.strip()]
+    merged_sentences: List[str] = []
+    buffer = ""
+    for part in parts:
+        if part in ".!?。！？":
+            buffer += part
+            if buffer.strip():
+                merged_sentences.append(buffer.strip())
+            buffer = ""
+        else:
+            if buffer:
+                buffer += " " + part
+            else:
+                buffer = part
+    if buffer.strip():
+        merged_sentences.append(buffer.strip())
+
+    dedup_sentences: List[str] = []
+    previous = ""
+    for sentence in merged_sentences:
+        sentence_key = re.sub(r"\s+", " ", sentence).strip().lower()
+        if sentence_key and sentence_key != previous:
+            dedup_sentences.append(sentence)
+            previous = sentence_key
+
+    cleaned = " ".join(dedup_sentences) if dedup_sentences else normalized
+
+    # 연속 중복 구문 제거 (예: "redis 캐시를 사용 redis 캐시를 사용")
+    tokens = cleaned.split()
+    compact_tokens: List[str] = []
+    index = 0
+    while index < len(tokens):
+        removed = False
+        for span in range(6, 1, -1):
+            if index + (2 * span) <= len(tokens):
+                left = tokens[index : index + span]
+                right = tokens[index + span : index + (2 * span)]
+                if left == right:
+                    compact_tokens.extend(left)
+                    index += 2 * span
+                    removed = True
+                    break
+        if not removed:
+            compact_tokens.append(tokens[index])
+            index += 1
+
+    return " ".join(compact_tokens).strip()
+
+
 async def run_llm_async(llm, messages):
     """LLM invoke를 비동기로 실행 (이벤트 루프 블로킹 방지 + 타임아웃)
 
     GTX 1660 등 저사양 GPU에서 VRAM 압박 시 LLM이 무기한 hang할 수 있으므로
     asyncio.wait_for로 LLM_TIMEOUT_SEC 초 내에 응답을 강제합니다.
     """
-    try:
-        return await asyncio.wait_for(
-            run_in_executor(LLM_EXECUTOR, llm.invoke, messages),
-            timeout=LLM_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError:
-        print(f"⏰ [LLM] 타임아웃 ({LLM_TIMEOUT_SEC}초 초과) — 폴백 응답 반환")
-        raise TimeoutError(f"LLM 응답 시간 초과 ({LLM_TIMEOUT_SEC}초)")
+    for attempt in range(2):
+        try:
+            return await asyncio.wait_for(
+                run_in_executor(LLM_EXECUTOR, llm.invoke, messages),
+                timeout=LLM_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            if attempt == 0:
+                print(f"⏰ [LLM] 타임아웃 ({LLM_TIMEOUT_SEC}초 초과) — 1회 재시도")
+                continue
+            print(
+                f"⏰ [LLM] 재시도 포함 타임아웃 ({LLM_TIMEOUT_SEC}초 x2) — 폴백 응답 반환"
+            )
+            raise TimeoutError(f"LLM 응답 시간 초과 ({LLM_TIMEOUT_SEC}초, 재시도 포함)")
 
 
 async def run_rag_async(retriever, query):
@@ -1501,15 +1570,15 @@ class AIInterviewer:
                     temperature=0.3,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
                     num_predict=DEFAULT_LLM_NUM_PREDICT,
-                    think=None,  # qwen3 thinking 비활성화 → 속도 2-5배 향상
+                    think=False,  # qwen3 thinking 명시적 비활성화 (None은 모델 기본값 유지 → thinking ON)
                 )
-                # 질문 생성용 LLM (높은 temperature, think=None으로 thinking mode 비활성화)
+                # 질문 생성용 LLM (높은 temperature, think=False로 thinking mode 명시적 비활성화)
                 self.question_llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=DEFAULT_LLM_TEMPERATURE,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
                     num_predict=DEFAULT_LLM_NUM_PREDICT,
-                    think=None,  # qwen3 thinking 비활성화 → 속도 2-5배 향상
+                    think=False,  # qwen3 thinking 명시적 비활성화 (None은 모델 기본값 유지 → thinking ON)
                 )
                 print(
                     f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}, num_ctx={DEFAULT_LLM_NUM_CTX}, num_predict={DEFAULT_LLM_NUM_PREDICT}"
@@ -1634,33 +1703,55 @@ class AIInterviewer:
         current_topic = session.get("current_topic")
         topic_count = session.get("topic_question_count", 0)
 
-        # 답변 품질 분석 (간단한 휴리스틱)
-        answer_length = len(answer)
-        has_specifics = any(
-            word in answer
-            for word in [
-                "예를 들어",
-                "구체적으로",
-                "실제로",
-                "결과적으로",
-                "%",
-                "개월",
-                "명",
+        # 답변 품질 분석 (완화된 휴리스틱)
+        normalized_answer = sanitize_user_input(answer)
+        answer_length = len(re.sub(r"\s+", "", normalized_answer))
+        word_count = len(normalized_answer.split())
+        has_numeric_detail = bool(re.search(r"\d", normalized_answer))
+        has_tech_keyword = any(
+            keyword in normalized_answer.lower()
+            for keyword in [
+                "api",
+                "redis",
+                "postgres",
+                "docker",
+                "kubernetes",
+                "python",
+                "fastapi",
+                "react",
+                "llm",
+                "rag",
             ]
+        )
+        has_specifics = (
+            any(
+                word in normalized_answer
+                for word in [
+                    "예를 들어",
+                    "구체적으로",
+                    "실제로",
+                    "결과적으로",
+                    "%",
+                    "개월",
+                    "명",
+                ]
+            )
+            or has_numeric_detail
+            or has_tech_keyword
         )
 
         # 꼬리질문 필요 여부 결정
         needs_follow_up = False
         follow_up_reason = ""
 
-        # 1. 답변이 너무 짧은 경우
-        if answer_length < 50:
+        # 1. 답변이 매우 짧은 경우에만 꼬리질문
+        if answer_length < 25 and word_count < 6:
             needs_follow_up = True
-            follow_up_reason = "답변이 짧음 - 구체적인 예시 요청"
-        # 2. 구체적인 내용이 없는 경우 (길이는 되지만 추상적)
-        elif answer_length < 150 and not has_specifics:
+            follow_up_reason = "답변이 매우 짧음 - 핵심 경험 보강 요청"
+        # 2. 길이가 다소 짧고 구체성도 부족한 경우에만 꼬리질문
+        elif answer_length < 90 and word_count < 15 and not has_specifics:
             needs_follow_up = True
-            follow_up_reason = "구체성 부족 - 상세 설명 요청"
+            follow_up_reason = "구체성 부족 - 간단한 수치/사례 보강 요청"
 
         # 3. 같은 주제로 2번 이상 질문했으면 꼬리질문 중단
         if topic_count >= 2:
@@ -2566,6 +2657,7 @@ class ChatResponse(BaseModel):
     session_id: str
     response: str
     audio_url: Optional[str] = None
+    question_number: Optional[int] = None  # 현재 질문 번호 (프론트엔드 동기화용)
 
 
 class SessionInfo(BaseModel):
@@ -4783,6 +4875,9 @@ async def chat(
     if not session:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
 
+    # 사용자 입력 텍스트 정제 (STT 중복 누적 완화)
+    sanitized_message = sanitize_user_input(request.message)
+
     # ── 지연 시간 측정용 request_id (미들웨어에서 부여) ──
     rid = getattr(req.state, "request_id", None)
 
@@ -4792,7 +4887,7 @@ async def chat(
     # 발화 분석 턴 종료
     if SPEECH_ANALYSIS_AVAILABLE and speech_service:
         try:
-            speech_service.end_turn(request.session_id, request.message)
+            speech_service.end_turn(request.session_id, sanitized_message)
         except Exception as e:
             print(f"[SpeechAnalysis] 턴 종료 오류: {e}")
 
@@ -4807,7 +4902,7 @@ async def chat(
     if rid:
         latency_monitor.start_phase(rid, "llm_inference")
     response = await interviewer.generate_response(
-        request.session_id, request.message, request.use_rag
+        request.session_id, sanitized_message, request.use_rag
     )
     if rid:
         latency_monitor.end_phase(rid, "llm_inference")
@@ -4854,7 +4949,7 @@ async def chat(
         await event_bus.publish(
             AppEventType.ANSWER_SUBMITTED,
             session_id=request.session_id,
-            data={"answer": request.message[:200], "question": response[:200]},
+            data={"answer": sanitized_message[:200], "question": response[:200]},
             source="chat_api",
         )
         await event_bus.publish(
@@ -4864,8 +4959,15 @@ async def chat(
             source="ai_interviewer",
         )
 
+    # 세션에서 현재 질문 번호 가져오기 (프론트엔드와 동기화)
+    current_session = state.get_session(request.session_id)
+    current_q_num = current_session.get("question_count", 1) if current_session else 1
+
     return ChatResponse(
-        session_id=request.session_id, response=response, audio_url=audio_url
+        session_id=request.session_id,
+        response=response,
+        audio_url=audio_url,
+        question_number=current_q_num,
     )
 
 

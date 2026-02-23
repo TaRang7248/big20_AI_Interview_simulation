@@ -24,8 +24,10 @@
       "type": "shell",
       "command": "${workspaceFolder}/interview_env/Scripts/python.exe",
       "args": [
-        "-m", "celery",
-        "-A", "celery_app",
+        "-m",
+        "celery",
+        "-A",
+        "celery_app",
         "worker",
         "--pool=solo",
         "--loglevel=info"
@@ -48,7 +50,10 @@
       "label": "2. Next.js Frontend",
       "type": "shell",
       "command": "npm.cmd",
-      "args": ["run", "dev"],
+      "args": [
+        "run",
+        "dev"
+      ],
       "options": {
         "cwd": "${workspaceFolder}/CSH/frontend"
       },
@@ -65,11 +70,13 @@
       "type": "shell",
       "command": "${workspaceFolder}/interview_env/Scripts/python.exe",
       "args": [
-        "-m", "uvicorn",
+        "-m",
+        "uvicorn",
         "integrated_interview_server:app",
-        "--host", "0.0.0.0",
-        "--port", "8000",
-        "--reload"
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
       ],
       "options": {
         "cwd": "${workspaceFolder}/CSH",
@@ -84,7 +91,9 @@
         "panel": "dedicated",
         "group": "ai-interview"
       },
-      "dependsOn": ["0. Prerequisites (Redis + Ollama 확인)"]
+      "dependsOn": [
+        "0. Prerequisites (Redis + Ollama 확인)"
+      ]
     },
     {
       "label": "🚀 AI 모의면접 시스템 전체 시작",
