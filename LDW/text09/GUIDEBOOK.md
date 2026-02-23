@@ -52,12 +52,12 @@ python scripts/check_env.py
 ```
 
 ### 2단계: 서버 실행
-`server.py` 파일을 실행하면 서버가 구동되고 자동으로 **Chrome 브라우저**가 열립니다.
-(Chrome이 설치되어 있지 않은 경우 시스템 기본 브라우저로 실행됩니다.)
+`server.py` 파일을 실행하면 서버가 구동되고 자동으로 **시스템 기본 웹 브라우저**가 열립니다.
+(보안 및 성능을 위해 127.0.0.1:8000 접속을 기본으로 합니다.)
 ```bash
 python server.py
 ```
-- 서버는 기본적으로 `http://localhost:5000` 에서 동작합니다.
+- 서버는 기본적으로 `http://127.0.0.1:8000` 에서 동작합니다.
 - 브라우저가 자동으로 열리지 않을 경우, 주소창에 위 주소를 직접 입력하세요.
 
 ### 3단계: Docker를 이용한 실행 방법 (권장)
@@ -138,7 +138,14 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 │       ├── tts_service.py       # 음성 합성
 │       └── video_analysis_service.py # MoveNet, DeepFace 영상 분석 로직
 ├── static/                  # CSS, JS, HTML 등 정적 파일 (index.html, app.js, styles.css)
-├── requirements.txt         # 프로젝트 의존성 패키지 목록 (google-generativeai 추가)
+├── uploads/                 # 업로드 및 생성 파일 저장소
+│   ├── resumes/            # 업로드된 이력서
+│   ├── audio/              # 면접 답변 녹음 파일
+│   ├── tts_audio/          # 생성된 TTS 오디오 파일
+│   └── Wav2Lip_mp4/        # 생성된 립싱크 비디오 파일 [UPDATED]
+├── data/                    # 모델 입력 데이터 및 백업
+│   └── man.png             # 면접관 아바타 이미지 [UPDATED]
+├── requirements.txt         # 프로젝트 의존성 패키지 목록
 ├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
 ├── scripts/                 # 유틸리티 스크립트 (모델 다운로드, 환경 점검 등)
 │   ├── check_env.py         # 실행 환경(라이브러리, FFmpeg) 점검 스크립트
@@ -223,6 +230,20 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ### 8.3 데이터 이관 시 주의사항
 - **파일 이동**: 다른 컴퓨터로 이관할 경우, `data/interview_db_backup.json` 파일뿐만 아니라 `uploads/` 폴더 전체를 함께 이동시키는 것을 권장합니다.
 - **환경 변수**: `scripts/.env` 또는 프로젝트 루트의 `.env` 파일 설정(DB 접속 정보 등)이 올바른지 확인하세요.
+
+---
+
+## 9. Wav2Lip 기반 립싱크 비디오 연동 (업데이트 노트)
+본 프로젝트는 기존의 정적 AI 아바타에서 벗어나, 사용자의 답변과 TTS 오디오에 맞춰 동적으로 발화하는 **Wav2Lip-GAN** 기반 비디오 렌더링 기능을 지원합니다.
+
+### 9.1 주요 통합 내용
+*   **비디오 출력 지원**: 프론트엔드(`static/index.html` 및 `static/app.js`)의 비디오 플레이어(`<video id="ai-video">`)를 통해 256x256 크기의 립싱크 비디오를 지원합니다.
+*   **Wav2Lip 비디오 생성 모듈**: `app/services/video_gen_service.py`를 통해 TTS 오디오(`uploads/tts_audio/*.mp3`)와 지정된 이미지(`data/man.png`)를 합성한 후 `uploads/Wav2Lip_mp4/*.mp4`를 생성 및 서바이벌합니다. [UPDATED]
+*   **의존성 최신화**: 립싱크 처리에 필요한 `ffmpeg-python`, `moviepy`, `tqdm`, `torchvision`, `torchaudio`, `librosa` 모듈이 요구사항(`requirements.txt`)에 반영되었습니다.
+
+### 9.2 참고 사항
+* 해당 기능을 원활하게 구동하기 위해서는 사전에 `C:\big20\big20_AI_Interview_simulation\LDW\text09\Wav2Lip\checkpoints` 내에 `wav2lip_gan.pth` 가중치 파일과 모델 구조가 필요합니다.
+* 실행 전 반드시 `pip install ffmpeg-python moviepy librosa torchvision torchaudio`가 완료되어 있는지 점검하십시오.
 
 
 

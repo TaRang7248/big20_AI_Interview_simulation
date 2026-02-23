@@ -1,45 +1,38 @@
-# NOTE:
-# - Python 3.10 권장
-# - PyTorch(CUDA 12.1)는 requirements.txt로 설치하지 말고 SETUP.md의 명령어로 별도 설치하세요.
-# - 아래는 "백엔드 + 실시간 + AI 오케스트레이션" 개발에 필요한 최소/권장 패키지 목록입니다.
-
 # --- Web/API ---
-fastapi
-uvicorn[standard]
-pydantic
-python-dotenv
-httpx
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
+httpx>=0.24.0
 
-# --- Auth / Security (선택: 필요 시 사용) ---
-python-jose[cryptography]
-passlib[bcrypt]
+# --- Auth / Security ---
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
 
 # --- Data / DB ---
-sqlalchemy
-alembic
-psycopg2-binary
-asyncpg
-redis
+sqlalchemy>=2.0.0
+alembic>=1.11.0
+psycopg2-binary>=2.9.0
+asyncpg>=0.28.0
+redis>=4.6.0
 
 # --- Async jobs ---
-celery
+celery>=5.3.0
 
 # --- Realtime (WebRTC / WebSocket) ---
-aiortc
-websockets
+aiortc>=1.5.0
+websockets>=11.0
 
-# --- Hume AI TTS ---
-hume[microphone]
-aiohttp
+# --- Hume AI / TTS ---
+hume[microphone]>=0.5.0
+aiohttp>=3.8.0
+edge-tts>=6.1.0
 
 # --- LLM Orchestration / RAG ---
-# --- LLM Orchestration / RAG ---
-google-generativeai
-anthropic
-langchain
-langchain-google-genai
-langchain-ollama
-langchain-community
+google-generativeai>=0.3.0
+anthropic>=0.3.0
+langchain>=0.0.300
+langchain-google-genai>=0.0.3
 langchain-ollama
 langchain-community
 langchain-postgres
@@ -49,35 +42,34 @@ pypdf
 pymupdf
 easyocr
 
-# --- Audio / STT pipeline helpers ---
-soundfile
-librosa
-noisereduce
-praat-parselmouth
-numpy
-deepgram-sdk
-pyaudio
+# --- Audio / STT ---
+soundfile>=0.12.0
+librosa>=0.10.0
+noisereduce>=2.0.0
+praat-parselmouth>=0.4.0
+numpy>=1.24.0
+deepgram-sdk>=3.0.0
+pyaudio>=0.2.13
+pyannote-audio>=3.0.0
+webrtcvad-wheels>=2.0.10
 
-# --- Speaker diarization / audio analysis (pin은 constraints로 관리) ---
-pyannote-audio
-webrtcvad-wheels
-
-# --- CV / Emotion (선택: 필요 시 사용) ---
-opencv-python
-deepface
-
-tensorflow
-tensorflow-hub
-
-tf-keras
-
-# --- Dev tools ---
-pytest
-ruff
-
-# --- TTS ---
-edge-tts
+# --- CV / Emotion / Video ---
+opencv-python>=4.8.0
+deepface>=0.0.79
+tensorflow>=2.13.0
+tensorflow-hub>=0.14.0
+tf-keras>=2.13.0
+ffmpeg-python>=0.2.0
+moviepy>=1.0.3
+tqdm>=4.65.0
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
 
 # --- STT / OpenAI ---
-openai
-python-Levenshtein
+openai>=1.0.0
+python-Levenshtein>=0.21.0
+
+# --- Dev tools ---
+pytest>=7.4.0
+ruff>=0.0.280

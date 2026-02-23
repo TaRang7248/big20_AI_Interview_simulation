@@ -459,7 +459,8 @@
                     <!-- AI Interviewer Area -->
                     <div class="interviewer-area">
                         <div class="avatar-wrapper">
-                            <div class="ai-avatar">🤖</div> <!-- Placeholder for AI Face -->
+                            <!-- AI 면접관 얼굴 256x256 비디오 태그 (정사각형 보장) -->
+                            <video id="ai-video" width="256" height="256" style="border-radius: 8px; object-fit: cover; background: #000;" poster="/data/면접관.png" playsinline></video>
                         </div>
                         <div class="chat-bubble ai" id="ai-message">면접관 연결 중...</div>
                     </div>

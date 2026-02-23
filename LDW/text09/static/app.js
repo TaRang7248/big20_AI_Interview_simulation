@@ -1103,7 +1103,7 @@ function addChatLog(sender, text) {
     $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
 }
 
-// --- Audio Utility ---
+// --- Audio/Video Utility ---
 function playAudio(url, callback) {
     if (!url) {
         console.warn("[playAudio] No URL provided");
@@ -1111,31 +1111,34 @@ function playAudio(url, callback) {
         return;
     }
 
-    console.log(`[playAudio] Playing: ${url}`);
+    console.log(`[playVideo] Playing: ${url}`);
+    const video = document.getElementById('ai-video');
+    if (!video) {
+        console.error("ai-video element not found!");
+        if (callback) callback();
+        return;
+    }
 
-    // Ensure relative path is correct if needed, but server returns /uploads/...
-    const audio = new Audio(url);
-    audio.volume = 1.0;
+    video.src = url;
+    video.volume = 1.0;
 
-    audio.onended = () => {
-        console.log(`[playAudio] Ended: ${url}`);
+    video.onended = () => {
+        console.log(`[playVideo] Ended: ${url}`);
+        // 영상 재생이 끝난 후 포스터 이미지로 되돌리기 위해 src 초기화 가능 (선택적)
+        // video.src = ""; // 여기서 초기화하면 화면이 까맣게 될 수 있으므로 유지
         if (callback) callback();
     };
 
-    audio.onerror = (e) => {
-        console.error("Audio Playback Error:", e);
-        console.error(`[playAudio] Failed to load: ${url}`);
-
-        // Detailed error info if available
-        if (audio.error) {
-            console.error(`[playAudio] Error Code: ${audio.error.code}, Message: ${audio.error.message}`);
+    video.onerror = (e) => {
+        console.error("Video Playback Error:", e);
+        if (video.error) {
+            console.error(`[playVideo] Error Code: ${video.error.code}, Message: ${video.error.message}`);
         }
-
         if (callback) callback();
     };
 
-    audio.play().catch(e => {
-        console.error("Audio Playback Failed (Auto-play policy?):", e);
+    video.play().catch(e => {
+        console.error("Video Playback Failed:", e);
         if (callback) callback();
     });
 }

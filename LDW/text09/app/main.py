@@ -28,6 +28,9 @@ app.include_router(video_router.router)
 # The directory setup is relative to where uvicorn is run (server.py root)
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+# Mount 'data' to serve static assets like interviewer face image
+app.mount("/data", StaticFiles(directory="data"), name="data")
+
 # Mount root static files (index.html, styles.css, app.js)
 # We serve index.html as the default for root
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
