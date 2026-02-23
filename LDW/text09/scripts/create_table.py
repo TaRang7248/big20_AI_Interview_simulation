@@ -47,6 +47,11 @@ def create_tables():
                 job TEXT,
                 deadline TEXT,
                 content TEXT,
+                qualifications TEXT,
+                preferred_qualifications TEXT,
+                benefits TEXT,
+                hiring_process TEXT,
+                number_of_hires TEXT,
                 id_name TEXT REFERENCES users(id_name),
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )

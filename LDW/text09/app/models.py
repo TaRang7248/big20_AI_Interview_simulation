@@ -40,6 +40,11 @@ class JobCreate(BaseModel):
     job: Optional[str] = ''
     deadline: Optional[str] = ''
     content: Optional[str] = ''
+    qualifications: Optional[str] = ''
+    preferred_qualifications: Optional[str] = ''
+    benefits: Optional[str] = ''
+    hiring_process: Optional[str] = ''
+    number_of_hires: Optional[str] = ''
     id_name: Optional[str] = None
 
 class JobUpdate(BaseModel):
@@ -47,6 +52,11 @@ class JobUpdate(BaseModel):
     job: Optional[str] = ''
     deadline: Optional[str] = ''
     content: Optional[str] = ''
+    qualifications: Optional[str] = ''
+    preferred_qualifications: Optional[str] = ''
+    benefits: Optional[str] = ''
+    hiring_process: Optional[str] = ''
+    number_of_hires: Optional[str] = ''
     id_name: Optional[str] = None
 
 # --- Interview Models ---
