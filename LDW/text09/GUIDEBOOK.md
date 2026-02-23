@@ -50,6 +50,18 @@ pip install -r requirements.txt
 ```bash
 python scripts/check_env.py
 ```
+결과에서 `[ERROR]` 항목이 없으면 정상입니다. `[WARN]` 항목은 해당 기능을 사용할 때만 문제가 됩니다.
+
+### 1-3단계: 테스트 계정 초기화 (최초 1회)
+PostgreSQL이 실행 중인 상태에서 아래 명령어로 테스트 계정을 생성합니다.
+```bash
+python scripts/setup_test_user.py
+```
+생성되는 계정:
+| 구분 | ID | PW |
+|------|----|---------|
+| 지원자(시험용) | `test` | `test` |
+| 관리자 | `admin` | `admin` |
 
 ### 2단계: 서버 실행
 `server.py` 파일을 실행하면 서버가 구동되고 자동으로 **시스템 기본 웹 브라우저**가 열립니다.
@@ -76,8 +88,6 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
    `Ctrl + C`를 눌러 서버를 중지하거나, 다른 터미널에서 `docker-compose down`을 실행합니다.
 
 ---
-
-## 4. 사용 모델 및 라이브러리 목록
 
 ## 4. 사용 모델 및 라이브러리 목록
 
@@ -186,6 +196,13 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
     - `FFmpeg`가 설치되지 않은 환경에서도 서버가 중단되지 않도록 예외 처리(Fallback) 로직을 추가했습니다.
     - `check_env.py`를 통해 사용자가 손쉽게 실행 환경을 진단할 수 있습니다.
 - **오디오 로딩 및 처리 오류 수정 (Critical Fix)** **[NEW]**:
+
+### 신규 업데이트 (server.py 실행 버그 수정) **[2026-02-23]**
+- **`reload=True` 브라우저 중복 실행 버그 수정**: Uvicorn의 `reload=True` 모드에서 Worker 프로세스가 `__main__` 블록을 재실행하여 브라우저가 2~3회 열리는 문제를 `reload=False`로 변경하여 해결했습니다.
+- **`server.py` 실행 디렉토리 고정**: `os.chdir()`를 추가하여 어떤 위치에서 실행해도 `static/`, `uploads/` 등 상대 경로가 올바르게 참조됩니다.
+- **`scripts/check_env.py` 신규 추가**: Python 버전, 필수 패키지, FFmpeg, PostgreSQL, 폴더 구조를 한 번에 진단하는 환경 점검 스크립트를 추가했습니다.
+- **`scripts/setup_test_user.py` 신규 추가**: 테스트 계정(`test`/`test`, `admin`/`admin`)을 PostgreSQL에 자동 삽입하는 초기화 스크립트를 추가했습니다.
+- **`requirements.txt` 최신화**: 주요 패키지를 2026년 최신 안정 버전으로 업데이트하고, `python-multipart`, `openai-whisper` 등 누락 패키지를 추가했습니다.
 
 ### 신규 업데이트 (관리자 공고 폼 구조 개선) **[NEW]**
 - **관리자 공고 등록 필드 고도화**: 공고 등록 및 수정 시 기존 '직무 (Job)', '공고 내용', '마감일' 텍스트를 '채용 직무', '주요업무', '공고 마감일'로 각각 변경하여 직관성을 높였습니다.
