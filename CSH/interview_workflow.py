@@ -533,22 +533,22 @@ class InterviewNodes:
         # ── LLM 질문 생성 (기존 AIInterviewer 로직 활용) ──
         question = await self._interviewer.generate_llm_question(session_id, user_input)
 
-        # ── qwen3 <think> 토큰 제거 + 빈 응답 방어 ──
+        # ── thinking 토큰 제거 + 빈 응답 방어 ──
         strip_fn = _get_strip_think_tokens()
         question = strip_fn(question)
         if not question:
             print(
-                "⚠️ [Workflow:generate_question] <think> 제거 후 빈 응답 → 폴백 질문 사용"
+                "⚠️ [Workflow:generate_question] thinking 토큰 제거 후 빈 응답 → LLM 재호출"
             )
-            question_count = session.get("question_count", 1) if session else 1
-            fallback = [
-                "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-                "구체적인 예시를 들어 설명해주실 수 있나요?",
-                "그 결과는 어땠나요?",
-                "다른 프로젝트 경험도 공유해주시겠어요?",
-                "마지막으로 하고 싶은 말씀이 있으신가요?",
-            ]
-            question = fallback[min(question_count, len(fallback) - 1)]
+            # LLM 재호출 시도
+            question = await self._interviewer.generate_llm_question(
+                session_id, user_input
+            )
+            question = strip_fn(question)
+            if not question:
+                raise RuntimeError(
+                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+                )
 
         # 대화 기록 업데이트
         session = self._state_mgr.get_session(session_id)
@@ -600,12 +600,19 @@ class InterviewNodes:
         # LLM 질문 생성 (내부적으로 should_follow_up 정보 활용)
         question = await self._interviewer.generate_llm_question(session_id, user_input)
 
-        # ── qwen3 <think> 토큰 제거 + 빈 응답 방어 ──
+        # ── thinking 토큰 제거 + 빈 응답 방어 ──
         strip_fn = _get_strip_think_tokens()
         question = strip_fn(question)
         if not question:
-            print("⚠️ [Workflow:follow_up] <think> 제거 후 빈 응답 → 폴백 꼬리질문 사용")
-            question = "조금 더 구체적으로 설명해주실 수 있나요? 예를 들어 수치나 결과를 포함해서요."
+            print("⚠️ [Workflow:follow_up] thinking 토큰 제거 후 빈 응답 → LLM 재호출")
+            question = await self._interviewer.generate_llm_question(
+                session_id, user_input
+            )
+            question = strip_fn(question)
+            if not question:
+                raise RuntimeError(
+                    "LLM이 유효한 꼬리질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+                )
 
         session = self._state_mgr.get_session(session_id)
         chat_history = session.get("chat_history", [])

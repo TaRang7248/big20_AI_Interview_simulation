@@ -1855,16 +1855,11 @@ class AIInterviewer:
             asyncio.create_task(self.start_interview_completion_workflow(session_id))
             return "면접이 종료되었습니다. 수고하셨습니다. 결과 보고서를 확인해주세요."
 
-        # LLM이 없으면 기본 질문 반환
+        # LLM이 없으면 면접 진행 불가 — 에러 반환
         if not self.question_llm:
-            fallback_questions = [
-                "지원하신 포지션에 관심을 갖게 된 계기가 무엇인가요?",
-                "가장 도전적이었던 프로젝트 경험에 대해 말씀해주세요.",
-                "사용하시는 주요 기술 스택에 대해 설명해주세요.",
-                "앞으로의 커리어 목표는 무엇인가요?",
-                "마지막으로 저희 회사에 궁금한 점이 있으신가요?",
-            ]
-            return fallback_questions[min(question_count, len(fallback_questions) - 1)]
+            raise RuntimeError(
+                "LLM 서비스가 초기화되지 않았습니다. Ollama 실행 상태를 확인하세요."
+            )
 
         try:
             # ========== 1. 세션 Memory 초기화/활용 ==========
@@ -2044,17 +2039,16 @@ class AIInterviewer:
             next_question = strip_think_tokens(response.content)
 
             # ── 빈 응답 방어 ──
-            # <think> 블록만 있고 실제 질문이 없는 경우 폴백 질문 사용
+            # <thought>/<think> 블록만 있고 실제 질문이 없는 경우 LLM 재호출
             if not next_question:
-                print("⚠️ [LLM] <think> 제거 후 빈 응답 → 폴백 질문 사용")
-                fallback = [
-                    "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-                    "구체적인 예시를 들어 설명해주실 수 있나요?",
-                    "그 결과는 어땠나요?",
-                    "다른 프로젝트 경험도 공유해주시겠어요?",
-                    "마지막으로 하고 싶은 말씀이 있으신가요?",
-                ]
-                next_question = fallback[min(question_count, len(fallback) - 1)]
+                print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
+                # 재호출 시 temperature를 약간 높여 다른 출력 유도
+                retry_response = await run_llm_async(self.question_llm, messages)
+                next_question = strip_think_tokens(retry_response.content)
+                if not next_question:
+                    raise RuntimeError(
+                        "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+                    )
 
             # ========== 8. 주제 추적 업데이트 ==========
             self.update_topic_tracking(session_id, user_answer, needs_follow_up)
@@ -2066,15 +2060,7 @@ class AIInterviewer:
 
         except Exception as e:
             print(f"LLM 질문 생성 오류: {e}")
-            # 폴백 질문
-            fallback = [
-                "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-                "구체적인 예시를 들어 설명해주실 수 있나요?",
-                "그 결과는 어땠나요?",
-                "다른 프로젝트 경험도 공유해주시겠어요?",
-                "마지막으로 하고 싶은 말씀이 있으신가요?",
-            ]
-            return fallback[min(question_count, len(fallback) - 1)]
+            raise RuntimeError(f"LLM 질문 생성 실패: {e}")
 
     async def evaluate_answer(
         self, session_id: str, question: str, answer: str
@@ -5001,13 +4987,23 @@ async def chat(
             print(f"[GazeTracking] 턴 종료 오류: {e}")
 
     # AI 응답 생성 — LLM 추론 단계 측정 (REQ-N-001)
-    if rid:
-        latency_monitor.start_phase(rid, "llm_inference")
-    response = await interviewer.generate_response(
-        request.session_id, sanitized_message, request.use_rag
-    )
-    if rid:
-        latency_monitor.end_phase(rid, "llm_inference")
+    # LLM 서비스 장애 시 RuntimeError가 전파되므로 503으로 변환
+    try:
+        if rid:
+            latency_monitor.start_phase(rid, "llm_inference")
+        response = await interviewer.generate_response(
+            request.session_id, sanitized_message, request.use_rag
+        )
+        if rid:
+            latency_monitor.end_phase(rid, "llm_inference")
+    except RuntimeError as llm_err:
+        if rid:
+            latency_monitor.end_phase(rid, "llm_inference")
+        print(f"❌ [/api/chat] LLM 서비스 오류: {llm_err}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"LLM 서비스 오류: {llm_err}",
+        )
 
     # 다음 질문을 위한 사용자 턴 시작 (개입 시스템)
     if not response.startswith("면접이 종료"):
