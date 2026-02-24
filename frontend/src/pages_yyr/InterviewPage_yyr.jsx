@@ -26,6 +26,9 @@ export default function InterviewPage_yyr({
 
     audioPlayerRef,
 }) {
+    /* =========================
+       진행도 계산
+    ========================= */
     const progress = useMemo(() => {
         if (showReport) return 100;
         const userTurns = chatLog.filter((m) => m.sender === "user").length;
@@ -49,47 +52,39 @@ export default function InterviewPage_yyr({
 
     const hint = useMemo(() => {
         if (!isResumeUploaded) return "PDF 업로드 후, 맞춤 질문이 자동 생성됩니다.";
-        if (isProcessing) return "AI가 답변을 생성 중이에요. 잠시만 기다려주세요.";
+        if (isProcessing) return "AI가 답변을 생성 중입니다.";
         return "준비가 되면 아래에서 답변을 녹음하세요.";
     }, [isResumeUploaded, isProcessing]);
 
-    const stageDot = useMemo(() => {
-        if (stageLabel === "진행") return "bg-emerald-500";
-        if (stageLabel === "AI 응답") return "bg-amber-500";
-        if (stageLabel === "리포트") return "bg-violet-500";
-        return "bg-slate-300";
-    }, [stageLabel]);
-
-    // ✅ Glass 공통 클래스 (이번 “갈아엎기” 핵심)
-    const glassCard =
-        "rounded-3xl bg-white/60 border border-white/50 backdrop-blur-xl shadow-[0_12px_35px_rgba(2,6,23,0.08)]";
-    const glassLine = "border-white/50"; // 구분선도 회색 대신 화이트톤
+    /* =========================
+       공통 스타일
+    ========================= */
+    const glass =
+        "bg-white/55 backdrop-blur-xl border border-white/60 shadow-[0_20px_40px_-20px_rgba(0,0,0,0.15)] rounded-3xl";
 
     return (
-        // 1) ✅ 최상단 wrapper 배경 교체 (파스텔 블루/퍼플)
-        <div className="min-h-screen text-slate-900 bg-gradient-to-br from-indigo-50 via-sky-50 to-fuchsia-50">
-            {/* 2) ✅ 상단바 “앱 헤더(글래스)” */}
-            <div className="sticky top-0 z-40 bg-white/55 backdrop-blur-xl border-b border-white/40">
-                <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                        <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-sky-500 to-violet-500 shadow-sm shrink-0" />
-                        <div className="min-w-0">
-                            <h1 className="text-sm sm:text-base font-extrabold truncate">AI Interview</h1>
-                            <p className="text-[11px] text-slate-600/90 truncate">{hint}</p>
+        <div className="min-h-screen bg-gradient-to-b from-sky-50 via-white to-indigo-50 text-slate-900">
+
+            {/* =========================
+                Glass Header
+            ========================= */}
+            <header className="sticky top-0 z-40 backdrop-blur-xl bg-white/60 border-b border-white/60">
+                <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-sky-500 to-violet-500" />
+                        <div>
+                            <h1 className="text-sm font-extrabold">AI Interview</h1>
+                            <p className="text-[11px] text-slate-500">{hint}</p>
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/55 backdrop-blur border border-white/50 shadow-[0_8px_22px_rgba(2,6,23,0.06)]">
-                            <span className={`w-2 h-2 rounded-full ${stageDot} ${stageLabel !== "준비" ? "animate-pulse" : ""}`} />
-                            <span className="text-xs font-semibold text-slate-700">{stageLabel}</span>
-                            <span className="text-xs text-slate-400">·</span>
-                            <span className="text-xs font-extrabold text-slate-900">{progress}%</span>
-                        </div>
-
+                    <div className="flex items-center gap-3">
+                        <span className="text-xs font-semibold text-slate-700">
+                            진행도 {progress}%
+                        </span>
                         <button
                             onClick={onLogout}
-                            className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-black transition"
+                            className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-bold"
                         >
                             로그아웃
                         </button>
@@ -97,40 +92,33 @@ export default function InterviewPage_yyr({
                 </div>
 
                 <div className="max-w-6xl mx-auto px-4 pb-3">
-                    <div className="flex items-center justify-between mb-1">
-                        <p className="text-[11px] text-slate-600/90">
-                            thread_id: <span className="font-mono text-slate-800">{sessionId ?? "준비 중..."}</span>
-                        </p>
-                        <p className="text-[11px] text-slate-600/90">
-                            진행도 <span className="font-extrabold text-slate-900">{progress}%</span>
-                        </p>
-                    </div>
-
-                    {/* progress bar도 유리톤에 맞춰 살짝 부드럽게 */}
-                    <div className="h-2 w-full rounded-full bg-white/55 border border-white/50 overflow-hidden">
+                    <div className="h-2 rounded-full bg-sky-100 overflow-hidden">
                         <div
-                            className="h-full rounded-full bg-gradient-to-r from-sky-500 to-violet-500 transition-all"
+                            className="h-full bg-gradient-to-r from-sky-500 to-violet-500 transition-all"
                             style={{ width: `${progress}%` }}
                         />
                     </div>
                 </div>
-            </div>
+            </header>
 
-            {/* ✅ 레이아웃은 네가 선호한 “이전 배치” 유지 */}
-            <main className="max-w-6xl mx-auto px-4 py-7 grid grid-cols-1 lg:grid-cols-12 gap-6">
-                {/* LEFT: Camera + Chips + Upload */}
+            {/* =========================
+                Main Layout
+            ========================= */}
+            <main className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+                {/* ================= LEFT */}
                 <section className="lg:col-span-5 space-y-4">
-                    {/* Camera */}
-                    <div className={`${glassCard} overflow-hidden`}>
-                        <div className="px-5 py-4 flex items-center justify-between">
+
+                    {/* Camera Card */}
+                    <div className={`${glass}`}>
+                        <div className="px-5 py-4 flex justify-between items-center">
                             <div>
-                                <p className="text-xs font-semibold text-slate-600/90">Live</p>
-                                <p className="text-sm font-extrabold text-slate-900 mt-0.5">면접 화면</p>
+                                <p className="text-xs text-slate-500 font-semibold">Live</p>
+                                <p className="text-sm font-extrabold">면접 화면</p>
                             </div>
 
-                            {/* ✅ LIVE pill: 파란 위치 → 빨강 */}
-                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-white text-xs font-extrabold bg-red-500/90 shadow-sm ring-1 ring-white/40">
-                                <span className="w-2 h-2 rounded-full bg-white/90 animate-pulse" />
+                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
+                                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
                                 LIVE
                             </span>
                         </div>
@@ -140,72 +128,63 @@ export default function InterviewPage_yyr({
                         </div>
                     </div>
 
-                    {/* Status chips */}
+                    {/* Status Chips */}
                     <div className="flex flex-wrap gap-2">
-                        <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/55 backdrop-blur border border-white/50 shadow-[0_8px_22px_rgba(2,6,23,0.06)] text-xs font-semibold text-slate-800">
-                            <span className="w-2 h-2 rounded-full bg-sky-500/80" />
-                            Vision: <span className="font-extrabold">{visionResult}</span>
+                        <span className="px-3 py-2 rounded-full text-xs font-semibold bg-white/70 border border-white/60">
+                            Vision: <b>{visionResult}</b>
                         </span>
-
-                        <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/55 backdrop-blur border border-white/50 shadow-[0_8px_22px_rgba(2,6,23,0.06)] text-xs font-semibold text-slate-800">
-                            <span className={`w-2 h-2 rounded-full ${isResumeUploaded ? "bg-emerald-500" : "bg-slate-300"}`} />
-                            Resume: <span className="font-extrabold">{isResumeUploaded ? "완료" : "미등록"}</span>
+                        <span className="px-3 py-2 rounded-full text-xs font-semibold bg-white/70 border border-white/60">
+                            Resume: <b>{isResumeUploaded ? "완료" : "미등록"}</b>
                         </span>
-
-                        <span className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-white/55 backdrop-blur border border-white/50 shadow-[0_8px_22px_rgba(2,6,23,0.06)] text-xs font-semibold text-slate-800">
-                            <span className={`w-2 h-2 rounded-full ${isProcessing ? "bg-amber-500 animate-pulse" : "bg-slate-300"}`} />
-                            Status: <span className="font-extrabold">{isProcessing ? "Processing" : "Ready"}</span>
+                        <span className="px-3 py-2 rounded-full text-xs font-semibold bg-white/70 border border-white/60">
+                            Status: <b>{isProcessing ? "Processing" : "Ready"}</b>
                         </span>
                     </div>
 
-                    {/* Upload card */}
-                    <div className={`${glassCard} p-5`}>
-                        <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0">
-                                <p className="text-xs font-semibold text-slate-600/90">Resume</p>
-                                <p className="text-base font-extrabold text-slate-900 mt-1">
-                                    {isResumeUploaded ? "업로드 완료" : "PDF 이력서 업로드"}
-                                </p>
-                                <p className="text-xs text-slate-600/90 mt-1">
-                                    {isResumeUploaded
-                                        ? "맞춤 질문이 생성될 준비가 되었어요."
-                                        : "이력서를 업로드하면 질문이 더 정교해집니다."}
-                                </p>
-                            </div>
+                    {/* Resume Upload */}
+                    <div className={`${glass} p-5`}>
+                        <p className="text-xs text-slate-500 font-semibold">Resume</p>
+                        <p className="text-base font-extrabold mt-1">
+                            PDF 이력서 업로드
+                        </p>
 
+                        <div className="mt-3">
                             {!isResumeUploaded ? (
-                                <label className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-2xl cursor-pointer text-white text-sm font-extrabold bg-gradient-to-r from-sky-500 to-violet-500 hover:from-sky-600 hover:to-violet-600 transition shadow-sm">
+                                <label className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl cursor-pointer text-white text-sm font-bold bg-gradient-to-r from-sky-500 to-violet-500">
                                     <FaFileUpload />
                                     업로드
-                                    <input type="file" className="hidden" accept=".pdf" onChange={onFileUpload} />
+                                    <input type="file" hidden accept=".pdf" onChange={onFileUpload} />
                                 </label>
                             ) : (
-                                <div className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-emerald-50/80 backdrop-blur text-emerald-700 border border-emerald-100/70 text-sm font-extrabold">
+                                <span className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-emerald-50 text-emerald-700 font-bold">
                                     <FaCheckCircle />
                                     완료
-                                </div>
+                                </span>
                             )}
                         </div>
                     </div>
                 </section>
 
-                {/* RIGHT: Question + Timeline + Action */}
+                {/* ================= RIGHT */}
                 <section className="lg:col-span-7">
-                    <div className={`${glassCard} overflow-hidden flex flex-col min-h-[720px]`}>
-                        {/* 4) ✅ 중앙 메인 카드 “테두리/구분선”도 바꾸기 */}
-                        <div className={`px-6 py-5 border-b ${glassLine} bg-white/35 backdrop-blur`}>
-                            <div className="flex items-start justify-between gap-4">
-                                <div className="min-w-0">
-                                    <p className="text-[11px] font-semibold text-slate-600/90">현재 질문</p>
-                                    <h2 className="mt-1 text-xl sm:text-2xl font-extrabold text-slate-900 leading-snug">
+                    <div
+                        className={`${glass} flex flex-col h-[calc(100vh-190px)] min-h-[520px]`}
+                    >
+                        {/* Question Header */}
+                        <div className="px-6 py-5 border-b border-white/60">
+                            <div className="flex justify-between gap-4">
+                                <div>
+                                    <p className="text-[11px] text-slate-500 font-semibold">
+                                        현재 질문
+                                    </p>
+                                    <h2 className="mt-1 text-xl font-extrabold">
                                         {currentQuestion}
                                     </h2>
-                                    <p className="text-xs text-slate-600/90 mt-2">{hint}</p>
                                 </div>
 
                                 <button
                                     onClick={onEndInterview}
-                                    className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-extrabold bg-gradient-to-r from-sky-500 to-violet-500 hover:from-sky-600 hover:to-violet-600 transition shadow-sm"
+                                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-bold bg-gradient-to-r from-sky-500 to-violet-500"
                                 >
                                     <FaChartBar />
                                     결과 보기
@@ -213,17 +192,17 @@ export default function InterviewPage_yyr({
                             </div>
                         </div>
 
-                        {/* Timeline / Chat */}
-                        <div className="flex-1 px-6 py-5 overflow-y-auto bg-white/20 backdrop-blur">
+                        {/* Timeline */}
+                        <div className="flex-1 px-6 py-5 overflow-y-auto">
                             {chatLog.length === 0 ? (
                                 <div className="h-full flex items-center justify-center text-center">
-                                    <div className="max-w-md">
-                                        <div className="mx-auto w-14 h-14 rounded-2xl bg-white/55 border border-white/50 backdrop-blur flex items-center justify-center text-slate-800 font-extrabold shadow-[0_10px_26px_rgba(2,6,23,0.06)]">
-                                            Q
-                                        </div>
-                                        <p className="mt-4 text-sm text-slate-700/80">
-                                            준비가 되시면 이력서를 업로드하고<br />
-                                            <span className="font-semibold text-slate-900">[답변 시작]</span>을 눌러주세요.
+                                    <div className="space-y-3">
+                                        <span className="inline-flex px-3 py-1 rounded-full text-xs font-bold bg-white/70 border border-white/60">
+                                            질문 대기
+                                        </span>
+                                        <p className="text-sm text-slate-500">
+                                            준비가 되면 이력서를 업로드하고<br />
+                                            <b>[답변 시작]</b>을 눌러주세요.
                                         </p>
                                     </div>
                                 </div>
@@ -231,34 +210,11 @@ export default function InterviewPage_yyr({
                                 <div className="space-y-3">
                                     {chatLog.map((msg, idx) => (
                                         <div key={idx} className="flex gap-3">
-                                            <div className="pt-1">
-                                                <div
-                                                    className={[
-                                                        "w-7 h-7 rounded-2xl flex items-center justify-center text-xs font-extrabold border",
-                                                        msg.sender === "user"
-                                                            ? "bg-slate-900 text-white border-slate-900"
-                                                            : msg.sender === "system"
-                                                                ? "bg-emerald-50/80 text-emerald-700 border-emerald-100/70"
-                                                                : "bg-white/55 text-slate-800 border-white/50 backdrop-blur",
-                                                    ].join(" ")}
-                                                >
-                                                    {msg.sender === "user" ? "U" : msg.sender === "system" ? "S" : "A"}
-                                                </div>
+                                            <div className="w-7 h-7 rounded-xl flex items-center justify-center text-xs font-bold bg-slate-900 text-white">
+                                                {msg.sender === "user" ? "U" : "A"}
                                             </div>
-
-                                            <div className="flex-1">
-                                                <div
-                                                    className={[
-                                                        "px-4 py-3 rounded-2xl text-sm leading-relaxed border",
-                                                        msg.sender === "user"
-                                                            ? "bg-slate-900 text-white border-slate-900"
-                                                            : msg.sender === "system"
-                                                                ? "bg-emerald-50/80 text-emerald-800 border-emerald-100/70"
-                                                                : "bg-white/55 text-slate-900 border-white/50 backdrop-blur",
-                                                    ].join(" ")}
-                                                >
-                                                    {msg.text}
-                                                </div>
+                                            <div className="px-4 py-3 rounded-2xl bg-white/70 border border-white/60 text-sm">
+                                                {msg.text}
                                             </div>
                                         </div>
                                     ))}
@@ -266,17 +222,8 @@ export default function InterviewPage_yyr({
                             )}
                         </div>
 
-                        {/* Action footer */}
-                        <div className={`px-6 py-5 border-t ${glassLine} bg-white/35 backdrop-blur`}>
-                            <div className="flex items-center justify-between mb-3">
-                                <p className="text-xs text-slate-700/80">
-                                    {isProcessing ? "AI 응답 생성 중…" : "버튼을 눌러 답변을 녹음하세요."}
-                                </p>
-                                <span className="text-xs font-semibold text-slate-800">
-                                    {isProcessing ? "Processing" : "Ready"}
-                                </span>
-                            </div>
-
+                        {/* Action */}
+                        <div className="px-6 py-5 border-t border-white/60">
                             <AudioRecorder onAudioSubmit={onAudioSubmit} isProcessing={isProcessing} />
                             <audio ref={audioPlayerRef} hidden />
                         </div>
@@ -284,33 +231,21 @@ export default function InterviewPage_yyr({
                 </section>
             </main>
 
-            {/* Report modal */}
+            {/* ================= Report Modal */}
             {showReport && (
                 <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-white/50">
-                        <div className="p-6 border-b border-white/50 flex justify-between items-center sticky top-0 bg-white/75 backdrop-blur-xl z-10">
-                            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
-                                📊 면접 분석 리포트
-                            </h2>
-                            <button
-                                onClick={() => setShowReport(false)}
-                                className="text-slate-500 hover:text-slate-700"
-                                aria-label="Close"
-                            >
-                                <FaTimes size={22} />
+                    <div className="bg-white rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                        <div className="p-6 border-b flex justify-between items-center">
+                            <h2 className="text-xl font-extrabold">📊 면접 분석 리포트</h2>
+                            <button onClick={() => setShowReport(false)}>
+                                <FaTimes />
                             </button>
                         </div>
-
                         <div className="p-6">
                             {loadingReport ? (
-                                <div className="text-center py-20">
-                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500 mx-auto mb-4" />
-                                    <p className="text-slate-700/80">AI가 면접관들의 평가를 취합 중입니다...</p>
-                                </div>
-                            ) : reportData ? (
-                                <ResultPage_yyr reportData={reportData} />
+                                <p className="text-center text-slate-500">리포트 생성 중…</p>
                             ) : (
-                                <p className="text-center text-red-500">데이터를 불러오지 못했습니다.</p>
+                                <ResultPage_yyr reportData={reportData} />
                             )}
                         </div>
                     </div>
