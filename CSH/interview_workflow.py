@@ -96,7 +96,7 @@ class WorkflowState(TypedDict, total=False):
 
     # ── 질문 추적 ──
     question_count: int  # 현재까지 질문 수 (1부터)
-    max_questions: int  # 최대 질문 수 (기본 5)
+    max_questions: int  # 최대 질문 수 (기본 10)
     current_topic: str  # 현재 질문 주제
     topic_question_count: int  # 해당 주제 내 질문 수
     topic_history: List[Dict]  # 주제 변경 이력
@@ -462,7 +462,7 @@ class InterviewNodes:
         question_count = ws.get(
             "question_count", session.get("question_count", 1) if session else 1
         )
-        max_questions = ws.get("max_questions", 5)
+        max_questions = ws.get("max_questions", 10)
 
         # ── 꼬리질문 판단 ──
         needs_follow_up = False
@@ -531,24 +531,9 @@ class InterviewNodes:
             )
 
         # ── LLM 질문 생성 (기존 AIInterviewer 로직 활용) ──
+        # NOTE: generate_llm_question() 내부에서 strip_think_tokens() + 빈 응답 재시도 +
+        #       RuntimeError raise를 모두 처리하므로, 여기서는 중복 호출하지 않음
         question = await self._interviewer.generate_llm_question(session_id, user_input)
-
-        # ── thinking 토큰 제거 + 빈 응답 방어 ──
-        strip_fn = _get_strip_think_tokens()
-        question = strip_fn(question)
-        if not question:
-            print(
-                "⚠️ [Workflow:generate_question] thinking 토큰 제거 후 빈 응답 → LLM 재호출"
-            )
-            # LLM 재호출 시도
-            question = await self._interviewer.generate_llm_question(
-                session_id, user_input
-            )
-            question = strip_fn(question)
-            if not question:
-                raise RuntimeError(
-                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
-                )
 
         # 대화 기록 업데이트
         session = self._state_mgr.get_session(session_id)
@@ -598,21 +583,9 @@ class InterviewNodes:
         self._state_mgr.update_session(session_id, {"follow_up_mode": True})
 
         # LLM 질문 생성 (내부적으로 should_follow_up 정보 활용)
+        # NOTE: generate_llm_question() 내부에서 strip_think_tokens() + 빈 응답 재시도 +
+        #       RuntimeError raise를 모두 처리하므로, 여기서는 중복 호출하지 않음
         question = await self._interviewer.generate_llm_question(session_id, user_input)
-
-        # ── thinking 토큰 제거 + 빈 응답 방어 ──
-        strip_fn = _get_strip_think_tokens()
-        question = strip_fn(question)
-        if not question:
-            print("⚠️ [Workflow:follow_up] thinking 토큰 제거 후 빈 응답 → LLM 재호출")
-            question = await self._interviewer.generate_llm_question(
-                session_id, user_input
-            )
-            question = strip_fn(question)
-            if not question:
-                raise RuntimeError(
-                    "LLM이 유효한 꼬리질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
-                )
 
         session = self._state_mgr.get_session(session_id)
         chat_history = session.get("chat_history", [])
@@ -755,7 +728,7 @@ def route_after_routing(state: WorkflowState) -> str:
     """
     session_id = state.get("session_id", "")
     question_count = state.get("question_count", 1)
-    max_questions = state.get("max_questions", 5)
+    max_questions = state.get("max_questions", 10)
 
     # 면접 종료 조건
     if question_count >= max_questions:
@@ -932,7 +905,7 @@ class InterviewWorkflow:
             "phase": InterviewPhase.IDLE.value,
             "response": "",
             "question_count": current_question_count,
-            "max_questions": 5,
+            "max_questions": 10,
             "current_topic": current_topic,
             "topic_question_count": topic_question_count,
             "topic_history": session.get("topic_history", []) if session else [],

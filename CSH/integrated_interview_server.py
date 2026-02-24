@@ -2160,9 +2160,8 @@ class AIInterviewer:
                     llm_available=LLM_AVAILABLE,
                 )
                 response_text = result.get("response", "")
-                # ── qwen3 <think> 토큰 제거 (워크플로우 경로) ──
-                if response_text:
-                    response_text = strip_think_tokens(response_text)
+                # NOTE: strip_think_tokens()는 generate_llm_question() 내부에서
+                #       이미 처리되므로, 워크플로우 경로에서는 중복 호출하지 않음
                 if response_text:
                     return response_text
                 # response가 빈 경우 폴백
