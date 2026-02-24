@@ -28,15 +28,6 @@ from json_utils import parse_evaluation_json
 from prompt_templates import (
     EVALUATION_PROMPT as SHARED_EVALUATION_PROMPT,
 )
-from prompt_templates import (
-    INTERVIEWER_PROMPT as SHARED_INTERVIEWER_PROMPT,
-)
-from prompt_templates import (
-    MAX_QUESTIONS as SHARED_MAX_QUESTIONS,
-)
-from prompt_templates import (
-    build_question_prompt,
-)
 
 # 경로 설정
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -176,7 +167,28 @@ def evaluate_answer_task(
 
         from langchain_core.messages import HumanMessage, SystemMessage
 
-        # RAG 컨텍스트 추가
+        # ── RAG 컨텍스트 자체 조회 Fallback ──
+        # 호출 측에서 resume_context를 전달하지 않았거나 빈 문자열인 경우,
+        # Celery Worker가 자율적으로 RAG를 조회하여 평가 품질을 보장합니다.
+        # 이를 통해 이력서 맥락 기반의 정확한 STAR/직무역량 평가가 가능합니다.
+        if not resume_context:
+            try:
+                rag = get_rag()
+                if rag:
+                    retriever = rag.get_retriever()
+                    # 답변 내용을 쿼리로 이력서에서 관련 컨텍스트 검색
+                    docs = retriever.invoke(answer)
+                    if docs:
+                        resume_context = "\n".join([d.page_content for d in docs[:3]])
+                        print(
+                            f"📚 [Task {task_id}] RAG 자체 조회 성공: "
+                            f"{len(docs[:3])}개 문서에서 이력서 컨텍스트 추출"
+                        )
+            except Exception as rag_err:
+                # RAG 조회 실패 시에도 평가는 계속 진행 (Graceful Degradation)
+                print(f"⚠️ [Task {task_id}] RAG 자체 조회 실패 (무시): {rag_err}")
+
+        # RAG 컨텍스트 추가 (호출 측 전달 또는 자체 조회 결과)
         rag_section = ""
         if resume_context:
             rag_section = f"\n[참고: 이력서 내용]\n{resume_context}"
@@ -1078,91 +1090,13 @@ def prefetch_tts_task(self, session_id: str, texts: List[str]) -> Dict:
     return {"session_id": session_id, "results": results, "task_id": task_id}
 
 
-# ========== 실시간 LLM 질문 생성 태스크 ==========
-
-INTERVIEWER_PROMPT_CELERY = SHARED_INTERVIEWER_PROMPT
-MAX_QUESTIONS = SHARED_MAX_QUESTIONS
-
-
-@celery_app.task(
-    bind=True,
-    name="celery_tasks.generate_question_task",
-    soft_time_limit=30,
-    time_limit=45,
-    max_retries=2,
-)
-def generate_question_task(
-    self,
-    session_id: str,
-    user_answer: str,
-    chat_history: List[Dict],
-    question_count: int,
-) -> Dict:
-    """
-    LLM을 사용하여 다음 면접 질문 생성 (비동기 태스크)
-
-    Args:
-        session_id: 세션 ID
-        user_answer: 사용자의 이전 답변
-        chat_history: 대화 기록
-        question_count: 현재 질문 수
-
-    Returns:
-        생성된 질문
-    """
-    task_id = self.request.id
-    print(f"[Task {task_id}] 질문 생성 시작 - Session: {session_id}")
-
-    try:
-        llm = get_llm()
-        if not llm:
-            return {
-                "question": "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-                "fallback": True,
-                "task_id": task_id,
-            }
-
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-        messages = [SystemMessage(content=INTERVIEWER_PROMPT_CELERY)]
-
-        # 대화 기록 추가
-        for msg in chat_history[-6:]:  # 최근 6개만
-            if msg["role"] == "assistant":
-                messages.append(AIMessage(content=msg["content"]))
-            elif msg["role"] == "user":
-                messages.append(HumanMessage(content=msg["content"]))
-
-        # 질문 생성 요청 (메인 서버와 동일한 템플릿 유지)
-        current_topic = "general"
-        topic_count = 0
-        follow_up_instruction = ""
-        question_prompt = build_question_prompt(
-            question_count=question_count,
-            max_questions=MAX_QUESTIONS,
-            current_topic=current_topic,
-            topic_count=topic_count,
-            follow_up_instruction=follow_up_instruction,
-        )
-
-        messages.append(HumanMessage(content=question_prompt))
-
-        response = llm.invoke(messages)
-        question = response.content.strip()
-
-        print(f"[Task {task_id}] 질문 생성 완료")
-        return {"question": question, "session_id": session_id, "task_id": task_id}
-
-    except Exception as e:
-        print(f"[Task {task_id}] 질문 생성 오류: {e}")
-        if self.request.retries < self.max_retries:
-            raise self.retry(exc=e)
-        return {
-            "question": "그 경험에서 가장 어려웠던 점은 무엇이었나요?",
-            "fallback": True,
-            "error": str(e),
-            "task_id": task_id,
-        }
+# ========== [REMOVED] 실시간 LLM 질문 생성 태스크 ==========
+# generate_question_task는 Dead Code로 확인되어 제거되었습니다.
+# - 코드베이스 전체에서 .delay() / .apply_async() 호출이 0건
+# - 질문 생성은 LangGraph 워크플로우의 generate_question / follow_up 노드에서
+#   build_and_call_llm()을 통해 처리합니다 (RAG + 감정 적응 + 토픽 추적 포함).
+# - celery_app.py의 Queue 라우팅 등록("celery_tasks.generate_question_task")은
+#   태스크가 없어도 에러를 발생시키지 않으므로 안전합니다.
 
 
 # ========== Redis 세션 저장 태스크 ==========

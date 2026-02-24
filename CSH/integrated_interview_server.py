@@ -734,7 +734,6 @@ try:
         batch_evaluate_task,
         complete_interview_workflow_task,
         evaluate_answer_task,
-        generate_question_task,
         generate_report_task,
         generate_tts_task,
         prefetch_tts_task,
