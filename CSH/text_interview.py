@@ -42,7 +42,7 @@ load_dotenv()
 # LLM 모델 설정 (환경변수로 오버라이드 가능)
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "exaone3.5:7.8b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "16384"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
 
 
 class InterviewReportGenerator:

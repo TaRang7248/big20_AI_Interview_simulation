@@ -474,7 +474,6 @@ class CodingProblemGenerator:
                 model=CODING_LLM_MODEL,  # 코딩 테스트 전용 경량 모델 (qwen3:1.7b)
                 temperature=0.8,  # 다양한 문제 생성을 위해 높은 temperature
                 num_ctx=CODING_LLM_NUM_CTX,  # 코딩 문제는 4096 컨텍스트면 충분
-                num_predict=2048,  # 최대 생성 토큰 수 제한 (문제 JSON ~1000토큰)
                 think=None,  # thinking 모드 비활성화 — 응답 지연 방지
             )
         else:
@@ -568,7 +567,6 @@ class CodingProblemGenerator:
                 model=CODING_CELERY_LLM_MODEL,  # qwen3:4b (고품질 모델)
                 temperature=0.8,
                 num_ctx=CODING_CELERY_LLM_NUM_CTX,  # 4096 (충분한 컨텍스트)
-                num_predict=2048,  # 문제 JSON ~1000토큰이면 충분
                 think=None,  # thinking 모드 비활성화
             )
 
@@ -1936,7 +1934,6 @@ class CodeAnalyzer:
                     model=CODING_LLM_MODEL,  # 코딩 테스트 전용 경량 모델 (qwen3:1.7b)
                     temperature=0.3,
                     num_ctx=CODING_LLM_NUM_CTX,  # 코딩 분석은 4096 컨텍스트면 충분
-                    num_predict=2048,  # 최대 생성 토큰 수 제한 (분석 JSON ~1500토큰)
                 )
             except Exception as e:
                 print(f"⚠️ CodeAnalyzer LLM 초기화 실패: {e}")

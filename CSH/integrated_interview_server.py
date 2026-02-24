@@ -105,11 +105,9 @@ from security import (
 # ========== 설정 ==========
 DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "exaone3.5:7.8b")
 DEFAULT_LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.7"))
-DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
-# 면접 LLM 최대 생성 토큰 수 — 무한 생성 방지
-# ⚡ 512토큰으로 제한: 면접 질문은 100~300토큰이면 충분하며,
-#    2048 설정은 불필요한 생성 시간을 초래하여 타임아웃의 주요 원인이 됨
-DEFAULT_LLM_NUM_PREDICT = int(os.getenv("LLM_NUM_PREDICT", "512"))
+DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
+# num_predict: 제한 없음 (Ollama 기본값 -1 = stop 토큰까지 생성)
+#   모델이 자연스럽게 응답을 종료하도록 하여 잘림 현상 방지
 # 면접 LLM 호출 타임아웃 (초) — GTX 1660 VRAM 압박 시 무기한 hang 방지
 # 60초 내 응답 없으면 폴백 질문으로 전환하여 사용자 대기 시간 최소화
 LLM_TIMEOUT_SEC = int(os.getenv("LLM_TIMEOUT_SEC", "60"))
@@ -1597,25 +1595,21 @@ class AIInterviewer:
         if LLM_AVAILABLE:
             try:
                 # 평가용 LLM (낮은 temperature)
-                # num_predict: 최대 생성 토큰 수 제한 → 불필요한 장문 생성 방지
-                # num_ctx: 4096으로 축소 → VRAM 절약 (8192 → 4096: ~1.5GB 절약)
-                # think=True: EXAONE Deep thinking mode 활성화 → 추론 품질 향상
-                #   strip_think_tokens()가 <thought> 블록을 자동 제거하므로 사용자에게 노출되지 않음
+                # num_ctx: 8192 컨텍스트 윈도우 → 충분한 대화 히스토리 수용
+                # num_predict: 제한 없음 → 모델이 stop 토큰까지 자연스럽게 생성
                 self.llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=0.3,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
-                    num_predict=DEFAULT_LLM_NUM_PREDICT,
                 )
-                # 질문 생성용 LLM (높은 temperature, thinking mode 활성화)
+                # 질문 생성용 LLM (높은 temperature)
                 self.question_llm = ChatOllama(
                     model=DEFAULT_LLM_MODEL,
                     temperature=DEFAULT_LLM_TEMPERATURE,
                     num_ctx=DEFAULT_LLM_NUM_CTX,
-                    num_predict=DEFAULT_LLM_NUM_PREDICT,
                 )
                 print(
-                    f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}, num_ctx={DEFAULT_LLM_NUM_CTX}, num_predict={DEFAULT_LLM_NUM_PREDICT}"
+                    f"✅ LLM 초기화 완료 (질문 생성 + 평가): {DEFAULT_LLM_MODEL}, num_ctx={DEFAULT_LLM_NUM_CTX}"
                 )
             except Exception as e:
                 print(f"❌ LLM 초기화 실패: {e}")
@@ -1973,8 +1967,8 @@ class AIInterviewer:
 
             # Memory에서 대화 기록 가져오기 (있으면)
             # ⚡ 성능 최적화: 최근 3턴(6메시지)만 포함하여 컨텍스트 윈도우 절약
-            #    num_ctx=4096에서 전체 히스토리를 넣으면 5번째 질문쯤 ~3,900토큰에 도달하여
-            #    토큰 처리 속도가 급락하고 타임아웃이 발생함
+            #    num_ctx=8192에서 전체 히스토리를 넣으면 후반부에 토큰이 부족해질 수 있으므로
+            #    최근 대화만 유지하여 안정적인 응답 생성 보장
             MAX_HISTORY_MESSAGES = 6  # 3턴 = assistant 3개 + user 3개
             memory_messages = self.get_memory_messages(session_id)
             if memory_messages:
