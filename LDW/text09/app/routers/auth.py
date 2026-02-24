@@ -94,16 +94,18 @@ verification_codes = {}
 @router.post("/find-id")
 def find_id(data: FindIdRequest):
     """
-    이름과 이메일로 아이디(id_name)를 찾습니다.
+    이름과 이메일로 모든 일치하는 아이디(id_name)를 찾습니다.
     """
     conn = get_db_connection()
     try:
         c = conn.cursor(cursor_factory=RealDictCursor)
-        # 이름(name)과 이메일(email)이 일치하는 사용자 확인
+        # 이름(name)과 이메일(email)이 일치하는 모든 사용자 조회
         c.execute('SELECT id_name FROM users WHERE name = %s AND email = %s', (data.name, data.email))
-        row = c.fetchone()
-        if row:
-            return {"success": True, "id_name": row['id_name']}
+        rows = c.fetchall() # 모든 결과 가져오기
+        if rows:
+            # 검색된 모든 아이디를 리스트로 추출
+            id_list = [row['id_name'] for row in rows]
+            return {"success": True, "id_names": id_list}
         else:
             return {"success": False, "message": "해당하는 아이디가 없습니다."}
     except Exception as e:

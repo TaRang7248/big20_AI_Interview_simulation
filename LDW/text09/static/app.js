@@ -132,17 +132,19 @@ function initFindAccount() {
             resultBox.style.display = 'block';
 
             if (result.success) {
-                resultBox.innerHTML = `찾으시는 아이디는 <strong>${result.id_name}</strong> 입니다.`;
+                // 여러 개의 아이디가 있을 수 있으므로 join 하여 표시
+                const idsText = result.id_names.join(', ');
+                resultBox.innerHTML = `찾으시는 아이디는 <strong>${idsText}</strong> 입니다.`;
                 resultBox.style.color = 'blue';
-                // 아이디 출력 후 3초 뒤 로그인 화면으로 이동 (선택 사항)
+                // 아이디 출력 후 5초 뒤 로그인 화면으로 이동 (사용자가 아이디를 기록할 시간을 충분히 줌)
                 setTimeout(() => {
-                    alert(`아이디 확인: ${result.id_name}. 로그인 화면으로 돌아갑니다.`);
+                    alert(`아이디 확인 완료. 로그인 화면으로 돌아갑니다.`);
                     navigateTo('login-page');
-                }, 3000);
+                }, 5000);
             } else {
                 resultBox.textContent = result.message;
                 resultBox.style.color = 'red';
-                // 실패 시 2초 뒤 로그인 화면으로 이동 (사용자 요구사항)
+                // 실패 시 2초 뒤 로그인 화면으로 이동
                 setTimeout(() => {
                     navigateTo('login-page');
                 }, 2000);
@@ -252,6 +254,11 @@ function initRouter() {
             // Clear signup form when entering signup page
             if (pageId === 'signup-page') {
                 clearSignupForm();
+            }
+
+            // ID/PW 찾기 페이지 진입 시 이전 기록 초기화
+            if (pageId === 'find-account-page') {
+                resetFindForms();
             }
         }
     };
