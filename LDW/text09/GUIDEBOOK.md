@@ -143,29 +143,48 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 3. **PW 찾기**: 아이디를 입력하면 해당 계정의 이메일로 4자리 인증번호가 발송(시뮬레이션)됩니다. 발송된 인증번호를 입력하면 비밀번호(pw)를 즉시 확인할 수 있습니다.
 ---
 
-## 6. 파일 구조 설명
-```
-C:\big20\big20_AI_Interview_simulation\LDW\text09\
-├── app/                     # FastAPI 애플리케이션 진입점 및 로직
-├── data/                    # 모델 입력 데이터, 백업 및 보관 데이터 (archive 포함)
-├── db/                      # 데이터베이스 초기화 및 설정
-├── db_data/                 # 데이터베이스 영구 데이터 저장소
-├── LivePortrait/            # 실시간 포션 애니메이션 엔진
-├── migration_package/       # DB 마이그레이션 패키지
-├── models/                  # AI 모델 저장소
-├── SadTalker/               # 아바타 생성 엔진
-├── scripts/                 # 유틸리티 및 관리 스크립트
-├── static/                  # 정적 파일 (HTML, JS, CSS)
-├── test_uploads/            # 테스트용 업로드 파일
-├── tests/                   # 기능 검증 및 유닛 테스트
-├── uploads/                 # 실제 업로드 파일 저장소
-├── Wav2Lip/                 # 립싱크 생성 엔진
-├── docker-compose.yml       # 도커 오케스트레이션
-├── Dockerfile               # 도커 빌드 설정
-├── GUIDEBOOK.md             # 프로젝트 가이드북
-├── requirements.txt         # 패키지 의존성 목록 (numpy==1.26.2, pyannote-audio==3.1.1 고정, 2026-02-24 최신화)
-└── server.py                # 서버 실행 및 브라우저 자동 실행 (한국어 주석 적용)
-```
+## 6. 상세 파일 구조 설명 (File Structure)
+
+본 프로젝트는 관리 효율성을 위해 계층화된 디렉토리 구조를 따릅니다.
+
+### [루트 디렉토리 파일]
+- **`server.py`**: 서비스의 메인 엔트리 포인트입니다. FastAPI 서버(uvicorn)를 구동함과 동시에 사용자의 기본 웹 브라우저를 자동으로 열어줍니다. 한국어 주석이 적용되어 있으며 서버 실행과 브라우저 호출 기능에 집중되어 있습니다.
+- **`requirements.txt`**: 프로젝트 실행을 위한 패키지 의존성 목록입니다. `numpy==1.26.2`, `pyannote-audio==3.1.1` 등 호환성이 중요한 라이브러리의 버전이 고정되어 있습니다.
+- **`GUIDEBOOK.md`**: 본 문서로, 프로젝트의 개요, 설치 방법, 상세 파일 기능 및 최근 변경 사항을 포함합니다.
+- **`Dockerfile` / `docker-compose.yml`**: Docker 컨테이너 환경에서 서비스를 실행하기 위한 빌드 및 오케스트레이션 설정 파일입니다.
+
+### [주요 디렉토리 및 구성 파일]
+- **`app/`**: 애플리케이션의 핵심 로직이 위치합니다.
+  - **`main.py`**: FastAPI 인스턴스 생성, CORS 설정, 라우터 등록 등 앱의 진입점 역할을 합니다.
+  - **`config.py`**: API 키, 파일 경로, 서버 설정 등 전역 설정을 중앙 관리합니다.
+  - **`database.py`**: SQLAlchemy를 이용한 DB 연결 엔진 및 세션 설정을 담당합니다.
+  - **`models.py`**: 유저, 면접 세션, 질문, 분석 결과 등 DB 테이블 스키마를 정의합니다.
+  - **`routers/`**: 기능별 API 엔드포인트를 정의합니다 (`auth`, `user`, `interview`, `admin`, `job`, `video_router`).
+  - **`services/`**: 핵심 비즈니스 기능을 수행합니다.
+    - `stt_service.py`: Gemini 및 Whisper를 활용한 음성 인식 로직.
+    - `tts_service.py`: Edge-TTS를 활용한 음성 합성 및 비디오 폴백 처리.
+    - `llm_service.py`: Gemini를 이용한 면접 질문 생성 및 답변 분석.
+    - `analysis_service.py`: 음성 데이터(성량, 피치 등) 정밀 분석.
+    - `video_analysis_service.py`: 실시간 자세 및 표정 분석 데이터 처리.
+    - `video_gen_service.py`: Wav2Lip 기반 립싱크 비디오 생성.
+    - `vad_service.py`: 목소리 활동 감지(VAD)를 통한 답변 유무 판단.
+- **`scripts/`**: 데이터 관리 및 환경 설정을 위한 유틸리티 폴더입니다.
+  - `check_env.py`: 실행 환경(FFmpeg, 패키지 등) 사전 점검.
+  - `setup_test_user.py`: 초기 테스트 계정(`test`/`test`) 생성.
+  - `export_db.py` / `import_db.py`: 데이터베이스 백업 및 복구.
+  - `diagnose_numpy.py`: numpy 버전 및 바이너리 호환성 진단.
+- **`static/`**: 웹 프론트엔드 자산입니다.
+  - `index.html`: 메인 웹 페이지 구조.
+  - `app.js`: 실시간 면접 진행, 미디어 처리, API 통신 등 클라이언트 로직.
+  - `style.css`: UI 디자인 및 레이아웃 스타일.
+- **`tests/`**: 시스템 안정성 검증을 위한 테스트 코드입니다.
+  - `manual_verification/`: 주요 기능(FFmpeg, 오디오 인식 등)의 수동 검증 스크립트.
+  - `test_stt_verification.py`, `test_video_gen.py` 등 각 모듈별 유닛 테스트.
+- **`data/`**: 시스템에서 사용하는 공통 리소스와 백업 데이터 저장소입니다.
+- **`models/`**: AI 모델 실행에 필요한 각종 가중치(pth, bin) 파일이 위치합니다.
+- **`uploads/`**: 사용자가 업로드한 파일(resume) 및 녹음된 원본 데이터(audio, Wav2Lip_mp4)가 저장됩니다.
+- **`LivePortrait`, `SadTalker`, `Wav2Lip`**: 외부 AI 이미지/비디오 생성 엔진 소스 코드 및 관련 모듈입니다.
+- **`db_data/`**: PostgreSQL 등 컨테이너 환경의 데이터 영구 보관용 폴더입니다.
 
 ---
 
