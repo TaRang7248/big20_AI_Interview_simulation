@@ -83,7 +83,7 @@ services:
       - HUME_API_KEY=${HUME_API_KEY}
       - HUME_SECRET_KEY=${HUME_SECRET_KEY}
       - HUME_CONFIG_ID=${HUME_CONFIG_ID}
-      - LLM_MODEL=${LLM_MODEL:-exaone-deep:2.4b-q8_0}
+      - LLM_MODEL=${LLM_MODEL:-exaone3.5:7.8b}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       # NGINX 뒤에서 동작하므로 직접 TLS 불필요
       - TLS_CERTFILE=
@@ -175,7 +175,7 @@ services:
       - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/interview_db
       - REDIS_URL=redis://redis:6379/0
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
-      - LLM_MODEL=${LLM_MODEL:-exaone-deep:2.4b-q8_0}
+      - LLM_MODEL=${LLM_MODEL:-exaone3.5:7.8b}
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
     depends_on:
       redis:
