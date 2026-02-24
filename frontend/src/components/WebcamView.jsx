@@ -11,7 +11,7 @@ const WebcamView = ({ onVideoFrame, isProcessing }) => {
       try {
         const mediaStream = await navigator.mediaDevices.getUserMedia({
           video: true,
-          audio: false, 
+          audio: false,
         });
         setStream(mediaStream);
         if (videoRef.current) {
@@ -47,7 +47,7 @@ const WebcamView = ({ onVideoFrame, isProcessing }) => {
       canvas.height = videoRef.current.videoHeight;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(videoRef.current, 0, 0);
-      
+
       canvas.toBlob((blob) => {
         if (onVideoFrame && blob) {
           onVideoFrame(blob);
@@ -65,19 +65,19 @@ const WebcamView = ({ onVideoFrame, isProcessing }) => {
           <p>{error}</p>
         </div>
       ) : (
-        <video 
-          ref={videoRef} 
-          autoPlay 
-          playsInline 
-          muted 
-          className="w-full h-full object-cover transform scale-x-[-1]" 
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover transform scale-x-[-1]"
         />
       )}
-      
-      <div className="absolute top-4 right-4 px-3 py-1 bg-red-600 bg-opacity-75 rounded-full flex items-center gap-2">
+
+      {/* <div className="absolute top-4 right-4 px-3 py-1 bg-red-600 bg-opacity-75 rounded-full flex items-center gap-2">
         <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
         <span className="text-white text-xs font-bold">LIVE</span>
-      </div>
+      </div> */}
     </div>
   );
 };
