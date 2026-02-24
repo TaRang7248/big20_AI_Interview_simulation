@@ -282,36 +282,10 @@ def select_best_transcript(gemini_text, whisper_text, audio_context_prompt=""):
         # 매우 유사한 경우, 더 긴 결과(보통 더 많은 세부 사항 보존)를 선택
         return gemini_text if len(gemini_text) >= len(whisper_text) else whisper_text
     
-    # 2. LLM 판단 (원본 보존성 중심)
-    try:
-        # 모델 인스턴스 재사용
-        judge_model = get_gemini_model("gemini-2.0-flash")
-        judge_prompt = f"""
-        다음은 동일한 오디오에 대한 두 가지 STT 결과입니다.
-        면접 상황에서 지원자가 말한 '원본 소리'를 가장 누락 없이, 그리고 변형 없이 그대로 옮긴 것처럼 보이는 결과를 선택하세요.
-        문법적인 올바름보다 '들리는 소리의 충실함'이 더 중요합니다.
-        
-        [결과 1]
-        {gemini_text}
-        
-        [결과 2]
-        {whisper_text}
-        
-        반환 형식: "1" 또는 "2"만 출력하세요. (설명 불필요)
-        """
-        response = judge_model.generate_content(judge_prompt)
-        choice = response.text.strip()
-        logger.info(f"LLM 판단 결과: {choice}")
-        
-        if "1" in choice: return gemini_text
-        else: return whisper_text
-        
-    except Exception:
-        # 오류 발생 시 더 긴 결과 반환
-        if not gemini_text: return whisper_text
-        if not whisper_text: return gemini_text
-        
-        return gemini_text if len(gemini_text) > len(whisper_text) else whisper_text
+    # [변경 사항] 유사도가 0.95 미만인 경우, LLM 판단을 거치지 않고 바로 Whisper 결과를 사용합니다.
+    # Whisper가 일반적으로 간투사 인식 및 안정성 면에서 뛰어난 성능을 보이기 때문입니다.
+    logger.info("STT 유사도가 낮아 Whisper 결과를 우선 선택합니다.")
+    return whisper_text
 
 # ---------------------------------------------------------
 # 4. 메인 함수
