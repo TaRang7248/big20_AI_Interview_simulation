@@ -14,6 +14,21 @@ from parselmouth.praat import call
 from ..config import logger, GOOGLE_API_KEY, OPENAI_API_KEY
 from .vad_service import calculate_average_rms, check_vad_activity
 
+# Gemini 모델 인스턴스 재사용을 위한 전역 변수
+_STT_MODEL_CACHE = {}
+
+def get_gemini_model(model_name="gemini-2.0-flash"):
+    """
+    Gemini 모델 인스턴스를 반환합니다. 이미 생성된 인스턴스가 있으면 재사용합니다.
+    """
+    if model_name not in _STT_MODEL_CACHE:
+        logger.info(f"STT용 새로운 {model_name} 모델 인스턴스를 생성합니다.")
+        _STT_MODEL_CACHE[model_name] = genai.GenerativeModel(
+            model_name=model_name,
+            generation_config={"temperature": 0.0}
+        )
+    return _STT_MODEL_CACHE[model_name]
+
 # Configure GenAI
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
@@ -185,10 +200,8 @@ def transcribe_with_gemini(audio_path):
         if audio_file.state.name == "FAILED":
              return None
         
-        model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",
-            generation_config={"temperature": 0.0}
-        )
+        # 모델 인스턴스 재사용
+        model = get_gemini_model("gemini-2.0-flash")
         
         prompt = """
         이 오디오 파일은 면접 지원자의 답변입니다. 
@@ -244,16 +257,22 @@ def transcribe_with_whisper(audio_path):
         logger.error(f"Whisper STT Error: {e}")
         return None
 
+def calculate_levenshtein_similarity(text1, text2):
+    """
+    두 텍스트 간의 Levenshtein 유사도를 계산합니다. (0.0 ~ 1.0)
+    """
+    return Levenshtein.ratio(text1, text2)
+
 def select_best_transcript(gemini_text, whisper_text, audio_context_prompt=""):
     """
-    Smart selection logic.
+    스마트 선택 로직: Gemini와 Whisper 결과 중 최적의 전사 결과를 선택합니다.
     """
     if not gemini_text and not whisper_text: return "답변 없음"
     if not gemini_text: return whisper_text
     if not whisper_text: return gemini_text
     
-    # 1. Similarity Check
-    similarity = Levenshtein.ratio(gemini_text, whisper_text)
+    # 1. Similarity Check (유사도 체크)
+    similarity = calculate_levenshtein_similarity(gemini_text, whisper_text)
     logger.info(f"STT Similarity: {similarity:.2f}")
     
     if similarity >= 0.95:
@@ -262,7 +281,8 @@ def select_best_transcript(gemini_text, whisper_text, audio_context_prompt=""):
     
     # 2. LLM Judge (Contextual Naturalness)
     try:
-        judge_model = genai.GenerativeModel("gemini-2.0-flash")
+        # 모델 인스턴스 재사용
+        judge_model = get_gemini_model("gemini-2.0-flash")
         judge_prompt = f"""
         다음은 동일한 오디오에 대한 두 가지 STT(음성 인식) 결과입니다.
         면접 답변 상황을 고려했을 때, 문맥상 더 자연스럽고 정확해 보이는 쪽을 선택해주세요.
@@ -341,9 +361,18 @@ def transcribe_audio(original_audio_path):
             "debug_info": {"skipped_due_to_silence": True}
         }
 
-    # 3. STT
-    gemini_res = transcribe_with_gemini(processed_path)
-    whisper_res = transcribe_with_whisper(processed_path)
+    # 3. STT (Gemini + Whisper 병렬 실행)
+    # ThreadPoolExecutor를 사용하여 두 STT 서비스를 동시에 호출함으로써 대기 시간을 단축합니다.
+    from concurrent.futures import ThreadPoolExecutor
+    
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        logger.info("Gemini 및 Whisper STT 병렬 실행 시작...")
+        future_gemini = executor.submit(transcribe_with_gemini, processed_path)
+        future_whisper = executor.submit(transcribe_with_whisper, processed_path)
+        
+        gemini_res = future_gemini.result()
+        whisper_res = future_whisper.result()
+        
     final_text = select_best_transcript(gemini_res, whisper_res)
     
     # 4. Speech Rate Calculation

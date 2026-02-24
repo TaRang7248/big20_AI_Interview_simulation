@@ -21,8 +21,19 @@ else:
 # Use Gemini 2.0 Flash
 MODEL_NAME = "gemini-2.0-flash"
 
+# Gemini 모델 인스턴스를 저장할 전역 변수 (싱글톤 패턴과 유사하게 사용)
+_MODEL_INSTANCE = None
+
 def get_model():
-    return genai.GenerativeModel(MODEL_NAME)
+    """
+    Gemini 모델 인스턴스를 불러옵니다.
+    매번 생성하는 대신, 이미 생성된 인스턴스가 있다면 재사용하여 속도를 개선합니다.
+    """
+    global _MODEL_INSTANCE
+    if _MODEL_INSTANCE is None:
+        logger.info(f"새로운 {MODEL_NAME} 모델 인스턴스를 생성합니다.")
+        _MODEL_INSTANCE = genai.GenerativeModel(MODEL_NAME)
+    return _MODEL_INSTANCE
 
 def generate_content_with_retry(model, prompt, generation_config=None, max_retries=3):
     """

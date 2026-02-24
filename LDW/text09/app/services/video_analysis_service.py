@@ -194,19 +194,35 @@ class VideoAnalysisService:
             logger.error(f"Upload directory does not exist: {upload_dir}")
             return aggregated_results
 
+        from concurrent.futures import ThreadPoolExecutor
+
+        video_files = []
         for filename in os.listdir(upload_dir):
-            # Check if file ends with -{session_name}.webm
-            # Example: 2026-02-19-15-32-12-면접-1.webm
             if filename.endswith(f"-{session_name}.webm"):
-                file_path = os.path.join(upload_dir, filename)
-                logger.info(f"Analyzing video file: {filename}")
-                
-                stats = self.analyze_video_file(file_path)
-                if stats:
-                    aggregated_results["processed_files"] += 1
-                    aggregated_results["total_emotions"].extend(stats["emotions"])
-                    aggregated_results["posture_issues_total"] += stats["posture_issues"]
-                    aggregated_results["files"].append(filename)
+                video_files.append(os.path.join(upload_dir, filename))
+
+        if not video_files:
+            logger.info(f"분석할 비디오 파일이 없습니다 (세션: {session_name})")
+            return aggregated_results
+
+        logger.info(f"총 {len(video_files)}개의 비디오 파일 병렬 분석 시작...")
+
+        # 비디오 파일 분석을 병렬로 수행하여 성능을 강화합니다.
+        with ThreadPoolExecutor() as executor:
+            # analyze_video_file은 순수 CPU 작업보다는 I/O 및 ML 추론이 섞여 있으므로 스레딩이 효과적입니다.
+            futures = {executor.submit(self.analyze_video_file, fp): os.path.basename(fp) for fp in video_files}
+            
+            for future in futures:
+                filename = futures[future]
+                try:
+                    stats = future.result()
+                    if stats:
+                        aggregated_results["processed_files"] += 1
+                        aggregated_results["total_emotions"].extend(stats["emotions"])
+                        aggregated_results["posture_issues_total"] += stats["posture_issues"]
+                        aggregated_results["files"].append(filename)
+                except Exception as e:
+                    logger.error(f"비디오 파일 {filename} 분석 중 오류 발생: {e}")
 
         return aggregated_results
 

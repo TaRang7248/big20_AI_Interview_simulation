@@ -6,10 +6,12 @@ import shutil
 import sys
 from ..config import BASE_DIR, logger
 
-def generate_wav2lip_video(audio_filepath: str) -> str:
+import asyncio
+
+async def generate_wav2lip_video(audio_filepath: str) -> str:
     """
     Wav2Lip-GAN을 사용하여 정지 이미지(data/man.png)와 입력 오디오로 립싱크 비디오를 생성합니다.
-    출력 결과는 지정된 폴더에 저장됩니다.
+    비동기 subprocess를 사용하여 서버의 블로킹을 최소화합니다.
     """
     # 기본 경로 설정 (절대 경로 보장)
     base_dir = os.path.abspath(BASE_DIR)
@@ -62,13 +64,21 @@ def generate_wav2lip_video(audio_filepath: str) -> str:
         
         logger.info(f"실행 명령어: {actual_wav2lip_cmd}")
         
-        # Wav2Lip 디렉토리에서 실행
-        result = subprocess.run(actual_wav2lip_cmd, cwd=wav2lip_dir, env=process_env, capture_output=True, encoding='utf-8', errors='replace', shell=True)
+        # Wav2Lip 디렉토리에서 비동기로 실행
+        process = await asyncio.create_subprocess_shell(
+            actual_wav2lip_cmd,
+            cwd=wav2lip_dir,
+            env=process_env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
         
-        if result.returncode != 0:
-            logger.error(f"Wav2Lip 실행 오류 (코드 {result.returncode})")
-            logger.error(f"Stdout: {result.stdout}")
-            logger.error(f"Stderr: {result.stderr}")
+        stdout, stderr = await process.communicate()
+        
+        if process.returncode != 0:
+            logger.error(f"Wav2Lip 실행 오류 (코드 {process.returncode})")
+            logger.error(f"Stdout: {stdout.decode('utf-8', errors='replace')}")
+            logger.error(f"Stderr: {stderr.decode('utf-8', errors='replace')}")
             return None
             
         if not os.path.exists(temp_filepath):
@@ -77,14 +87,19 @@ def generate_wav2lip_video(audio_filepath: str) -> str:
 
         logger.info("Wav2Lip 기본 비디오 생성 완료. 웹 재생 최적화 중...")
         
-        # FFmpeg를 사용하여 웹에서 재생 가능한 포맷으로 변환 및 256x256 리사이즈
+        # FFmpeg를 사용하여 웹에서 재생 가능한 포맷으로 변환 및 256x256 리사이즈 (비동기 처리)
         ffmpeg_cmd = f'ffmpeg -y -i "{temp_filepath}" -vf "scale=256:256,setsar=1:1" -c:v libx264 -pix_fmt yuv420p -c:a aac -strict experimental "{final_filepath}"'
         
         logger.info(f"FFmpeg 실행 명령어: {ffmpeg_cmd}")
-        resize_result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, shell=True)
+        ffmpeg_process = await asyncio.create_subprocess_shell(
+            ffmpeg_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        await ffmpeg_process.wait()
         
-        if resize_result.returncode != 0:
-            logger.error(f"FFmpeg 변환 오류: {resize_result.stderr}")
+        if ffmpeg_process.returncode != 0:
+            logger.error("FFmpeg 변환 오류")
             # 리사이즈 실패 시 원본이라도 사용하기 위해 이동
             shutil.move(temp_filepath, final_filepath)
         else:

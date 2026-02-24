@@ -20,10 +20,10 @@ async def generate_tts_audio(text, voice="fr-FR-RemyMultilingualNeural"):
         filesize = os.path.getsize(filepath)
         logger.info(f"TTS Generated: {filepath} (Size: {filesize} bytes)")
 
-        # Wav2Lip 비디오 생성 연동 (동기 함수이므로 스레드에서 실행하여 루프 차단 방지)
+        # TTS 완료 후 Wav2Lip 비디오 생성을 비동기로 실행
+        # (Wav2Lip은 이제 async 함수이므로 직접 await 합니다.)
         from .video_gen_service import generate_wav2lip_video
-        import asyncio
-        video_url = await asyncio.to_thread(generate_wav2lip_video, filepath)
+        video_url = await generate_wav2lip_video(filepath)
         
         if video_url:
             return video_url

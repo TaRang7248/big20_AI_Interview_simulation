@@ -1,14 +1,14 @@
 # ──────────────────────────────────────────────────────────
 # AI 면접 시뮬레이션 - 패키지 의존성 목록
-# 최종 업데이트: 2026-02-23
+# 최종 업데이트: 2026-02-24 (성능 개선 및 최적화 반영)
 # ──────────────────────────────────────────────────────────
 
 # ─── 웹 프레임워크 / API ───────────────────────────────────
-fastapi>=0.115.0
+fastapi>=0.115.8
 uvicorn[standard]>=0.34.0
 pydantic>=2.10.0
-python-dotenv>=1.0.0
-httpx>=0.28.0
+python-dotenv>=1.0.1
+httpx>=0.28.1
 python-multipart>=0.0.20
 
 # ─── 인증 / 보안 ──────────────────────────────────────────
@@ -17,66 +17,64 @@ passlib[bcrypt]>=1.7.4
 
 # ─── 데이터베이스 ─────────────────────────────────────────
 sqlalchemy>=2.0.37
-alembic>=1.14.0
+alembic>=1.15.1
 psycopg2-binary>=2.9.10
 asyncpg>=0.30.0
-redis>=5.2.0
+redis>=5.2.1
 
 # ─── 비동기 작업 큐 ──────────────────────────────────────
 celery>=5.4.0
 
 # ─── 실시간 통신 (WebRTC / WebSocket) ─────────────────────
 aiortc>=1.9.0
-websockets>=14.0
+websockets>=14.2
 
 # ─── Hume AI / TTS ────────────────────────────────────────
 hume[microphone]>=0.7.0
-aiohttp>=3.11.0
-edge-tts>=6.1.0
+aiohttp>=3.11.11
+edge-tts>=6.1.15
 
 # ─── LLM 오케스트레이션 / RAG ─────────────────────────────
-google-generativeai>=0.8.0
-anthropic>=0.40.0
-langchain>=0.3.0
-langchain-google-genai>=2.0.0
-langchain-ollama>=0.2.0
-langchain-community>=0.3.0
+google-generativeai>=0.8.4
+openai>=1.63.0
+anthropic>=0.45.2
+langchain>=0.3.18
+langchain-google-genai>=2.0.9
+langchain-ollama>=0.2.2
+langchain-community>=0.3.30
 langchain-postgres>=0.0.13
-langgraph>=0.2.0
+langgraph>=0.2.73
 tiktoken>=0.8.0
-pypdf>=5.0.0
-pymupdf>=1.25.0
+pypdf>=5.2.0
+pymupdf>=1.25.3
 easyocr>=1.7.2
 
 # ─── 오디오 / STT ─────────────────────────────────────────
-soundfile>=0.12.0
-librosa>=0.10.0
-noisereduce>=3.0.0
-praat-parselmouth>=0.4.3
-numpy>=1.26.0
+soundfile>=0.13.1
+librosa>=0.10.2
+noisereduce>=3.0.3
+praat-parselmouth>=0.4.5
+numpy>=1.26.4
 deepgram-sdk>=3.9.0
 pyaudio>=0.2.14
 pyannote-audio>=3.3.0
-webrtcvad-wheels>=2.0.10
+webrtcvad-wheels>=2.0.11
 openai-whisper>=20240930
+python-Levenshtein>=0.26.1
 
 # ─── 컴퓨터 비전 / 감정 / 영상 ────────────────────────────
-opencv-python>=4.10.0
+opencv-python>=4.11.0.86
 deepface>=0.0.93
-tensorflow>=2.17.0
-tensorflow-hub>=0.16.0
-tf-keras>=2.17.0
+tensorflow>=2.18.0
+tensorflow-hub>=0.16.1
+tf-keras>=2.18.0
 ffmpeg-python>=0.2.0
 moviepy>=1.0.3
-tqdm>=4.67.0
-torch>=2.5.0
-torchvision>=0.20.0
-torchaudio>=2.5.0
-
-# ─── STT / OpenAI ─────────────────────────────────────────
-openai>=1.60.0
-python-Levenshtein>=0.26.0
+tqdm>=4.67.1
+torch>=2.6.0
+torchvision>=0.21.0
+torchaudio>=2.6.0
 
 # ─── 개발 도구 ────────────────────────────────────────────
-pytest>=8.3.0
-ruff>=0.8.0
+pytest>=8.3.4
+ruff>=0.9.6
