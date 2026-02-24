@@ -59,17 +59,22 @@ except ImportError:
 
 
 # ========== 설정 ==========
-DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "exaone-deep:2.4b-q8_0")
+DEFAULT_LLM_MODEL = os.getenv("LLM_MODEL", "exaone3.5:7.8b")
 DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
 
-# 코딩 테스트 전용 경량 LLM 설정 (이원화 전략)
-# [사용자 요청 시 — API 직접 호출용] qwen3:1.7b (VRAM ~2GB, 빠른 응답)
-# [백그라운드 사전 생성 — Celery용] qwen3:4b (고품질, 시간 여유)
+# 코딩 테스트 전용 LLM 설정
+# Qwen3-Coder-30B-A3B-Instruct: MoE 아키텍처 (30B 총 파라미터, 3B 활성 파라미터)
+# → 코딩 문제 생성/분석에 특화된 모델로, 일반 LLM 대비 코드 품질 우수
+# ⚠️ 6GB VRAM에서는 CPU 오프로딩 필수 (Q4_K_M ~18GB 모델 가중치)
 # 환경변수로 별도 설정 가능
-CODING_LLM_MODEL = os.getenv("CODING_LLM_MODEL", "qwen3:1.7b")
-CODING_LLM_NUM_CTX = int(os.getenv("CODING_LLM_NUM_CTX", "4096"))
-CODING_CELERY_LLM_MODEL = os.getenv("CODING_CELERY_LLM_MODEL", "qwen3:4b")
-CODING_CELERY_LLM_NUM_CTX = int(os.getenv("CODING_CELERY_LLM_NUM_CTX", "4096"))
+CODING_LLM_MODEL = os.getenv(
+    "CODING_LLM_MODEL", "hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q3_K_M"
+)
+CODING_LLM_NUM_CTX = int(os.getenv("CODING_LLM_NUM_CTX", "8192"))
+CODING_CELERY_LLM_MODEL = os.getenv(
+    "CODING_CELERY_LLM_MODEL", "hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q3_K_M"
+)
+CODING_CELERY_LLM_NUM_CTX = int(os.getenv("CODING_CELERY_LLM_NUM_CTX", "8192"))
 
 MAX_EXECUTION_TIME = 10  # 초
 MAX_OUTPUT_SIZE = 10000  # 문자
@@ -465,16 +470,15 @@ class CodingProblemGenerator:
     """LLM 기반 코딩 문제 자동 생성기"""
 
     # LLM 호출 타임아웃 (초) — 이 시간 내에 응답이 없으면 fallback 문제 반환
-    # qwen3:1.7b + num_ctx 4096 기준, 코딩 문제 생성 약 15~30초 소요 예상
-    LLM_TIMEOUT_SEC = 60
+    # Qwen3-Coder MoE (3B 활성) + num_ctx 8192 기준, CPU 오프로딩 시 30~60초 소요 예상
+    LLM_TIMEOUT_SEC = 120
 
     def __init__(self):
         if LLM_AVAILABLE:
             self.llm = ChatOllama(
-                model=CODING_LLM_MODEL,  # 코딩 테스트 전용 경량 모델 (qwen3:1.7b)
+                model=CODING_LLM_MODEL,  # Qwen3-Coder-30B-A3B-Instruct (MoE, 3B 활성)
                 temperature=0.8,  # 다양한 문제 생성을 위해 높은 temperature
-                num_ctx=CODING_LLM_NUM_CTX,  # 코딩 문제는 4096 컨텍스트면 충분
-                num_predict=2048,  # 최대 생성 토큰 수 제한 (문제 JSON ~1000토큰)
+                num_ctx=CODING_LLM_NUM_CTX,  # 코딩 문제 생성 (num_ctx=8192)
                 think=None,  # thinking 모드 비활성화 — 응답 지연 방지
             )
         else:
@@ -563,12 +567,11 @@ class CodingProblemGenerator:
             return None
 
         try:
-            # Celery 전용 고품질 LLM 인스턴스 (백그라운드 사전 생성용, 시간 여유)
+            # Celery 전용 LLM 인스턴스 (백그라운드 사전 생성용, 시간 여유)
             celery_llm = ChatOllama(
-                model=CODING_CELERY_LLM_MODEL,  # qwen3:4b (고품질 모델)
+                model=CODING_CELERY_LLM_MODEL,  # Qwen3-Coder-30B-A3B-Instruct (MoE, 3B 활성)
                 temperature=0.8,
-                num_ctx=CODING_CELERY_LLM_NUM_CTX,  # 4096 (충분한 컨텍스트)
-                num_predict=2048,  # 문제 JSON ~1000토큰이면 충분
+                num_ctx=CODING_CELERY_LLM_NUM_CTX,  # Celery 비동기 (num_ctx=8192)
                 think=None,  # thinking 모드 비활성화
             )
 
@@ -1933,10 +1936,9 @@ class CodeAnalyzer:
         if LLM_AVAILABLE:
             try:
                 self.llm = ChatOllama(
-                    model=CODING_LLM_MODEL,  # 코딩 테스트 전용 경량 모델 (qwen3:1.7b)
+                    model=CODING_LLM_MODEL,  # Qwen3-Coder-30B-A3B-Instruct (MoE, 3B 활성)
                     temperature=0.3,
-                    num_ctx=CODING_LLM_NUM_CTX,  # 코딩 분석은 4096 컨텍스트면 충분
-                    num_predict=2048,  # 최대 생성 토큰 수 제한 (분석 JSON ~1500토큰)
+                    num_ctx=CODING_LLM_NUM_CTX,  # 코딩 분석 (num_ctx=8192)
                 )
             except Exception as e:
                 print(f"⚠️ CodeAnalyzer LLM 초기화 실패: {e}")
