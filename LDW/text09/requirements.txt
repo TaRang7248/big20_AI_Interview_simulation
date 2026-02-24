@@ -50,7 +50,7 @@ easyocr==1.7.2
 soundfile==0.13.1
 librosa==0.10.1
 scipy==1.12.0
-noisereduce==3.0.3
+# noisereduce==3.0.3  # STT 엔진 개선으로 삭제됨
 praat-parselmouth==0.4.5
 numpy==1.26.2
 deepgram-sdk==3.9.0

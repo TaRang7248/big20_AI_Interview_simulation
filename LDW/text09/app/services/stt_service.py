@@ -12,7 +12,9 @@ from openai import OpenAI
 import google.generativeai as genai
 from parselmouth.praat import call
 from ..config import logger, GOOGLE_API_KEY, OPENAI_API_KEY
-from .vad_service import calculate_average_rms, check_vad_activity
+# from .vad_service import calculate_average_rms, check_vad_activity
+# vad_service를 직접 사용하지 않고 내부 로직으로 통합하거나 수정된 방식을 사용합니다.
+
 
 # Gemini 모델 인스턴스 재사용을 위한 전역 변수
 _STT_MODEL_CACHE = {}
@@ -45,13 +47,12 @@ else:
 # ---------------------------------------------------------
 def preprocess_audio(input_path):
     """
-    오디오 파일에 노이즈 제거 및 정규화를 적용합니다.
-    처리된 오디오 파일의 경로를 반환합니다.
+    오디오 파일의 전처리를 수행합니다.
+    - 노이즈 제거(noisereduce)는 원본 손상을 방지하기 위해 삭제되었습니다.
+    - 오디오 품질(RMS)이 이미 충분히 높다면 전처리를 최소화합니다.
     """
     try:
-        # 오디오 로드
-        # 참고: ffmpeg이 설치되어 있지 않으면 librosa.load가 실패할 수 있음(특히 webm)
-        # 샘플링 레이트 보존을 위해 sr=None 명시
+        # 오디오 로드 (샘플링 레이트 보존)
         try:
             y, sr = librosa.load(input_path, sr=None)
         except Exception as load_err:
@@ -64,43 +65,29 @@ def preprocess_audio(input_path):
                 logger.error(f"Soundfile 읽기도 실패: {sf_err}")
                 raise load_err
 
-        # 1. 노이즈 제거
-        # prop_decrease=0.8은 80% 노이즈 제거를 의미 (공격적이지만 음성은 보존)
-        try:
-            y_reduced = nr.reduce_noise(y=y, sr=sr, prop_decrease=0.8)
-        except Exception as nr_err:
-            logger.warning(f"노이즈 제거 실패: {nr_err}. 원본 오디오를 사용합니다.")
-            y_reduced = y
-        
-        # 2. 정규화
-        # -3dB로 정규화
-        max_val = np.max(np.abs(y_reduced))
-        if max_val > 0:
-            y_norm = y_reduced / max_val * 0.707  # 0.707은 약 -3dB
+        # RMS 계산하여 품질 확인
+        rms = np.sqrt(np.mean(y**2))
+        logger.info(f"원본 오디오 RMS: {rms:.5f}")
+
+        # 정규화 및 최소 전처리 로직
+        # RMS가 충분히 크면(0.05 이상) 원본의 품질이 좋다고 판단하여 정규화만 수행
+        if rms > 0.05:
+            logger.info("오디오 품질이 양호하므로 전처리를 최소화합니다.")
+            y_norm = librosa.util.normalize(y) * 0.9
         else:
-            y_norm = y_reduced
-            
-        # 처리된 파일 저장
-        # 변경: .webm과의 soundfile 포맷 오류를 피하기 위해 .wav 사용
+            # 품질이 낮을 경우 적절한 수준으로 증폭 및 정규화
+            y_norm = librosa.util.normalize(y) * 0.707
+
+        # 처리된 파일 저장 (WAV 형식 권장)
         base, _ = os.path.splitext(input_path)
         output_path = f"{base}_processed.wav"
         
-        # 명시적으로 포맷/서브타입 지정 (WAV는 보통 안전한 기본값)
         sf.write(output_path, y_norm, sr)
         
         logger.info(f"오디오 전처리 완료: {output_path}")
         return output_path, y_norm, sr
     except Exception as e:
         logger.error(f"전처리 치명적 오류: {e}")
-        logger.error(f"실패한 파일: {input_path}")
-        # 파일 존재 여부 및 크기 확인
-        if os.path.exists(input_path):
-             size = os.path.getsize(input_path)
-             logger.error(f"파일 존재함. 크기: {size} 바이트")
-        else:
-             logger.error("파일이 존재하지 않습니다.")
-             
-        # 분석이 우아하게 처리할 수 있도록 원본 경로와 None 반환
         return input_path, None, None
 
 # ---------------------------------------------------------
@@ -208,12 +195,12 @@ def transcribe_with_gemini(audio_path):
         이 오디오 파일은 면접 지원자의 답변입니다. 
         당신의 임무는 들리는 '모든 소리'를 단 한 글자도 빠짐없이, 그리고 단 한 글자도 변형하지 않고 '완벽하게 똑같이' 전사하는 것입니다.
 
-        [강력한 규칙 - 절대 엄수]
-        1. 들리는 내용을 있는 그대로 적으세요. 문법 교정, 문장 다듬기, 요약, 재해석을 '절대' 하지 마세요.
-        2. "어...", "음...", "그..."와 같은 간투사도 소리가 들린다면 그대로 적어야 합니다.
-        3. 만약 사람의 목소리가 전혀 들리지 않거나 침묵, 백색소음만 있다면, 절대로 내용을 지어내지 말고 오직 "답변 없음" 이라고만 핵심 단어를 출력하세요.
-        4. 오디오에 없는 내용을 절대로 추측하거나 생성하지 마세요. (Hallucination 방지)
-        5. 모든 소리를 완전히 똑같이 인식하여 텍스트로 변환하세요.
+        [절대 규칙]
+        - 문맥에 맞게 문장을 완성하지 마세요.
+        - 지원자가 말을 더듬으면 '어... 그게...'와 같이 들리는 그대로 적으세요.
+        - 비문(틀린 문장)이라도 절대로 교정하지 마세요.
+        - 사람의 목소리가 전혀 들리지 않거나 침묵, 백색소음만 있다면 "답변 없음" 이라고만 출력하세요.
+        - 오디오에 없는 내용을 절대로 추측하거나 생성하지 마세요.
         """
         response = model.generate_content(
             [prompt, audio_file],
@@ -238,21 +225,11 @@ def transcribe_with_whisper(audio_path):
             )
         text = transcript.text.strip()
         
-        # Whisper 환각(Hallucination) 필터
-        hallucinations = [
-            "이것은 한국어 면접 답변입니다",
-            "사람의 목소리가 없다면 지어내지 마세요",
-            "들리는 내용대로 똑같이 적어주세요",
-            "MBC 뉴스",
-            "시청해주셔서 감사합니다",
-            "구독과 좋아요",
-            "9시 뉴스"
-        ]
-        
-        for h in hallucinations:
-            if h in text:
-                logger.info(f"Whisper 환각 감지됨: {text}")
-                return None # 무음으로 처리
+        # Whisper 환각(Hallucination) 필터 강화
+        hallucinations = ["시청해주셔서", "MBC 뉴스", "한글 자막", "Subtitles", "감사합니다", "9시 뉴스"]
+        if len(text) < 10 and any(h in text for h in hallucinations):
+            logger.info(f"Whisper 환각 감지 및 필터링: {text}")
+            return None # 환각 가능성 높음
                 
         return text
     except Exception as e:
@@ -302,19 +279,28 @@ def transcribe_audio(original_audio_path):
     if not os.path.exists(original_audio_path):
         return {"text": "파일 없음", "analysis": {}}
 
-    # 0. RMS 및 VAD 체크 (사전 필터링)
-    rms_mean = calculate_average_rms(original_audio_path)
-    if rms_mean < 0.002: # RMS 임계값
-        logger.info(f"RMS가 너무 낮음 ({rms_mean:.5f}). 무음으로 처리합니다.")
-        return {
-            "text": "답변 없음",
-            "analysis": {"rms_mean": rms_mean},
-            "debug_info": {"skipped_due_to_rms": True}
-        }
+    # 0. RMS 체크 (사전 필터링) - 임계값 하향 조정 및 전체 구간 신호 탐색
+    try:
+        y_orig, sr_orig = librosa.load(original_audio_path, sr=None)
+        # 전체 구간에서 RMS 계산
+        rms_total = np.sqrt(np.mean(y_orig**2))
         
+        # RMS 임계값을 0.001로 하향 조정 (작은 소리도 허용)
+        if rms_total < 0.001:
+            logger.info(f"전체 오디오 신호가 너무 약함 ({rms_total:.5f}). 무음 처리합니다.")
+            return {
+                "text": "답변 없음",
+                "analysis": {"rms_mean": rms_total},
+                "debug_info": {"skipped_due_to_low_signal": True}
+            }
+    except Exception as e:
+        logger.error(f"초기 신호 확인 중 오류: {e}")
+
+    # VAD 체크 (전체적인 발화 존재 여부 확인)
+    from .vad_service import check_vad_activity
     vad_ratio = check_vad_activity(original_audio_path)
-    if vad_ratio < 0.05: # 발화 비율 < 5%
-        logger.info(f"VAD 발화 비율이 너무 낮음 ({vad_ratio:.2f}). 무음으로 처리합니다.")
+    if vad_ratio < 0.01: # 발화 비율 임계값도 더 낮춤
+        logger.info(f"VAD 발화 비율이 매우 낮음 ({vad_ratio:.2f}). 무음 처리합니다.")
         return {
             "text": "답변 없음",
             "analysis": {"vad_ratio": vad_ratio},
