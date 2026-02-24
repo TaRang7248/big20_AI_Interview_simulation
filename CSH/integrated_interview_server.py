@@ -682,24 +682,9 @@ except ImportError as e:
     LLM_AVAILABLE = False
     print(f"⚠️ LLM 서비스 비활성화: {e}")
 
-# LangChain Memory (선택적)
-MEMORY_AVAILABLE = False
-ConversationBufferMemory = None
-try:
-    # 최신 LangChain (v0.2+)
-    from langchain_community.chat_message_histories import ChatMessageHistory
-
-    MEMORY_AVAILABLE = True
-    print("✅ LangChain Memory 모듈 활성화됨 (ChatMessageHistory)")
-except ImportError:
-    try:
-        # 레거시 LangChain
-        from langchain.memory import ConversationBufferMemory
-
-        MEMORY_AVAILABLE = True
-        print("✅ LangChain Memory 모듈 활성화됨 (ConversationBufferMemory)")
-    except ImportError:
-        print("⚠️ LangChain Memory 모듈 비활성화 (수동 대화 기록 사용)")
+# NOTE: LangChain Memory (ConversationBufferMemory) 는 사용하지 않음
+# 대화 기록은 session["chat_history"] (dict 리스트) 로 단일 관리
+# LLM 호출 시 chat_history_to_messages() 유틸로 LangChain Message 객체로 변환
 
 # 한국어 띄어쓰기 보정기 (STT 후처리용) — deepface보다 먼저 import해야 함
 # deepface가 tf_keras를 활성화하면 tensorflow.keras.layers.TFSMLayer를 찾지 못함
@@ -1116,8 +1101,6 @@ class InterviewState:
             "resume_path": None,
             "resume_filename": None,
             "retriever": None,  # 세션별 RAG retriever
-            # LangChain Memory
-            "memory": None,  # ConversationBufferMemory 인스턴스
             # 꼬리질문 추적
             "current_topic": None,  # 현재 질문 주제
             "topic_question_count": 0,  # 해당 주제에서 진행된 질문 수
@@ -1642,52 +1625,41 @@ class AIInterviewer:
             except Exception as e:
                 print(f"⚠️ TTS 초기화 실패: {e}")
 
-    def init_session_memory(self, session_id: str):
-        """세션별 대화 기록 메모리 초기화 (수동 관리 방식)"""
-        session = state.get_session(session_id)
-        if not session:
-            return None
+    @staticmethod
+    def chat_history_to_messages(chat_history: list, max_messages: int = 6) -> list:
+        """chat_history (dict 리스트)를 LangChain Message 객체 리스트로 변환
 
-        # 이미 메모리가 있으면 반환
-        if session.get("memory"):
-            return session["memory"]
+        대화 기록을 단일 소스(session["chat_history"])에서 관리하고,
+        LLM 호출 시에만 LangChain Message 형태로 변환합니다.
 
-        try:
-            # 수동 대화 기록 관리 (LangChain 버전 무관)
-            memory = {
-                "messages": [],  # [HumanMessage, AIMessage, ...]
-                "summary": "",  # 요약 (나중에 사용)
-            }
+        Args:
+            chat_history: [{"role": "assistant"|"user", "content": str}, ...]
+            max_messages: 최근 N개 메시지만 포함 (기본 6 = 최근 3턴)
+                          num_ctx=8192 환경에서 컨텍스트 윈도우 절약을 위해
+                          전체가 아닌 최근 대화만 유지
 
-            # 세션에 저장
-            state.update_session(session_id, {"memory": memory})
-            print(f"✅ 세션 {session_id[:8]}... Memory 초기화 완료")
-            return memory
-        except Exception as e:
-            print(f"⚠️ Memory 초기화 실패: {e}")
-            return None
-
-    def save_to_memory(self, session_id: str, question: str, answer: str):
-        """대화를 메모리에 저장"""
-        session = state.get_session(session_id)
-        if not session or not session.get("memory"):
-            return
-
-        memory = session["memory"]
-        if isinstance(memory, dict) and "messages" in memory:
-            memory["messages"].append(AIMessage(content=question))
-            memory["messages"].append(HumanMessage(content=answer))
-
-    def get_memory_messages(self, session_id: str) -> list:
-        """메모리에서 대화 기록 가져오기"""
-        session = state.get_session(session_id)
-        if not session or not session.get("memory"):
+        Returns:
+            [AIMessage(...), HumanMessage(...), ...] — LLM 호출에 바로 사용 가능
+        """
+        if not chat_history:
             return []
 
-        memory = session["memory"]
-        if isinstance(memory, dict) and "messages" in memory:
-            return memory["messages"]
-        return []
+        # 최근 max_messages 개만 슬라이싱 (오래된 대화 제거)
+        recent = (
+            chat_history[-max_messages:]
+            if len(chat_history) > max_messages
+            else chat_history
+        )
+
+        messages = []
+        for msg in recent:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "assistant":
+                messages.append(AIMessage(content=content))
+            elif role == "user":
+                messages.append(HumanMessage(content=content))
+        return messages
 
     def detect_topic_from_answer(self, answer: str) -> str:
         """답변에서 주제를 추출 (간단한 키워드 기반)"""
@@ -1856,23 +1828,7 @@ class AIInterviewer:
             )
 
         try:
-            # ========== 1. 세션 Memory 초기화/활용 ==========
-            memory = self.init_session_memory(session_id)
-
-            # Memory에 현재 대화 저장 (있으면)
-            if memory and user_answer:
-                # 마지막 질문 가져오기
-                chat_history = session.get("chat_history", [])
-                last_question = ""
-                for msg in reversed(chat_history):
-                    if msg["role"] == "assistant":
-                        last_question = msg["content"]
-                        break
-
-                if last_question:
-                    self.save_to_memory(session_id, last_question, user_answer)
-
-            # ========== 2. 꼬리질문 필요 여부 판단 ==========
+            # ========== 1. 꼬리질문 필요 여부 판단 ==========
             needs_follow_up, follow_up_reason = self.should_follow_up(
                 session_id, user_answer
             )
@@ -1965,32 +1921,16 @@ class AIInterviewer:
                     f"📋 LLM에 공고 컨텍스트 주입: [{job_posting.get('company')}] {job_posting.get('title')}"
                 )
 
-            # Memory에서 대화 기록 가져오기 (있으면)
+            # ========== 4-2. chat_history → LangChain Message 변환 ==========
             # ⚡ 성능 최적화: 최근 3턴(6메시지)만 포함하여 컨텍스트 윈도우 절약
             #    num_ctx=8192에서 전체 히스토리를 넣으면 후반부에 토큰이 부족해질 수 있으므로
             #    최근 대화만 유지하여 안정적인 응답 생성 보장
+            #    단일 소스(chat_history)에서 변환하므로 이중 관리 문제 없음
             MAX_HISTORY_MESSAGES = 6  # 3턴 = assistant 3개 + user 3개
-            memory_messages = self.get_memory_messages(session_id)
-            if memory_messages:
-                # 최근 3턴만 사용하여 컨텍스트 윈도우 절약
-                recent_memory = (
-                    memory_messages[-MAX_HISTORY_MESSAGES:]
-                    if len(memory_messages) > MAX_HISTORY_MESSAGES
-                    else memory_messages
-                )
-                messages.extend(recent_memory)
-            else:
-                # Memory가 없으면 수동 chat_history 사용 — 역시 최근 3턴만
-                recent_history = (
-                    chat_history[-MAX_HISTORY_MESSAGES:]
-                    if len(chat_history) > MAX_HISTORY_MESSAGES
-                    else chat_history
-                )
-                for msg in recent_history:
-                    if msg["role"] == "assistant":
-                        messages.append(AIMessage(content=msg["content"]))
-                    elif msg["role"] == "user":
-                        messages.append(HumanMessage(content=msg["content"]))
+            history_messages = self.chat_history_to_messages(
+                chat_history, max_messages=MAX_HISTORY_MESSAGES
+            )
+            messages.extend(history_messages)
 
             # ========== 5. 이력서 RAG 컨텍스트 추가 ==========
             if resume_context:
