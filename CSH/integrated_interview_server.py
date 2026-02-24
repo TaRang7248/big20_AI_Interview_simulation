@@ -55,7 +55,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 # PostgreSQL 데이터베이스
-from sqlalchemy import Column, DateTime, Integer, String, Text, create_engine, text
+from sqlalchemy import (
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    text,
+)
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -329,6 +338,9 @@ try:
         __tablename__ = "user_resumes"
 
         id = Column(Integer, primary_key=True, index=True)
+        user_id = Column(
+            Integer, ForeignKey("users.id"), nullable=True, index=True
+        )  # FK: users.id 참조 (기존 데이터 호환을 위해 nullable)
         user_email = Column(
             String(255), nullable=False, index=True
         )  # 사용자 이메일 (users.email 참조)
