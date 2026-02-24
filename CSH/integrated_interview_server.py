@@ -249,6 +249,70 @@ def strip_think_tokens(text: str) -> str:
     return cleaned.strip()
 
 
+def extract_single_question(text: str) -> str:
+    """LLM 응답에서 첫 번째 질문만 추출하는 후처리 함수.
+
+    LLM이 프롬프트 지시를 무시하고 여러 질문을 번호 매기기로 나열하는 경우
+    (예: "1. OOO?\n2. XXX?"), 첫 번째 질문만 추출하여 반환합니다.
+    단일 질문이면 원문 그대로 반환합니다.
+
+    방어 패턴:
+      - "1. 질문\n2. 질문" → 1번 질문만 추출
+      - "첫째, 질문\n둘째, 질문" → 첫째 질문만 추출
+      - "질문1?\n\n질문2?" → 첫 번째 문단만 추출
+    """
+    if not text:
+        return text
+
+    # ── 패턴 1: 번호 매기기 ("1. ...", "2. ...") ──
+    # 2개 이상의 번호 항목이 있으면 첫 번째만 추출
+    numbered_pattern = _re.compile(
+        r"^\s*(?:1[.)\]]\s*)",  # "1." 또는 "1)" 또는 "1]"로 시작
+        _re.MULTILINE,
+    )
+    second_item_pattern = _re.compile(
+        r"^\s*(?:2[.)\]]\s*)",  # "2." 또는 "2)"가 별도 줄에 존재
+        _re.MULTILINE,
+    )
+    if numbered_pattern.search(text) and second_item_pattern.search(text):
+        # 2번 항목 시작 위치 앞까지 잘라냄
+        match = second_item_pattern.search(text)
+        first_only = text[: match.start()].strip()
+        # "1." 접두사 제거
+        first_only = _re.sub(r"^\s*1[.)\]]\s*", "", first_only).strip()
+        if first_only:
+            print(
+                f"✂️ [extract_single_question] 복수 질문 감지 → 첫 번째만 추출 (원문 {len(text)}자 → {len(first_only)}자)"
+            )
+            return first_only
+
+    # ── 패턴 2: 한글 서수 ("첫째,", "둘째,") ──
+    ordinal_pattern = _re.compile(
+        r"^\s*(?:둘째|두\s*번째|셋째|세\s*번째)",
+        _re.MULTILINE,
+    )
+    if ordinal_pattern.search(text):
+        match = ordinal_pattern.search(text)
+        first_only = text[: match.start()].strip()
+        # "첫째," 접두사 제거
+        first_only = _re.sub(r"^\s*(?:첫째|첫\s*번째)[,.]?\s*", "", first_only).strip()
+        if first_only:
+            print("✂️ [extract_single_question] 서수 복수 질문 감지 → 첫 번째만 추출")
+            return first_only
+
+    # ── 패턴 3: 빈 줄로 구분된 여러 질문 (각각 물음표로 끝남) ──
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(paragraphs) >= 2:
+        questions_found = [p for p in paragraphs if "?" in p or "?" in p]
+        if len(questions_found) >= 2:
+            print(
+                "✂️ [extract_single_question] 문단 분리 복수 질문 감지 → 첫 번째 문단만 추출"
+            )
+            return paragraphs[0]
+
+    return text
+
+
 async def run_llm_async(llm, messages):
     """LLM invoke를 비동기로 실행 (이벤트 루프 블로킹 방지 + 타임아웃)
 
@@ -1879,14 +1943,17 @@ class AIInterviewer:
         )
         messages.append(HumanMessage(content=question_prompt))
 
-        # ========== 7. LLM 호출 + strip_think_tokens + 빈 응답 재시도 ==========
+        # ========== 7. LLM 호출 + strip_think_tokens + 단일 질문 추출 + 빈 응답 재시도 ==========
         response = await run_llm_async(self.question_llm, messages)
         next_question = strip_think_tokens(response.content)
+        # LLM이 한 번에 여러 질문을 나열한 경우, 첫 번째 질문만 추출
+        next_question = extract_single_question(next_question)
 
         if not next_question:
             print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
             retry_response = await run_llm_async(self.question_llm, messages)
             next_question = strip_think_tokens(retry_response.content)
+            next_question = extract_single_question(next_question)
             if not next_question:
                 raise RuntimeError(
                     "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
@@ -2204,6 +2271,8 @@ class AIInterviewer:
             # think=False 설정에도 일부 버전에서 <think>블록</think>이 포함될 수 있음
             # 제거하지 않으면 LLM 내부 추론이 면접관 발화로 노출됨 ("엉뚱한 답변" 원인)
             next_question = strip_think_tokens(response.content)
+            # ── 복수 질문 방어: LLM이 여러 질문을 나열한 경우 첫 번째만 추출 ──
+            next_question = extract_single_question(next_question)
 
             # ── 빈 응답 방어 ──
             # <thought>/<think> 블록만 있고 실제 질문이 없는 경우 LLM 재호출
@@ -2212,6 +2281,7 @@ class AIInterviewer:
                 # 재호출 시 temperature를 약간 높여 다른 출력 유도
                 retry_response = await run_llm_async(self.question_llm, messages)
                 next_question = strip_think_tokens(retry_response.content)
+                next_question = extract_single_question(next_question)
                 if not next_question:
                     raise RuntimeError(
                         "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
