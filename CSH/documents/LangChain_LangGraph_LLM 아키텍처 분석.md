@@ -1,7 +1,7 @@
 # CSH 폴더 AI 면접 시스템 — LangChain / LangGraph / LLM 아키텍처 분석
 
 > 최초 작성일: 2026-02-11  
-> 최종 수정일: 2026-02-11 (Hume Prosody 멀티모달 융합 통합 반영)
+> 최종 수정일: 2026-02-24 (LLM 모델 변경, 메모리 통합, LangGraph 독립적 상태 변환, 4중 병렬 evaluate, Celery Dead Code 제거)
 
 ---
 
@@ -11,7 +11,7 @@
 
 | 계층 | 기술 | 역할 |
 |---|---|---|
-| **LLM 계층** | Ollama `qwen3:4b` (ChatOllama × 2 인스턴스) | 질문 생성 + 답변 평가 |
+| **LLM 계층** | Ollama `exaone3.5:7.8b` (ChatOllama × 2 인스턴스) | 질문 생성 + 답변 평가 |
 | **오케스트레이션 계층** | LangGraph `StateGraph` (8 노드) | 면접 흐름 상태 머신 |
 | **데이터 계층** | LangChain `PGVectorStore V2` + `nomic-embed-text` | RAG 이력서/Q&A 검색 |
 | **감정 분석 계층** | DeepFace (표정 7종) + Hume Prosody (음성 48종→10지표) | 멀티모달 감정 융합 |
@@ -27,17 +27,29 @@
 `integrated_interview_server.py`의 `AIInterviewer._init_services()`에서 두 개의 `ChatOllama` 인스턴스를 초기화합니다:
 
 ```python
+# 평가용 (정밀)
+self.llm = ChatOllama(
+    model=DEFAULT_LLM_MODEL,    # "exaone3.5:7.8b" (Q4_K_M, 4.8GB)
+    temperature=0.3,
+    num_ctx=DEFAULT_LLM_NUM_CTX, # 8192
+)
 # 질문 생성용 (창의적)
-self.question_llm = ChatOllama(model="qwen3:4b", temperature=0.7, num_ctx=16384)
-
-# 평가용 (정밀)  
-self.llm = ChatOllama(model="qwen3:4b", temperature=0.3, num_ctx=16384)
+self.question_llm = ChatOllama(
+    model=DEFAULT_LLM_MODEL,
+    temperature=DEFAULT_LLM_TEMPERATURE, # 0.7
+    num_ctx=DEFAULT_LLM_NUM_CTX,
+)
 ```
 
-| 인스턴스 | Temperature | 용도 |
-|---|---|---|
-| `question_llm` | 0.7 (높음) | 다양한 면접 질문 생성 — 창의성 우선 |
-| `llm` | 0.3 (낮음) | 답변 평가, JSON 파싱 — 정확성 우선 |
+> ⚠️ `num_predict`는 설정하지 않음—모델이 `stop` 토큰까지 자연스럽게 생성합니다.
+
+| 인스턴스 | Temperature | num_ctx | 용도 |
+|---|---|---|---|
+| `question_llm` | 0.7 (높음) | 8192 | 다양한 면접 질문 생성 — 창의성 우선 |
+| `llm` | 0.3 (낮음) | 8192 | 답변 평가, JSON 파싱 — 정확성 우선 |
+
+> **VRAM 최적화**: GTX 1660 6GB 환경에서 EXAONE 3.5 7.8B (Q4_K_M, ~4.8GB) + `num_ctx=8192`로 약 5.34GB 사용.
+> `OLLAMA_FLASH_ATTENTION=1`과 `OLLAMA_KV_CACHE_TYPE=q8_0`으로 KV Cache 메모리 절감.
 
 LLM 호출은 `ThreadPoolExecutor`를 통해 비동기로 실행됩니다:
 - `LLM_EXECUTOR` (4 workers) → `run_llm_async()`
@@ -63,7 +75,7 @@ class WorkflowState(TypedDict, total=False):
 
     # ── 질문 추적 ──
     question_count: int                 # 현재 질문 번호 (1부터)
-    max_questions: int                  # 최대 질문 수 (기본 5)
+    max_questions: int                  # 최대 질문 수 (기본 10)
     current_topic: str                  # 현재 질문 주제
     topic_question_count: int           # 해당 주제 내 질문 수
     topic_history: List[Dict]           # 주제 변경 이력
@@ -89,7 +101,10 @@ class WorkflowState(TypedDict, total=False):
 
     # ── 대화 기록 ──
     chat_history: List[Dict]
-    memory_messages: list               # LangChain 메시지 리스트
+
+    # ── RAG 사전 조회 결과 (evaluate 노드에서 병렬 조회 → generate_question에서 사용) ──
+    rag_resume_context: str             # 이력서 RAG 검색 결과 → LLM 프롬프트에 주입
+    rag_qa_context: str                 # Q&A 참조 RAG 검색 결과 → LLM 프롬프트에 주입
 
     # ── 감사 / 추적 ──
     trace: List[Dict]                   # [{node, timestamp, duration_ms, details}]
@@ -125,10 +140,10 @@ class InterviewPhase(str, Enum):
 |---|---|---|
 | `greeting` | 첫 인사 | 세션 초기화, 환영 메시지 반환 |
 | `process_answer` | 답변 기록 | `user_input`을 세션에 저장, 이전 질문 추출 |
-| `evaluate` | **3중 병렬 평가** | `asyncio.gather()`로 LLM 평가 + DeepFace 감정 + Hume Prosody 동시 실행 |
+| `evaluate` | **4중 병렬 평가** | `asyncio.gather()`로 LLM 평가 + DeepFace 감정 + Hume Prosody + **RAG 사전 조회** 동시 실행 |
 | `route_next` | 분기 결정 | MAX 도달? 후속 필요? 토픽 수? 감정 적응 모드? |
-| `generate_question` | 질문 생성 | `AIInterviewer.generate_llm_question()` 호출 |
-| `follow_up` | 후속 질문 | `follow_up_mode=True`로 질문 생성 |
+| `generate_question` | 질문 생성 | `build_and_call_llm()` 독립적 상태 변환 — State에서 RAG/감정 컨텍스트 수신 |
+| `follow_up` | 후속 질문 | `build_and_call_llm(needs_follow_up=True)` 독립적 상태 변환 |
 | `complete` | 면접 종료 | 종료 메시지 + Celery 리포트 생성 트리거 |
 | `error_recovery` | 오류 복구 | 안전한 폴백 응답 반환 |
 
@@ -174,12 +189,14 @@ stateDiagram-v2
         [*] --> LLM평가
         [*] --> DeepFace감정
         [*] --> Prosody음성감정
+        [*] --> RAG사전조회
         LLM평가 --> [*]
         DeepFace감정 --> 멀티모달융합
         Prosody음성감정 --> 멀티모달융합
+        RAG사전조회 --> [*]
         멀티모달융합 --> [*]
     }
-    evaluate --> route_next : 3중 병렬 평가 완료
+    evaluate --> route_next : 4중 병렬 평가 완료
     
     state route_next <<choice>>
     route_next --> complete : MAX 도달 or 종료 요청
@@ -249,9 +266,34 @@ PDF 업로드 → PyPDFLoader → RecursiveCharacterTextSplitter(1500자/300자 
 
 ---
 
-## 5단계: 질문 생성 파이프라인 — 8단계 프로세스
+## 5단계: 질문 생성 파이프라인 — 이중 경로 (Workflow vs Fallback)
 
-`AIInterviewer.generate_llm_question()`의 실행 흐름:
+### 5-1. Path A: LangGraph `generate_question` / `follow_up` 노드 (독립적 상태 변환)
+
+LangGraph 노드는 `build_and_call_llm()`을 사용하여 **순수 프롬프트 조립 + LLM 호출**만 수행합니다.
+RAG 검색, 감정 판단, 주제 추적 등 모든 데이터는 **State를 통해 이전 노드에서 전달**됩니다:
+
+```
+evaluate 노드에서 병렬 조회:
+   ├─ _fetch_rag() → rag_resume_context, rag_qa_context → State 저장
+   ├─ 감정 분석 → emotion_adaptive_mode → State 저장
+   └─ 평가 → eval_result → State 저장
+     ↓
+generate_question / follow_up 노드:
+   │  State에서 수신:
+   │    resume_context = ws["rag_resume_context"]
+   │    qa_context = ws["rag_qa_context"]
+   │    emotion_mode = ws["emotion_adaptive_mode"]
+   │    follow_up_reason = ws["follow_up_reason"]
+   └─→ build_and_call_llm(순수 LLM 호출) → response
+```
+
+> 이전 Thin Wrapper 방식에서는 `generate_llm_question()` 안에서 RAG 검색, 팔단, 메모리를 모두 처리했으나,
+> 독립적 상태 변환 패턴으로 리팩토링하여 각 노드의 책임이 명확해졌습니다.
+
+### 5-2. Path B: Procedural Fallback — `generate_llm_question()` (8단계 프로세스)
+
+LangGraph 실패 시 폴백으로 사용되는 `AIInterviewer.generate_llm_question()`의 실행 흐름:
 
 ```
 ① 세션 메모리 초기화/로드
@@ -282,40 +324,47 @@ PDF 업로드 → PyPDFLoader → RecursiveCharacterTextSplitter(1500자/300자 
 
 ## 6단계: 평가 시스템
 
-### 6-1. evaluate 노드의 3중 병렬 실행
+### 6-1. evaluate 노드의 4중 병렬 실행
 
-`interview_workflow.py`의 `evaluate` 노드는 3개의 코루틴을 `asyncio.gather()`로 동시 실행합니다:
+`interview_workflow.py`의 `evaluate` 노드는 4개의 코루틴을 `asyncio.gather()`로 동시 실행합니다:
 
 ```python
 async def _run_evaluation():   # ① LLM 답변 평가 (Celery or 로컬)
 async def _run_emotion():      # ② DeepFace 표정 감정 수집
 async def _run_prosody():      # ③ Hume Prosody 음성 감정 수집
+async def _fetch_rag():        # ④ RAG 컨텍스트 사전 조회 (질문 생성 노드에서 사용)
 
-await asyncio.gather(_run_evaluation(), _run_emotion(), _run_prosody())
+await asyncio.gather(_run_evaluation(), _run_emotion(), _run_prosody(), _fetch_rag())
 ```
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                    asyncio.gather() 병렬 실행                    │
+│                    asyncio.gather() 4중 병렬 실행                  │
 │                                                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
-│  │ _run_evaluation() │  │ _run_emotion()   │  │ _run_prosody()│ │
-│  │                   │  │                   │  │               │ │
-│  │ Celery 평가 큐잉   │  │ DeepFace 7감정   │  │ Prosody 10지표 │ │
-│  │  or 로컬 LLM 평가  │  │ probabilities    │  │ 48감정→10매핑  │ │
-│  └────────┬─────────┘  └────────┬─────────┘  └──────┬────────┘ │
-│           ▼                      ▼                    ▼          │
-│      eval_result           emotion_result       prosody_result   │
+│  ┌───────────────┐  ┌──────────────┐  ┌────────────┐  ┌──────────┐ │
+│  │ _run_eval()   │  │ _run_emotion()│  │ _run_prosd()│  │_fetch_rag()│ │
+│  │               │  │              │  │            │  │           │ │
+│  │ Celery 평가    │  │ DeepFace 7감정│  │ Prosody    │  │ RAG 사전  │ │
+│  │  or 로컬 LLM   │  │ probabilities│  │ 48감정→10  │  │ 조회(2테이블)│ │
+│  └────────┬──────┘  └────────┬─────┘  └──────┬─────┘  └─────┬────┘ │
+│           ▼                ▼              ▼              ▼          │
+│      eval_result      emotion_result  prosody_result  rag_ctx    │
 └────────────────────────────────────────────────────────────────┘
-                               │                    │
-                               ▼                    ▼
-                    ┌──────────────────────────────────┐
-                    │      멀티모달 감정 융합 결정          │
-                    │  merge_with_deepface()             │
-                    │  Prosody 50% + DeepFace 50%        │
-                    │  → emotion_adaptive_mode 산출       │
-                    └──────────────────────────────────┘
+         │                    │              │              │
+         │                    ▼              ▼              │
+         │       ┌────────────────────────────────┐        │
+         │       │      멀티모달 감정 융합 결정          │        │
+         │       │  merge_with_deepface()             │        │
+         │       │  Prosody 50% + DeepFace 50%        │        │
+         │       │  → emotion_adaptive_mode 산출       │        │
+         │       └────────────────────────────────┘        │
+         │                                                   │
+         ▼                                                   ▼
+    State로 전달 → generate_question / follow_up 노드에서 사용
 ```
+
+> ⚡ **성능 최적화**: RAG 검색(~2초)을 평가(~3초)와 병렬 실행하여,
+> `generate_question` 시점에는 이미 State에 RAG 결과가 준비되어 LLM 호출만 수행합니다.
 
 ### 6-2. 멀티모달 적응 모드 결정 (3단계 폴백)
 
@@ -362,10 +411,13 @@ elif emotion_result:
 ```
 답변 입력 → Celery Task 큐잉 (Redis Broker)
 → Worker에서 ChatOllama(temp=0.3) + EVALUATION_PROMPT 실행
+→ Worker 내부 RAG 자체 조회 (⚡ resume_context 가 비어있으면 Fallback)
 → JSON Resilience 파싱 (json_utils.py)
 → Redis Pub/Sub 이벤트 발행 ("evaluation.completed")
 → 재시도 3회, 소프트 타임아웃 60초
 ```
+
+> ℹ️ `generate_question_task`는 Dead Code로 확인되어 **제거**되었습니다 (0개의 `.delay()` 호출).
 
 ---
 
@@ -448,23 +500,36 @@ EMOTION_ANALYZED → on_emotion_analyzed (기존)
 
 ---
 
-## 8단계: 메모리 관리
+## 8단계: 메모리 관리 — `chat_history` 단일 소스
 
-LangChain의 `ChatMessageHistory`를 수동으로 관리합니다:
+이전에는 `session["memory"]` (LangChain 메시지 리스트)와 `session["chat_history"]` (덱셔너리 리스트)가 이중으로 관리되었으나, **통합되어 `chat_history` 단일 소스**로 바뀌었습니다.
 
 ```python
-# 세션별 메모리 딕셔너리
-self.session_memories: Dict[str, list] = {}
+# 세션별 대화 기록 (단일 소스)
+session["chat_history"] = [
+    {"role": "assistant", "content": "안녕하세요..."},
+    {"role": "user", "content": "저는 3년차..."},
+    ...
+]
 
-# 메시지 저장
-def save_to_memory(session_id, role, content):
-    if role == "ai":
-        self.session_memories[session_id].append(AIMessage(content=content))
-    else:
-        self.session_memories[session_id].append(HumanMessage(content=content))
+# LLM 호출 시: chat_history → LangChain 메시지 변환 (정적 유틸리티)
+@staticmethod
+def chat_history_to_messages(chat_history, system_prompt):
+    messages = [SystemMessage(content=system_prompt)]
+    for msg in chat_history:
+        if msg["role"] == "assistant":
+            messages.append(AIMessage(content=msg["content"]))
+        elif msg["role"] == "user":
+            messages.append(HumanMessage(content=msg["content"]))
+    return messages
 ```
 
-질문 생성 시 이 메모리를 `SystemMessage → AIMessage → HumanMessage → ...` 순서의 LangChain 메시지 리스트로 변환하여 LLM에 전달합니다.
+**제거된 코드:**
+- `init_session_memory()` — 세션 메모리 초기화
+- `save_to_memory()` — 메시지 이중 저장
+- `get_memory_messages()` — 메모리 미러링
+- `session["memory"]` — 이중 관리 필드
+- `WorkflowState.memory_messages` — State 필드
 
 ---
 
@@ -490,16 +555,17 @@ generate_response()  ← AIInterviewer 진입점    │
 │      ↓                                                          │
 │  route_initial() → process_answer                               │
 │      ↓                                                          │
-│  evaluate (asyncio.gather 3중 병렬):                            │
+│  evaluate (asyncio.gather 4중 병렬):                            │
 │      ├─ _run_evaluation()  → LLM평가 or Celery 오프로드        │
 │      ├─ _run_emotion()     → DeepFace 최신 데이터 수집          │
-│      └─ _run_prosody()     → Prosody 최신 데이터 수집           │
+│      ├─ _run_prosody()     → Prosody 최신 데이터 수집           │
+│      └─ _fetch_rag()       → RAG 사전 조회 (resume + Q&A)    │
 │      ↓                                                          │
 │  멀티모달 융합 (Prosody 50% + DeepFace 50%)                    │
 │      → emotion_adaptive_mode 결정                               │
 │      ↓                                                          │
 │  route_next → generate_question or follow_up or complete       │
-│      ↓                                                          │
+│      ↓  (build_and_call_llm — State에서 RAG/감정 컨텍스트 수신) │
 │  응답 반환 → END                                                │
 └─────────────────────────────────────────────────────────────────┘
     ↓ (실패 시)
@@ -517,13 +583,15 @@ generate_response()  ← AIInterviewer 진입점    │
 ## 핵심 구조 요약
 
 1. **LangGraph StateGraph**가 면접의 **전체 흐름을 제어**하는 상태 머신 역할
-2. **이중 LLM** (`temp=0.7` 질문 / `temp=0.3` 평가)으로 목적에 맞는 추론 수행
+2. **이중 LLM** (`temp=0.7` 질문 / `temp=0.3` 평가)으로 목적에 맞는 추론 수행 (모델: EXAONE 3.5 7.8B, num_ctx=8192)
 3. **RAG (PGVectorStore V2)** 가 이력서 + 모범답안 컨텍스트를 실시간 주입
 4. **Celery + Redis**가 평가/리포트 등 무거운 작업을 비동기 오프로드
 5. **멀티모달 감정 융합** (Prosody 50% + DeepFace 50%)이 10종 통합 지표를 산출
-6. **3중 병렬 evaluate** 노드에서 LLM평가 + 표정분석 + 음성감정을 동시 실행
+6. **4중 병렬 evaluate** 노드에서 LLM평가 + 표정분석 + 음성감정 + **RAG 사전 조회**를 동시 실행
 7. **3단계 폴백 적응 모드**: 멀티모달 융합 → Prosody 단독 → DeepFace 단독
-8. **MemorySaver 체크포인팅**으로 세션 중간 복구 지원
+8. **독립적 상태 변환**: 각 노드가 State에서 데이터를 수신하여 순수 LLM 호출만 수행
+9. **메모리 통합**: `chat_history` 단일 소스 (이중 관리 제거) + `chat_history_to_messages()` 정적 변환
+10. **MemorySaver 체크포인팅**으로 세션 중간 복구 지원
 
 ---
 
@@ -531,12 +599,13 @@ generate_response()  ← AIInterviewer 진입점    │
 
 | 파일 | 역할 |
 |---|---|
-| `interview_workflow.py` | LangGraph StateGraph 정의 (8 노드, 3중 병렬 evaluate, 멀티모달 라우팅) |
+| `interview_workflow.py` | LangGraph StateGraph 정의 (8 노드, 4중 병렬 evaluate, 독립적 상태 변환, 멀티모달 라우팅) |
 | `integrated_interview_server.py` | AIInterviewer 클래스 (이중 LLM, 오디오 파이프라인, Prosody 분석 함수) |
 | `hume_prosody_service.py` | Hume Prosody 서비스 (48감정→10지표, Batch/Streaming API, 멀티모달 융합) |
 | `resume_rag.py` | RAG 시스템 (PGVectorStore V2, nomic-embed-text) |
-| `celery_tasks.py` | 비동기 태스크 (평가, 리포트 + Prosody 통계 포함) |
+| `celery_tasks.py` | 비동기 태스크 (evaluate_answer_task RAG fallback, 리포트 + Prosody 통계). generate_question_task 제거됨 |
 | `celery_app.py` | Celery 앱 설정 (Redis Broker) |
 | `events.py` | 이벤트 타입 정의 (PROSODY_ANALYZED, PROSODY_ALERT 포함) |
 | `event_handlers.py` | 이벤트 핸들러 (Prosody 불안 알림 핸들러 포함) |
+| `prompt_templates.py` | 면접 프롬프트 템플릿 관리 (질문/평가/팔로우업 프롬프트) |
 | `json_utils.py` | JSON Resilience 파싱 유틸리티 |

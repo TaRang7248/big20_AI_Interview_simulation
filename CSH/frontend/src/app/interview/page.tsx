@@ -59,7 +59,8 @@ function InterviewPageInner() {
   const [messages, setMessages] = useState<{ role: "ai" | "user"; text: string }[]>([]);
   const [currentQuestion, setCurrentQuestion] = useState("");
   const [questionNum, setQuestionNum] = useState(0);
-  const totalQuestions = 5;
+  // 백엔드 /api/session/create 응답의 max_questions 값을 동적으로 수신 (기본값 10 = 폴백)
+  const [totalQuestions, setTotalQuestions] = useState(10);
   const [sttText, setSttText] = useState("");
   const [manualInput, setManualInput] = useState("");  // STT 실패 시 수동 텍스트 입력 (폴백)
   const [sttAvailable, setSttAvailable] = useState(true); // Web Speech API 사용 가능 여부
@@ -193,6 +194,11 @@ function InterviewPageInner() {
       }
       const res = await sessionApi.create(createData);
       setSessionId(res.session_id);
+
+      // 백엔드에서 전달받은 max_questions로 UI 동기화 (진행 바·종료 판단)
+      if (res.max_questions && res.max_questions > 0) {
+        setTotalQuestions(res.max_questions);
+      }
 
       // 이력서 미업로드 시 경고 모달 표시 (UX 개선)
       if (!res.resume_uploaded && res.resume_warning) {
