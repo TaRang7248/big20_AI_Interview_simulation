@@ -32,9 +32,9 @@
 python -m venv venv
 
 # 가상환경 활성화 (Windows)
-venv\Scripts\activate
+venv\Scripts/activate
 
-# 필수 패키지 설치
+# 필수 패키지 설치 (numpy 1.26.2, pyannote-audio 3.1.1 고정 설치)
 pip install -r requirements.txt
 ```
 
@@ -66,6 +66,7 @@ python scripts/setup_test_user.py
 ### 2단계: 서버 실행
 `server.py` 파일을 실행하면 서버가 구동되고 자동으로 **시스템 기본 웹 브라우저**가 열립니다.
 (보안 및 성능을 위해 127.0.0.1:8000 접속을 기본으로 합니다.)
+`server.py`는 서버 구동과 웹 브라우저 자동 실행 기능에 집중되어 있습니다.
 ```bash
 python server.py
 ```
@@ -96,6 +97,11 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 - **Google Gemini 2.0 Flash**: 면접 질문 생성, 답변 분석, 평가(LLM) 및 **음성 인식(STT)** 통합 모델 - **[NEW]** All-in-One AI 적용
 - **LangChain**: LLM 오케스트레이션 및 프롬프트 관리
 - **Uvicorn**: ASGI 웹 서버
+- **numpy==1.26.2**: 특정 버전 고정 (바이너리 호환성 해결) **[UPDATED]**
+- **pyannote-audio==3.1.1**: 특정 버전 고정 (의존성 충돌 해결) **[UPDATED]**
+- **scipy==1.12.0**: numpy 1.26.2 ABI 호환 버전으로 다운그레이드 **[UPDATED]**
+- **tensorflow==2.15.1**: numpy 1.26.2 바이너리 호환 버전으로 다운그레이드 **[UPDATED]**
+- **onnx==1.15.0 / onnxruntime==1.17.1**: ml_dtypes 호환성 문제 해결을 위해 버전 고정 **[NEW]**
 
 ### 음성 및 멀티미디어
 - **Google Gemini (Multimodal)**: 고성능 음성 인식 (STT) - [유지]
@@ -115,7 +121,7 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 ## 5. 주요 기능 사용법
 
 ### [1] 로그인 및 직무 선택
-1. 회원가입 후 로그인을 진행합니다.
+1. 회원가입 후 로그인을 진행합니다. (시험용 계정: `test` / `test`)
 2. 면접을 진행할 **직무(예: 웹 개발자, 마케팅 등)**를 선택하거나 입력합니다.
 3. 자기소개서 파일을 업로드하거나 텍스트로 입력합니다.
 
@@ -136,37 +142,25 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 ## 6. 파일 구조 설명
 ```
 C:\big20\big20_AI_Interview_simulation\LDW\text09\
-├── app/
-│   ├── main.py              # FastAPI 애플리케이션 진입점
-│   ├── config.py            # 환경 변수 및 설정 관리 (Gemini 설정 추가)
-│   ├── database.py          # 데이터베이스 연결 설정
-│   ├── models.py            # Pydantic/SQLAlchemy 데이터 모델 정의
-│   └── services/            # 핵심 비즈니스 로직
-│       ├── analysis_service.py  # 면접 결과 분석 및 루브릭 평가 로직 (Gemini 적용) ★
-│       ├── llm_service.py       # LLM 연동 (Gemini 2.0 Flash 적용) ★
-│       ├── stt_service.py       # 음성 인식 (Gemini Multimodal 적용) ★ [NEW]
-│       ├── tts_service.py       # 음성 합성
-│       └── video_analysis_service.py # MoveNet, DeepFace 영상 분석 로직
-├── static/                  # CSS, JS, HTML 등 정적 파일 (index.html, app.js, styles.css)
-├── uploads/                 # 업로드 및 생성 파일 저장소
-│   ├── resumes/            # 업로드된 이력서
-│   ├── audio/              # 면접 답변 녹음 파일
-│   ├── tts_audio/          # 생성된 TTS 오디오 파일
-│   └── Wav2Lip_mp4/        # 생성된 립싱크 비디오 파일 [UPDATED]
+├── app/                     # FastAPI 애플리케이션 진입점 및 로직
 ├── data/                    # 모델 입력 데이터 및 백업
-│   └── man.png             # 면접관 아바타 이미지 [UPDATED]
-├── requirements.txt         # 프로젝트 의존성 패키지 목록
-├── server.py                # 서버 실행 및 브라우저 자동 실행 스크립트
-├── scripts/                 # 유틸리티 스크립트 (모델 다운로드, 환경 점검 등)
-│   ├── check_env.py         # 실행 환경(라이브러리, FFmpeg) 점검 스크립트
-│   ├── export_db.py         # DB 백업 스크립트
-│   └── ...                  # 기타 마이그레이션 및 관리 스크립트
+├── db/                      # 데이터베이스 초기화 및 설정
+├── db_data/                 # 데이터베이스 영구 데이터 저장소
+├── LivePortrait/            # 실시간 포션 애니메이션 엔진
+├── migration_package/       # DB 마이그레이션 패키지
 ├── models/                  # AI 모델 저장소
-├── tests/                   # 테스트 코드
-│   ├── manual_verification/ # 기능별 단위 검증 스크립트 모음
-│   └── ...                  # API 및 통합 테스트
-├── Dockerfile               # 도커 이미지 빌드 설정 파일
-└── docker-compose.yml       # 도커 컨테이너 실행 설정 파일
+├── SadTalker/               # 아바타 생성 엔진
+├── scripts/                 # 유틸리티 및 관리 스크립트
+├── static/                  # 정적 파일 (HTML, JS, CSS)
+├── test_uploads/            # 테스트용 업로드 파일
+├── tests/                   # 기능 검증 및 유닛 테스트
+├── uploads/                 # 실제 업로드 파일 저장소
+├── Wav2Lip/                 # 립싱크 생성 엔진
+├── docker-compose.yml       # 도커 오케스트레이션
+├── Dockerfile               # 도커 빌드 설정
+├── GUIDEBOOK.md             # 프로젝트 가이드북
+├── requirements.txt         # 패키지 의존성 목록 (numpy 1.26.2, pyannote-audio 3.1.1, scipy 1.12.0, tensorflow 2.15.1 고정)
+└── server.py                # 서버 실행 및 브라우저 자동 실행 (한국어 주석 적용)
 ```
 
 ---
@@ -196,6 +190,9 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
     - `FFmpeg`가 설치되지 않은 환경에서도 서버가 중단되지 않도록 예외 처리(Fallback) 로직을 추가했습니다.
     - `check_env.py`를 통해 사용자가 손쉽게 실행 환경을 진단할 수 있습니다.
 - **오디오 로딩 및 처리 오류 수정 (Critical Fix)** **[NEW]**:
+- **의존성 바이너리 호환성 해결 (2026-02-24)**: `ValueError: numpy.dtype size changed` 문제를 해결하기 위해 `numpy==1.26.2`와 `pyannote-audio==3.1.1` 버전을 고정하고, 추가로 `scipy==1.12.0`, `tensorflow==2.15.1`, `tensorflow-hub==0.15.0`, `tf-keras==2.15.1`, `onnx==1.15.0`, `onnxruntime==1.17.1`로 다운그레이드하여 전체 의존성 호환성을 확보했습니다.
+- **서버 실행 스크립트 최적화**: `server.py`를 서버 구동 및 자동 브라우저 오픈 기능 전용으로 개편하고 한국어 주석을 추가했습니다.
+- **프로젝트 구조 정량화**: 루트 디렉토리를 정리하여 관리 효율성을 높였습니다. (`diagnose_numpy.py` → `scripts/` 이동)
 
 ### 신규 업데이트 (성능 개선 및 구조 최적화) **[2026-02-24]**
 - **STT (음성 인식) 병렬 처리 도입**: `Gemini`와 `Whisper` 모델을 `ThreadPoolExecutor`를 통해 병렬로 호출하여 인식 대기 시간을 최대 50% 단축했습니다.
