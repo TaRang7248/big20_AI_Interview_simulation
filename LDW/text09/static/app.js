@@ -681,7 +681,8 @@ async function handleStartInterview() {
         AppState.interview.inProgress = true;
         AppState.interview.interviewNumber = startResult.interview_number;
         AppState.interview.currentQuestion = startResult.question;
-        AppState.interview.currentAudioUrl = startResult.audio_url; // Store Audio URL
+        AppState.interview.currentAudioUrl = startResult.audio_url; // 미디어 URL 저장
+        AppState.interview.currentAudioType = startResult.audio_type || 'audio'; // 미디어 타입 저장 (video/audio)
         AppState.interview.currentQuestionIndex = 1;
 
         // Start Interaction
@@ -1002,7 +1003,8 @@ async function handleSubmitAnswer(forced = false) {
 
         } else {
             AppState.interview.currentQuestion = result.next_question;
-            AppState.interview.currentAudioUrl = result.audio_url; // Store Audio URL
+            AppState.interview.currentAudioUrl = result.audio_url; // 미디어 URL 저장
+            AppState.interview.currentAudioType = result.audio_type || 'audio'; // 미디어 타입 저장
             AppState.interview.currentQuestionIndex++;
             updateProgressUI();
             startQuestionSequence(result.next_question);
@@ -1103,44 +1105,68 @@ function addChatLog(sender, text) {
     $('#chat-log').scrollTop = $('#chat-log').scrollHeight;
 }
 
-// --- Audio/Video Utility ---
+// --- 오디오/비디오 재생 유틸리티 ---
 function playAudio(url, callback) {
     if (!url) {
-        console.warn("[playAudio] No URL provided");
+        console.warn("[playAudio] URL이 제공되지 않았습니다.");
         if (callback) callback();
         return;
     }
 
-    console.log(`[playVideo] Playing: ${url}`);
-    const video = document.getElementById('ai-video');
-    if (!video) {
-        console.error("ai-video element not found!");
-        if (callback) callback();
-        return;
-    }
-
-    video.src = url;
-    video.volume = 1.0;
-
-    video.onended = () => {
-        console.log(`[playVideo] Ended: ${url}`);
-        // 영상 재생이 끝난 후 포스터 이미지로 되돌리기 위해 src 초기화 가능 (선택적)
-        // video.src = ""; // 여기서 초기화하면 화면이 까맣게 될 수 있으므로 유지
-        if (callback) callback();
-    };
-
-    video.onerror = (e) => {
-        console.error("Video Playback Error:", e);
-        if (video.error) {
-            console.error(`[playVideo] Error Code: ${video.error.code}, Message: ${video.error.message}`);
+    // URL 확장자로 비디오/오디오 구분
+    const isVideo = url.toLowerCase().endsWith('.mp4');
+    
+    if (isVideo) {
+        // 비디오 파일: <video> 태그로 재생 (Wav2Lip 립싱크 비디오)
+        console.log(`[playVideo] 비디오 재생: ${url}`);
+        const video = document.getElementById('ai-video');
+        if (!video) {
+            console.error("ai-video 요소를 찾을 수 없습니다!");
+            if (callback) callback();
+            return;
         }
-        if (callback) callback();
-    };
 
-    video.play().catch(e => {
-        console.error("Video Playback Failed:", e);
-        if (callback) callback();
-    });
+        video.src = url;
+        video.volume = 1.0;
+
+        video.onended = () => {
+            console.log(`[playVideo] 비디오 재생 종료: ${url}`);
+            if (callback) callback();
+        };
+
+        video.onerror = (e) => {
+            console.error("비디오 재생 오류:", e);
+            if (video.error) {
+                console.error(`[playVideo] 오류 코드: ${video.error.code}, 메시지: ${video.error.message}`);
+            }
+            if (callback) callback();
+        };
+
+        video.play().catch(e => {
+            console.error("비디오 재생 실패:", e);
+            if (callback) callback();
+        });
+    } else {
+        // 오디오 파일 (.mp3 등): <audio> 요소로 재생 (비디오 생성 실패 시 폴백)
+        console.log(`[playAudio] 오디오 재생: ${url}`);
+        const audio = new Audio(url);
+        audio.volume = 1.0;
+
+        audio.onended = () => {
+            console.log(`[playAudio] 오디오 재생 종료: ${url}`);
+            if (callback) callback();
+        };
+
+        audio.onerror = (e) => {
+            console.error("오디오 재생 오류:", e);
+            if (callback) callback();
+        };
+
+        audio.play().catch(e => {
+            console.error("오디오 재생 실패:", e);
+            if (callback) callback();
+        });
+    }
 }
 
 
