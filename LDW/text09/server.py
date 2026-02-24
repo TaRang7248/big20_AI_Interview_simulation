@@ -1,13 +1,11 @@
+# AI 면접 시뮬레이션 서버 및 자동 브라우저 실행 스크립트
+
 import uvicorn
 import webbrowser
 import threading
 import time
 import socket
 import os
-
-# ──────────────────────────────────────────────────────────
-# AI 면접 시뮬레이션 서버 및 자동 브라우저 실행 스크립트
-# ──────────────────────────────────────────────────────────
 
 # 서버 접속 정보 설정 (호스트 및 포트)
 HOST = "127.0.0.1"
@@ -62,4 +60,5 @@ if __name__ == "__main__":
             log_level="info",
         )
     except Exception as e:
+        # 서버 실행 중 예외 처리
         print(f"[오류] 서버 실행 중 에러가 발생했습니다: {e}")

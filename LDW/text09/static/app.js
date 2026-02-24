@@ -792,7 +792,7 @@ async function handleStartInterview() {
     navigateTo('interview-page');
 
     // UI Initialization on Interview Page
-    $('#ai-message').textContent = "이력서를 분석하고 면접을 준비 중입니다...";
+    // $('#ai-message').textContent = "이력서를 분석하고 면접을 준비 중입니다...";
     $('#chat-log').innerHTML = ''; // Clear previous log
     addChatLog('System', '면접 환경을 설정하고 있습니다.');
 
@@ -859,7 +859,7 @@ async function handleStartInterview() {
 function startQuestionSequence(question) {
     // UI Update
     addChatLog('AI', question);
-    $('#ai-message').textContent = question;
+    // $('#ai-message').textContent = question;
     $('#user-answer').value = '';
     $('#user-answer').placeholder = "답변을 말씀해주세요 (녹음 중...)";
 
@@ -1117,7 +1117,7 @@ async function handleSubmitAnswer(forced = false) {
             // Play closing remark properly
             const closingRemark = result.next_question || "면접이 종료되었습니다. 수고하셨습니다.";
             addChatLog('AI', closingRemark);
-            $('#ai-message').textContent = closingRemark;
+            // $('#ai-message').textContent = closingRemark;
 
             // [Prevent Double Submission] Disable controls immediately
             $('#btn-submit-answer').disabled = true;

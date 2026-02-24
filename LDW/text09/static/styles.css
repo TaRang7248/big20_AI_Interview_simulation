@@ -365,17 +365,16 @@ body {
 }
 
 .avatar-wrapper {
-    width: 120px;
-    height: 120px;
-    background: #ddd;
-    border-radius: 50%;
+    width: 256px;
+    height: 256px;
+    background: #000;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 3rem;
-    margin-bottom: 15px;
-    background: white;
+    margin-bottom: 0;
     border: 3px solid var(--primary-color);
+    overflow: hidden;
 }
 
 .chat-bubble {
@@ -388,7 +387,8 @@ body {
 }
 
 .user-area {
-    width: 300px;
+    width: 341px; /* To maintain aspect ratio with interviewer height if needed or just fixed */
+    height: 256px;
     background: black;
     border-radius: 8px;
     overflow: hidden;
