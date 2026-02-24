@@ -1,5 +1,5 @@
 // src/pages_yyr/InterviewPage_yyr.jsx
-import React from "react";
+import React, { useMemo } from "react";
 import { FaFileUpload, FaCheckCircle, FaChartBar, FaTimes } from "react-icons/fa";
 
 import WebcamView from "../components/WebcamView";
@@ -7,171 +7,318 @@ import AudioRecorder from "../components/AudioRecorder";
 import ResultPage_yyr from "./ResultPage_yyr";
 
 export default function InterviewPage_yyr({
-    // 상태/데이터
     sessionId,
     visionResult,
     chatLog,
     isProcessing,
     isResumeUploaded,
 
-    // 핸들러
     onLogout,
     onFileUpload,
     onAudioSubmit,
     onEndInterview,
     onVideoFrame,
 
-    // 리포트 모달
     showReport,
     setShowReport,
     reportData,
     loadingReport,
 
-    // 오디오 재생
     audioPlayerRef,
 }) {
+    // ✅ 진행도(임시 정책): 기능 유지 + UX용
+    const progress = useMemo(() => {
+        if (showReport) return 100;
+        const userTurns = chatLog.filter((m) => m.sender === "user").length;
+        const base = isResumeUploaded ? 18 : 6;
+        const inc = Math.min(userTurns * 12, 68);
+        return Math.min(base + inc, 88);
+    }, [chatLog, isResumeUploaded, showReport]);
+
+    const stageLabel = useMemo(() => {
+        if (showReport) return "평가/리포트";
+        if (!isResumeUploaded) return "준비";
+        if (isProcessing) return "AI 응답 중";
+        if (chatLog.length === 0) return "첫 답변 대기";
+        return "진행 중";
+    }, [showReport, isResumeUploaded, isProcessing, chatLog.length]);
+
+    const stageHint = useMemo(() => {
+        if (!isResumeUploaded) return "이력서를 업로드하면 맞춤 질문이 시작돼요.";
+        if (isProcessing) return "AI가 답변을 생성 중이에요. 잠시만 기다려주세요.";
+        if (chatLog.length === 0) return "준비가 되면 ‘답변 시작’을 눌러 첫 답변을 진행해보세요.";
+        return "답변을 시작하면 다음 질문 흐름이 이어집니다.";
+    }, [isResumeUploaded, isProcessing, chatLog.length]);
+
+    // ✅ “현재 질문” placeholder (질문 API 연결 전 임시)
+    const currentQuestion = useMemo(() => {
+        if (!isResumeUploaded) return "이력서를 업로드하면 맞춤 질문이 시작돼요.";
+        return "자기소개를 30초~1분으로 해주세요.";
+    }, [isResumeUploaded]);
+
     return (
-        <div className="min-h-screen bg-gray-100 flex flex-col items-center py-10 font-sans relative">
-            <header className="mb-8 text-center">
-                <h1 className="text-4xl font-extrabold text-gray-900 mb-2">
-                    AI Interview Simulation
-                </h1>
-                <p className="text-gray-500">카메라를 보고 질문에 답해보세요.</p>
-
-                {/* 현재 세션ID 표시 */}
-                <p className="text-xs text-gray-400 mt-2">
-                    thread_id: <span className="font-mono">{sessionId ?? "준비 중..."}</span>
-                </p>
-
-                <button
-                    onClick={onLogout}
-                    className="mt-4 px-4 py-2 rounded-lg bg-gray-200 text-gray-700 text-sm font-bold hover:bg-gray-300"
-                >
-                    로그아웃
-                </button>
-            </header>
-
-            <main className="w-full max-w-6xl px-4 grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* 왼쪽 섹션 */}
-                <section className="flex flex-col gap-4">
-                    <div className="bg-white p-2 rounded-2xl shadow-lg border border-gray-200">
-                        {/* ✅ 핵심: App.jsx에서 내려준 onVideoFrame을 그대로 연결 */}
-                        <WebcamView onVideoFrame={onVideoFrame} isProcessing={isProcessing} />
+        <div className="min-h-screen font-sans bg-gradient-to-b from-sky-50 via-white to-indigo-50">
+            {/* Top bar */}
+            <div className="sticky top-0 z-40 border-b border-sky-100/70 bg-white/70 backdrop-blur">
+                <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                        <h1 className="text-xl sm:text-2xl font-extrabold text-slate-900 leading-tight">
+                            AI Interview Simulation
+                        </h1>
+                        <p className="text-sm text-slate-500 mt-1">
+                            카메라를 보고 질문에 답해보세요.
+                        </p>
                     </div>
 
-                    <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200 flex items-center justify-between">
-                        <div>
-                            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
-                                Vision Analysis
-                            </h3>
-                            <p className="text-2xl font-bold text-blue-600 mt-1">{visionResult}</p>
+                    <div className="flex items-center gap-3 shrink-0">
+                        <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-full border border-sky-100 bg-white shadow-sm">
+                            <span
+                                className={[
+                                    "w-2 h-2 rounded-full",
+                                    stageLabel === "진행 중"
+                                        ? "bg-emerald-500 animate-pulse"
+                                        : stageLabel === "AI 응답 중"
+                                            ? "bg-amber-500 animate-pulse"
+                                            : stageLabel === "평가/리포트"
+                                                ? "bg-violet-500 animate-pulse"
+                                                : "bg-slate-300",
+                                ].join(" ")}
+                            />
+                            <span className="text-xs font-semibold text-slate-700">{stageLabel}</span>
                         </div>
-                        <div
-                            className={`w-3 h-3 rounded-full ${visionResult !== "분석 대기 중..." ? "bg-green-500 animate-pulse" : "bg-gray-300"
-                                }`}
-                        />
+
+                        <button
+                            onClick={onLogout}
+                            className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-black transition"
+                        >
+                            로그아웃
+                        </button>
                     </div>
+                </div>
 
-                    <div className="bg-white p-6 rounded-2xl shadow-md border border-gray-200">
-                        <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                            Resume Setup
-                        </h3>
-
-                        {!isResumeUploaded ? (
-                            <label className="flex items-center justify-center w-full p-6 border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition group">
-                                <div className="flex flex-col items-center">
-                                    <FaFileUpload className="text-3xl text-gray-400 mb-2 group-hover:text-blue-500 transition" />
-                                    <span className="text-sm text-gray-600 font-medium group-hover:text-blue-600">
-                                        PDF 이력서 업로드하기
+                {/* Progress card */}
+                <div className="max-w-6xl mx-auto px-4 pb-5">
+                    <div className="rounded-2xl border border-sky-100 bg-white shadow-sm px-4 py-3">
+                        <div className="flex items-center justify-between gap-4">
+                            <div className="min-w-0">
+                                <p className="text-[11px] text-slate-500">
+                                    thread_id:{" "}
+                                    <span className="font-mono text-slate-700">
+                                        {sessionId ?? "준비 중..."}
                                     </span>
-                                </div>
-                                <input type="file" className="hidden" accept=".pdf" onChange={onFileUpload} />
-                            </label>
-                        ) : (
-                            <div className="flex items-center gap-3 p-4 bg-green-50 text-green-700 rounded-xl border border-green-200">
-                                <FaCheckCircle className="text-2xl" />
-                                <div>
-                                    <p className="font-bold text-sm">이력서 분석 완료</p>
-                                    <p className="text-xs text-green-600">AI가 내용을 숙지했습니다.</p>
-                                </div>
+                                </p>
+                                <p className="text-sm font-semibold text-slate-800 mt-1">
+                                    {stageHint}
+                                </p>
                             </div>
-                        )}
+
+                            <div className="shrink-0 text-right">
+                                <p className="text-[11px] text-slate-500">면접 진행도</p>
+                                <p className="text-xl font-extrabold text-slate-900">
+                                    {progress}%
+                                </p>
+                            </div>
+                        </div>
+
+                        <div className="mt-3 w-full h-2.5 rounded-full bg-sky-100 overflow-hidden">
+                            <div
+                                className="h-full rounded-full bg-gradient-to-r from-sky-500 to-violet-500 transition-all"
+                                style={{ width: `${progress}%` }}
+                            />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Body */}
+            <main className="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* LEFT */}
+                <section className="space-y-5">
+                    <div className="bg-white rounded-3xl shadow-sm border border-sky-100 overflow-hidden">
+                        <div className="p-4 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-base font-extrabold text-slate-900">Live</h2>
+                                <p className="text-xs text-slate-500 mt-1">
+                                    카메라/표정 분석은 자동으로 진행돼요
+                                </p>
+                            </div>
+
+                            {/* ✅ 절제 그라데이션 포인트: LIVE 뱃지 */}
+                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-white text-xs font-bold bg-gradient-to-r from-sky-500 to-violet-500 shadow-sm">
+                                <span className="w-2 h-2 rounded-full bg-white/90 animate-pulse" />
+                                LIVE
+                            </span>
+                        </div>
+
+                        <div className="px-4 pb-4">
+                            <WebcamView onVideoFrame={onVideoFrame} isProcessing={isProcessing} />
+                        </div>
+
+                        <div className="px-4 pb-4 grid grid-cols-2 gap-3">
+                            <div className="rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
+                                <p className="text-xs font-semibold text-slate-500">Vision</p>
+                                <p className="mt-1 text-lg font-extrabold text-slate-900">
+                                    {visionResult}
+                                </p>
+                                <p className="text-[11px] text-slate-500 mt-1">
+                                    {visionResult === "분석 대기 중..."
+                                        ? "카메라가 연결되면 자동 분석됩니다."
+                                        : "실시간 표정 정보를 참고합니다."}
+                                </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
+                                <p className="text-xs font-semibold text-slate-500">Resume</p>
+                                {!isResumeUploaded ? (
+                                    <>
+                                        <p className="mt-1 text-lg font-extrabold text-slate-900">미등록</p>
+                                        <p className="text-[11px] text-slate-500 mt-1">
+                                            PDF 업로드 후 맞춤 질문이 시작돼요.
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <p className="mt-1 text-lg font-extrabold text-slate-900">완료</p>
+                                        <p className="text-[11px] text-slate-500 mt-1">
+                                            AI가 이력서를 반영해 질문을 만들어요.
+                                        </p>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="px-4 pb-5">
+                            {!isResumeUploaded ? (
+                                <label className="flex items-center justify-between w-full px-4 py-4 rounded-2xl border border-sky-100 bg-white hover:bg-sky-50/40 cursor-pointer transition">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-2xl bg-slate-900 text-white flex items-center justify-center">
+                                            <FaFileUpload />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-extrabold text-slate-900">PDF 이력서 업로드</p>
+                                            <p className="text-xs text-slate-500 mt-0.5">맞춤 질문을 위해 필요해요</p>
+                                        </div>
+                                    </div>
+                                    <span className="text-xs font-bold text-slate-900">업로드</span>
+                                    <input type="file" className="hidden" accept=".pdf" onChange={onFileUpload} />
+                                </label>
+                            ) : (
+                                <div className="flex items-center gap-3 px-4 py-4 rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-800">
+                                    <FaCheckCircle className="text-xl" />
+                                    <div>
+                                        <p className="text-sm font-extrabold">이력서 분석 완료</p>
+                                        <p className="text-xs text-emerald-700 mt-0.5">이제 면접을 진행해보세요</p>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </section>
 
-                {/* 오른쪽 섹션 */}
-                <section className="bg-white rounded-2xl shadow-lg border border-gray-200 p-6 flex flex-col h-[750px] relative">
-                    <div className="flex items-center justify-between border-b border-gray-100 pb-4 mb-4">
-                        <h2 className="text-xl font-bold text-gray-800">💬 Interview Chat</h2>
+                {/* RIGHT */}
+                <section className="bg-white rounded-3xl shadow-sm border border-sky-100 p-6 flex flex-col min-h-[760px]">
+                    {/* Question card */}
+                    <div className="rounded-2xl border border-sky-100 bg-sky-50/60 p-4">
+                        <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                                <p className="text-[11px] font-semibold text-slate-500">현재 질문</p>
+                                <h2 className="mt-1 text-lg sm:text-xl font-extrabold text-slate-900 leading-snug">
+                                    {currentQuestion}
+                                </h2>
+                                <p className="text-xs text-slate-500 mt-2">
+                                    {isResumeUploaded
+                                        ? "준비가 되면 아래에서 답변을 시작해보세요."
+                                        : "이력서 업로드 후 맞춤 질문이 자동 생성됩니다."}
+                                </p>
+                            </div>
 
-                        <button
-                            onClick={onEndInterview}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 text-white text-xs font-bold rounded-lg hover:bg-black transition"
-                        >
-                            <FaChartBar /> 결과 보기
-                        </button>
+                            {/* ✅ 절제 그라데이션 포인트: 결과 보기 버튼 */}
+                            <button
+                                onClick={onEndInterview}
+                                className="shrink-0 inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-sm font-extrabold bg-gradient-to-r from-sky-500 to-violet-500 hover:from-sky-600 hover:to-violet-600 transition shadow-sm"
+                            >
+                                <FaChartBar />
+                                결과 보기
+                            </button>
+                        </div>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto space-y-4 mb-6 pr-2">
-                        {chatLog.length === 0 && (
-                            <div className="text-center text-gray-400 mt-20">
-                                준비가 되시면<br />
-                                이력서를 업로드하고<br />
-                                [답변 시작] 버튼을 눌러주세요.
+                    {/* Chat */}
+                    <div className="mt-5 flex-1 overflow-y-auto pr-2 space-y-3">
+                        {chatLog.length === 0 ? (
+                            <div className="mt-14 text-center text-slate-400">
+                                <p className="text-sm">
+                                    준비가 되시면 이력서를 업로드하고<br />
+                                    <span className="font-semibold text-slate-500">[답변 시작]</span>을 눌러주세요.
+                                </p>
                             </div>
-                        )}
-
-                        {chatLog.map((msg, idx) => (
-                            <div
-                                key={idx}
-                                className={`flex ${msg.sender === "user"
-                                        ? "justify-end"
-                                        : msg.sender === "system"
-                                            ? "justify-center"
-                                            : "justify-start"
-                                    }`}
-                            >
+                        ) : (
+                            chatLog.map((msg, idx) => (
                                 <div
-                                    className={`max-w-[80%] px-4 py-3 rounded-2xl text-sm ${msg.sender === "user"
-                                            ? "bg-blue-600 text-white rounded-tr-none"
+                                    key={idx}
+                                    className={`flex ${msg.sender === "user"
+                                            ? "justify-end"
                                             : msg.sender === "system"
-                                                ? "bg-green-100 text-green-800 text-xs py-2"
-                                                : "bg-gray-100 text-gray-800 rounded-tl-none"
+                                                ? "justify-center"
+                                                : "justify-start"
                                         }`}
                                 >
-                                    {msg.text}
+                                    <div
+                                        className={`max-w-[86%] px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.sender === "user"
+                                                ? "bg-slate-900 text-white rounded-tr-md"
+                                                : msg.sender === "system"
+                                                    ? "bg-emerald-50 text-emerald-800 border border-emerald-100 text-xs py-2"
+                                                    : "bg-sky-50/60 text-slate-900 border border-sky-100 rounded-tl-md"
+                                            }`}
+                                    >
+                                        {msg.text}
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))
+                        )}
                     </div>
 
-                    <div className="pt-4 border-t border-gray-100">
+                    {/* Action bar */}
+                    <div className="pt-5 mt-5 border-t border-sky-100">
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                            <p className="text-xs text-slate-500">
+                                {isProcessing
+                                    ? "AI가 응답을 생성 중입니다. 잠시만 기다려주세요."
+                                    : "버튼을 눌러 답변을 녹음하세요."}
+                            </p>
+                            <span className="text-xs font-semibold text-slate-700">
+                                {isProcessing ? "Processing" : "Ready"}
+                            </span>
+                        </div>
+
                         <AudioRecorder onAudioSubmit={onAudioSubmit} isProcessing={isProcessing} />
-                        {/* ✅ App.jsx에서 내려준 ref를 그대로 사용 */}
                         <audio ref={audioPlayerRef} hidden />
                     </div>
                 </section>
             </main>
 
-            {/* 결과 리포트 모달 */}
+            {/* Report modal */}
             {showReport && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white z-10">
-                            <h2 className="text-2xl font-bold text-gray-900">📊 면접 분석 리포트</h2>
+                <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-sky-100">
+                        <div className="p-6 border-b border-sky-100 flex justify-between items-center sticky top-0 bg-white z-10">
+                            <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900">
+                                📊 면접 분석 리포트
+                            </h2>
                             <button
                                 onClick={() => setShowReport(false)}
-                                className="text-gray-400 hover:text-gray-600"
+                                className="text-slate-400 hover:text-slate-600"
+                                aria-label="Close"
                             >
-                                <FaTimes size={24} />
+                                <FaTimes size={22} />
                             </button>
                         </div>
 
                         <div className="p-6">
                             {loadingReport ? (
                                 <div className="text-center py-20">
-                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4" />
-                                    <p className="text-gray-500">AI가 면접관들의 평가를 취합 중입니다...</p>
+                                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-sky-500 mx-auto mb-4" />
+                                    <p className="text-slate-500">AI가 면접관들의 평가를 취합 중입니다...</p>
                                 </div>
                             ) : reportData ? (
                                 <ResultPage_yyr reportData={reportData} />
