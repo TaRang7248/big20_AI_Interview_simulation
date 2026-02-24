@@ -8,10 +8,12 @@ import soundfile as sf
 import noisereduce as nr
 import parselmouth
 import Levenshtein
+import torch
+import whisper
 from openai import OpenAI
 import google.generativeai as genai
 from parselmouth.praat import call
-from ..config import logger, GOOGLE_API_KEY, OPENAI_API_KEY
+from ..config import logger, GOOGLE_API_KEY, OPENAI_API_KEY, BASE_DIR
 # from .vad_service import calculate_average_rms, check_vad_activity
 # vad_service를 직접 사용하지 않고 내부 로직으로 통합하거나 수정된 방식을 사용합니다.
 
@@ -35,12 +37,32 @@ def get_gemini_model(model_name="gemini-2.0-flash"):
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# OpenAI 설정
+# OpenAI API 설정 (필요시 사용, 현재는 로컬 Whisper 우선)
 openai_client = None
 if OPENAI_API_KEY:
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
-else:
-    logger.warning("OPENAI_API_KEY가 설정되지 않았습니다. Whisper STT를 건너뜁니다.")
+
+# 로컬 Whisper 모델 캐시
+_WHISPER_MODEL_CACHE = None
+
+def get_whisper_model():
+    """
+    OpenAI Whisper (V3 Turbo) 모델을 로드하거나 캐시된 인스턴스를 반환합니다.
+    """
+    global _WHISPER_MODEL_CACHE
+    if _WHISPER_MODEL_CACHE is None:
+        model_name = "large-v3-turbo"
+        logger.info(f"Whisper 로컬 모델({model_name}) 로딩 중... (최초 실행 시 시간이 걸릴 수 있습니다)")
+        
+        # GPU 사용 가능 여부 확인
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Whisper 실행 장치: {device}")
+        
+        # 모델 로드
+        _WHISPER_MODEL_CACHE = whisper.load_model(model_name, device=device)
+        logger.info(f"Whisper 로컬 모델({model_name}) 로드 완료.")
+    
+    return _WHISPER_MODEL_CACHE
 
 # ---------------------------------------------------------
 # 1. 오디오 전처리 (노이즈 제거 및 정규화)
@@ -212,28 +234,34 @@ def transcribe_with_gemini(audio_path):
         return None
 
 def transcribe_with_whisper(audio_path):
-    if not openai_client: return None
+    """
+    로컬 OpenAI Whisper (V3 Turbo) 모델을 사용하여 음성 전사를 수행합니다.
+    """
     try:
-        with open(audio_path, "rb") as audio_file:
-            transcript = openai_client.audio.transcriptions.create(
-                model="whisper-1", 
-                file=audio_file,
-                language="ko",
-                temperature=0.0,
-                prompt="이것은 한국어 면접 답변입니다. 간투사(어, 음)를 포함하여 들리는 모든 소리를 단 한 글자도 변형하지 말고 있는 그대로 똑같이 전사하세요. 목소리가 없다면 절대로 내용을 지어내지 마세요.",
-                timeout=30
-            )
-        text = transcript.text.strip()
+        model = get_whisper_model()
+        
+        logger.info(f"Whisper 로컬 모델 전사 시작: {audio_path}")
+        # fp16=False는 CPU 환경에서의 경고 방지용
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        result = model.transcribe(
+            audio_path, 
+            language="ko", 
+            temperature=0.0,
+            initial_prompt="이것은 한국어 면접 답변입니다. 간투사(어, 음)를 포함하여 들리는 모든 소리를 단 한 글자도 변형하지 말고 있는 그대로 똑같이 전사하세요. 목소리가 없다면 절대로 내용을 지어내지 마세요.",
+            fp16=(device == "cuda")
+        )
+        
+        text = result["text"].strip()
         
         # Whisper 환각(Hallucination) 필터 강화
-        hallucinations = ["시청해주셔서", "MBC 뉴스", "한글 자막", "Subtitles", "감사합니다", "9시 뉴스"]
-        if len(text) < 10 and any(h in text for h in hallucinations):
+        hallucinations = ["시청해주셔서", "MBC 뉴스", "한글 자막", "Subtitles", "감사합니다", "9시 뉴스", "오늘 영상 여기까지입니다", "구독과 좋아요"]
+        if len(text) < 15 and any(h in text for h in hallucinations):
             logger.info(f"Whisper 환각 감지 및 필터링: {text}")
             return None # 환각 가능성 높음
                 
         return text
     except Exception as e:
-        logger.error(f"Whisper STT 오류: {e}")
+        logger.error(f"Whisper 로컬 STT 오류: {e}")
         return None
 
 def calculate_levenshtein_similarity(text1, text2):
