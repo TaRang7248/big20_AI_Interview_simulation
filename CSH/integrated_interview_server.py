@@ -4900,6 +4900,8 @@ async def create_session(
         "greeting": greeting,
         "status": "active",
         "resume_uploaded": resume_uploaded,
+        # 프론트엔드 진행 바·종료 판단용 — 백엔드 MAX_QUESTIONS와 동기화
+        "max_questions": interviewer.MAX_QUESTIONS,
         # 이력서가 없으면 경고 메시지 포함
         "resume_warning": None
         if resume_uploaded
