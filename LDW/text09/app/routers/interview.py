@@ -72,16 +72,27 @@ async def start_interview(background_tasks: BackgroundTasks, data: StartIntervie
         
         conn.commit()
         
-        # Generate TTS
-        logger.info(f"Generating first question TTS... Text: {first_question[:30]}")
-        audio_url = await generate_tts_audio(first_question)
-        logger.info(f"First Question Audio URL: {audio_url}")
+        # TTS 음성 생성 (비디오 생성 시도 포함)
+        logger.info(f"첫 질문 TTS 생성 중... 텍스트: {first_question[:30]}")
+        tts_result = await generate_tts_audio(first_question)
+        
+        # TTS 결과에서 URL과 타입 추출
+        audio_url = None
+        audio_type = "audio"
+        if isinstance(tts_result, dict):
+            audio_url = tts_result.get("url")
+            audio_type = tts_result.get("type", "audio")
+        elif isinstance(tts_result, str):
+            audio_url = tts_result  # 하위 호환성 유지
+        
+        logger.info(f"첫 질문 미디어 URL: {audio_url} (타입: {audio_type})")
 
         return {
             "success": True,
             "interview_number": interview_number,
             "question": first_question,
             "audio_url": audio_url,
+            "audio_type": audio_type,
             "session_name": session_name
         }
         
@@ -232,15 +243,22 @@ async def submit_answer(
         conn.close()
         conn = None # Prevent finally block from creating issues if closed
 
-        # Generate TTS if not finished
+        # 면접이 계속되면 다음 질문 TTS 생성
         audio_url = None
+        audio_type = "audio"
         if not interview_finished:
-             audio_url = await generate_tts_audio(next_question)
+            tts_result = await generate_tts_audio(next_question)
+            if isinstance(tts_result, dict):
+                audio_url = tts_result.get("url")
+                audio_type = tts_result.get("type", "audio")
+            elif isinstance(tts_result, str):
+                audio_url = tts_result  # 하위 호환성 유지
 
         return {
             "success": True,
             "next_question": next_question,
             "audio_url": audio_url,
+            "audio_type": audio_type,
             "transcript": applicant_answer,
             "interview_finished": interview_finished,
             "session_name": session_name

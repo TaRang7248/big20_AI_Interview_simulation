@@ -159,7 +159,7 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── docker-compose.yml       # 도커 오케스트레이션
 ├── Dockerfile               # 도커 빌드 설정
 ├── GUIDEBOOK.md             # 프로젝트 가이드북
-├── requirements.txt         # 패키지 의존성 목록 (numpy 1.26.2, pyannote-audio 3.1.1, scipy 1.12.0, tensorflow 2.15.1 고정)
+├── requirements.txt         # 패키지 의존성 목록 (numpy 1.26.2, pyannote-audio 3.1.1, scipy 1.12.0, tensorflow 2.15.1 고정, 2026-02-24 최신화)
 └── server.py                # 서버 실행 및 브라우저 자동 실행 (한국어 주석 적용)
 ```
 
@@ -194,13 +194,12 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 - **서버 실행 스크립트 최적화**: `server.py`를 서버 구동 및 자동 브라우저 오픈 기능 전용으로 개편하고 한국어 주석을 추가했습니다.
 - **프로젝트 구조 정량화**: 루트 디렉토리를 정리하여 관리 효율성을 높였습니다. (`diagnose_numpy.py` → `scripts/` 이동)
 
-### 신규 업데이트 (성능 개선 및 구조 최적화) **[2026-02-24]**
-- **STT (음성 인식) 병렬 처리 도입**: `Gemini`와 `Whisper` 모델을 `ThreadPoolExecutor`를 통해 병렬로 호출하여 인식 대기 시간을 최대 50% 단축했습니다.
-- **LLM 모델 인스턴스 재사용**: 질문 생성 및 답변 평가 시 매번 모델 인스턴스를 생성하던 방식에서 글로벌 인스턴스를 재사용하는 방식으로 변경하여 초기 응답 속도를 개선했습니다.
-- **비디오 생성(Wav2Lip) 비동기화**: TTS 오디오 생성 후 Wav2Lip를 비동기 subprocess로 실행하여 서버 블로킹을 방지하고, 영상이 준비되는 즉시 프론트엔드에 전달하도록 최적화했습니다.
-- **면접 종료 분석 성능 강화**: 다수의 면접 영상(.webm)을 분석할 때 병합 처리가 아닌 병렬 처리(`ThreadPoolExecutor`)를 적용하여 최종 결과 도출 속도를 대폭 향상했습니다.
-- **루트 디렉토리 구조 정량화**: 프로젝트 루트에는 실행 필수 파일 및 폴더(`app`, `data`, `server.py` 등)만 남기고 나머지 작업 파일들은 하위 디렉토리로 정리하여 관리 효율성을 높였습니다.
-- **의존성 최신화**: 주요 라이브러리들을 2026년 상반기 최신 안정 버전으로 업데이트했습니다.
+### 신규 업데이트 (STT 성능 개선 및 구조 최적화) **[2026-02-24]**
+- **STT 전사 품질 극대화**: Gemini 및 Whisper 프롬프트를 강화하여 "어...", "음..." 같은 간투사를 포함한 모든 소리를 변형 없이 '완벽하게 똑같이' 전사하도록 개선했습니다. AI가 내용을 지어내거나(Hallucination) 문법을 교정하는 것을 차단했습니다.
+- **STT (음성 인식) 병렬 처리**: `Gemini`와 `Whisper` 모델을 `ThreadPoolExecutor`를 통해 병렬로 호출하여 인식 대기 시간을 대폭 단축했습니다.
+- **의존성 최적화 및 고정**: `requirements.txt`를 최신화하되, 요청된 `numpy==1.26.2` 및 `pyannote-audio==3.1.1` 버전을 고정하여 바이너리 호환성 문제를 해결했습니다.
+- **서버 실행 스크립트 리팩토링**: `server.py`를 서버 구동 및 자동 웹 브라우저 실행 기능만 남겨 최적화하고, 모든 주석을 한국어로 변경했습니다.
+- **루트 디렉토리 정리**: 프로젝트 루트에는 실행 필수 파일(`app`, `data`, `server.py` 등)만 남기고 나머지 작업 폴더들을 하위로 정리하여 관리 효율성을 높였습니다.
 
 ### 신규 업데이트 (관리자 공고 폼 구조 개선) **[NEW]**
 - **관리자 공고 등록 필드 고도화**: 공고 등록 및 수정 시 기존 '직무 (Job)', '공고 내용', '마감일' 텍스트를 '채용 직무', '주요업무', '공고 마감일'로 각각 변경하여 직관성을 높였습니다.
@@ -209,6 +208,13 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ### 신규 업데이트 (이력서 시각화 및 구조화) **[NEW]**
 - **이력서 미리보기(썸네일) 및 원본 보기(모달)**: '1. 이력서 업로드' 중 파일 선택 즉시 사용자 화면 우측에 이력서를 작은 크기(썸네일 형태)로 간편하게 미리 볼 수 있습니다. 썸네일을 클릭하면 원본 크기로 큰 모달 창을 띄워 상세히 확인할 수 있어 사용성이 개선되었습니다.
 - **루트 디렉토리 정리**: `create_pdf.py` 및 `test_resume.pdf`와 같은 부가 스크립트와 파일들을 각각 `scripts/`, `test_uploads/` 폴더 등으로 옮겨 폴더 구조가 더 직관적으로 정리되었습니다.
+
+### 신규 업데이트 (비디오 생성 안정성 개선) **[2026-02-24]**
+- **비디오 생성 경로 설정 중앙화 (Critical Fix)**: `app/config.py`에 `WAV2LIP_OUTPUT_FOLDER`, `WAV2LIP_DIR`, `WAV2LIP_INFERENCE_SCRIPT`, `WAV2LIP_CHECKPOINT`, `WAV2LIP_FACE_IMAGE` 등 비디오 생성 관련 경로를 중앙 관리하도록 추가했습니다. 기존에는 `video_gen_service.py`에서 하드코딩된 경로를 사용하여 경로 불일치로 인한 비디오 생성 실패가 발생할 수 있었습니다.
+- **비디오/오디오 폴백 로직 개선**: `tts_service.py`의 반환값을 `{"url": ..., "type": "video"|"audio"}` dict 형태로 변경하여, 프론트엔드가 비디오 생성 성공/실패 여부를 명확히 구분할 수 있게 했습니다.
+- **프론트엔드 재생 안정화**: `app.js`의 `playAudio()` 함수를 수정하여, `.mp4` 파일은 `<video>` 태그로, `.mp3` 파일은 `<audio>` 요소로 재생합니다. 기존에는 비디오 생성 실패 시 mp3 파일을 `<video>` 태그에 로드하여 재생 오류가 발생했습니다.
+- **인터뷰 라우터 응답 확장**: API 응답에 `audio_type` 필드를 추가하여 클라이언트가 미디어 타입을 인지하고 적절한 재생 방식을 선택할 수 있습니다.
+- **의존성 최신화**: FastAPI 0.131.0, Uvicorn 0.41.0, Pydantic 2.12.5, SQLAlchemy 2.0.46 등 주요 라이브러리를 2026년 2월 기준 최신 안정 버전으로 업데이트했습니다. (`numpy==1.26.2`, `pyannote-audio==3.1.1` 고정 유지)
 
 ---
 
@@ -253,7 +259,8 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 
 ### 9.1 주요 통합 내용
 *   **비디오 출력 지원**: 프론트엔드(`static/index.html` 및 `static/app.js`)의 비디오 플레이어(`<video id="ai-video">`)를 통해 256x256 크기의 립싱크 비디오를 지원합니다.
-*   **Wav2Lip 비디오 생성 모듈**: `app/services/video_gen_service.py`를 통해 TTS 오디오(`uploads/tts_audio/*.mp3`)와 지정된 이미지(`data/man.png`)를 합성한 후 `uploads/Wav2Lip_mp4/*.mp4`를 생성 및 서바이벌합니다. [UPDATED]
+*   **Wav2Lip 비디오 생성 모듈**: `app/services/video_gen_service.py`를 통해 TTS 오디오(`uploads/tts_audio/*.mp3`)와 지정된 이미지(`data/man.png`)를 합성한 후 `uploads/Wav2Lip_mp4/*.mp4`를 생성합니다. 경로 설정은 `app/config.py`에서 `WAV2LIP_OUTPUT_FOLDER`, `WAV2LIP_CHECKPOINT`, `WAV2LIP_FACE_IMAGE` 등으로 중앙 관리됩니다. **[UPDATED]**
+*   **비디오/오디오 자동 폴백**: 비디오 생성에 실패할 경우 TTS 오디오(mp3)만 재생하며, 프론트엔드가 `.mp4`/`.mp3` 확장자를 자동 감지하여 적절한 방식(`<video>` 또는 `<audio>`)으로 재생합니다. **[NEW]**
 *   **의존성 최신화**: 립싱크 처리에 필요한 `ffmpeg-python`, `moviepy`, `tqdm`, `torchvision`, `torchaudio`, `librosa` 모듈이 요구사항(`requirements.txt`)에 반영되었습니다.
 
 ### 9.2 참고 사항
