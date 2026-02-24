@@ -69,12 +69,165 @@ function clearSignupForm() {
 
 // --- 3. Initialization ---
 document.addEventListener('DOMContentLoaded', () => {
-    initRouter();
-    initAuth();
-    initDashboard();
-    initAdmin();
-    initInterview();
+    console.log("[System] Application initialization started.");
+
+    const initFunctions = [
+        { name: 'Router', func: initRouter },
+        { name: 'Auth', func: initAuth },
+        { name: 'Dashboard', func: initDashboard },
+        { name: 'Admin', func: initAdmin },
+        { name: 'Interview', func: initInterview },
+        { name: 'FindAccount', func: initFindAccount }
+    ];
+
+    initFunctions.forEach(item => {
+        try {
+            item.func();
+            console.log(`[System] ${item.name} initialized successfully.`);
+        } catch (error) {
+            console.error(`[Error] Failed to initialize ${item.name}:`, error);
+        }
+    });
+
+    console.log("[System] Application initialization completed.");
 });
+
+// --- ID/PW 찾기 로직 ---
+function initFindAccount() {
+    console.log("[Auth] Initializing ID/PW recovery listeners.");
+
+    // 탭 전환: ID 찾기
+    $('#btn-tab-find-id').addEventListener('click', () => {
+        console.log("[Nav] Switching to Find ID tab.");
+        $('#btn-tab-find-id').classList.add('active');
+        $('#btn-tab-find-pw').classList.remove('active');
+        $('#form-find-id').classList.remove('hidden');
+        $('#form-find-pw').classList.add('hidden');
+        resetFindForms();
+    });
+
+    // 탭 전환: PW 찾기
+    $('#btn-tab-find-pw').addEventListener('click', () => {
+        $('#btn-tab-find-pw').classList.add('active');
+        $('#btn-tab-find-id').classList.remove('active');
+        $('#form-find-pw').classList.remove('hidden');
+        $('#form-find-id').classList.add('hidden');
+        resetFindForms();
+    });
+
+    // ID 찾기 양식 제출
+    $('#find-id-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = $('#find-id-name').value;
+        const email = $('#find-id-email').value;
+
+        try {
+            const response = await fetch('/api/find-id', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email })
+            });
+            const result = await response.json();
+            const resultBox = $('#find-id-result');
+            resultBox.style.display = 'block';
+
+            if (result.success) {
+                resultBox.innerHTML = `찾으시는 아이디는 <strong>${result.id_name}</strong> 입니다.`;
+                resultBox.style.color = 'blue';
+                // 아이디 출력 후 3초 뒤 로그인 화면으로 이동 (선택 사항)
+                setTimeout(() => {
+                    alert(`아이디 확인: ${result.id_name}. 로그인 화면으로 돌아갑니다.`);
+                    navigateTo('login-page');
+                }, 3000);
+            } else {
+                resultBox.textContent = result.message;
+                resultBox.style.color = 'red';
+                // 실패 시 2초 뒤 로그인 화면으로 이동 (사용자 요구사항)
+                setTimeout(() => {
+                    navigateTo('login-page');
+                }, 2000);
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('서버 오류 발생', 'error');
+        }
+    });
+
+    // PW 찾기 Step 1 (아이디 입력) 제출
+    $('#find-pw-form-step1').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id_name = $('#find-pw-id').value;
+
+        try {
+            const response = await fetch('/api/find-pw-step1', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_name })
+            });
+            const result = await response.json();
+            if (result.success) {
+                $('#find-pw-step1-ui').classList.add('hidden');
+                $('#find-pw-step2-ui').classList.remove('hidden');
+                $('#find-pw-msg').textContent = result.message;
+                // 테스트를 위한 인증번호 알림 (실제 운영 시 제거)
+                if (result.debug_code) {
+                    console.log(`[DEBUG] Verification Code: ${result.debug_code}`);
+                    showToast(`[테스트용] 인증번호: ${result.debug_code}`, 'info');
+                }
+            } else {
+                showToast(result.message, 'error');
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('서버 오류 발생', 'error');
+        }
+    });
+
+    // PW 찾기 Step 2 (인증번호 입력) 제출
+    $('#find-pw-form-step2').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const id_name = $('#find-pw-id').value;
+        const verification_code = $('#find-pw-code').value;
+
+        try {
+            const response = await fetch('/api/find-pw-step2', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id_name, verification_code })
+            });
+            const result = await response.json();
+            const resultBox = $('#find-pw-result');
+            resultBox.style.display = 'block';
+
+            if (result.success) {
+                resultBox.innerHTML = `귀하의 비밀번호는 <strong>${result.pw}</strong> 입니다.`;
+                resultBox.style.color = 'blue';
+            } else {
+                resultBox.textContent = result.message;
+                resultBox.style.color = 'red';
+            }
+        } catch (error) {
+            console.error(error);
+            showToast('서버 오류 발생', 'error');
+        }
+    });
+
+    $('#btn-find-back-login').addEventListener('click', () => navigateTo('login-page'));
+    $('#link-find-account').addEventListener('click', (e) => {
+        e.preventDefault();
+        navigateTo('find-account-page');
+    });
+}
+
+function resetFindForms() {
+    $('#find-id-form').reset();
+    $('#find-pw-form-step1').reset();
+    $('#find-pw-form-step2').reset();
+    $('#find-id-result').style.display = 'none';
+    $('#find-pw-result').style.display = 'none';
+    $('#find-pw-step1-ui').classList.remove('hidden');
+    $('#find-pw-step2-ui').classList.add('hidden');
+}
 
 // --- 4. Router ---
 function initRouter() {
@@ -1115,7 +1268,7 @@ function playAudio(url, callback) {
 
     // URL 확장자로 비디오/오디오 구분
     const isVideo = url.toLowerCase().endsWith('.mp4');
-    
+
     if (isVideo) {
         // 비디오 파일: <video> 태그로 재생 (Wav2Lip 립싱크 비디오)
         console.log(`[playVideo] 비디오 재생: ${url}`);

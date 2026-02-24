@@ -64,3 +64,15 @@ class StartInterviewRequest(BaseModel):
     id_name: str
     job_title: str
     announcement_id: Optional[int] = None
+
+# --- ID/PW Recovery Models ---
+class FindIdRequest(BaseModel):
+    name: str
+    email: str
+
+class FindPwStep1Request(BaseModel):
+    id_name: str
+
+class FindPwStep2Request(BaseModel):
+    id_name: str
+    verification_code: str
