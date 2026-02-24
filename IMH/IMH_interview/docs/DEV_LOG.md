@@ -1136,3 +1136,25 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
 - **Key Findings**:
     - Small on-prem models (4B-8B) require strict output token caps and "Preamble-free" instructions to maintain real-time performance.
     - Models show significant variance in "Instruction Following" for JSON output; choice of scoring model is more critical than questioning model.
+
+### [2026-02-24] TASK-034: STT Engine Selection & Foreign Term Optimization
+- **목표**: 실제 사용자 음성과 전문 용어가 포함된 데이터를 기반으로 로컬 STT 엔진(Faster-Whisper vs SenseVoice)을 비교 분석하여 IMH의 공식 엔진 확정.
+- **주요 성과**:
+    - **전문 용어 최적화**: `initial_prompt` 주입을 통해 `PostgreSQL`, `Kubernetes`, `Docker` 등 핵심 IT 전문 용어의 영문 스펠링 복원 성능 극대화.
+    - **메트릭 고도화**: 단순 CER/WER을 넘어 `foreign_term_accuracy`와 `digit_accuracy`를 측정하여 면접 데이터로서의 고품질 텍스트 추출 능력 검증.
+    - **최종 선정**: **Faster-Whisper-v3-turbo** 확정. 
+        - 선정 이유: 높은 충실도(Fidelity), 수치 정확도(81% vs 3%), 전문 용어 영문 표기 능력 우수.
+        - 비고: SenseVoice는 속도는 빠르나 핵심 기술 키워드 및 숫자 누락(Omission)이 심각하여 면접 데이터 원문 기록용으로 부적합 판정.
+- **검증**: `docs/benchmarks/stt/report_202602d_160840.json` (사용자 실제 녹음 데이터 기반 벤치마크 완료)
+- **후속 조치**: VAD 적용 및 `initial_prompt` 유니버설 사전 구축을 통한 환각 방지 전략 수립.
+
+### [2026-02-24] TASK-033v2: LLM Benchmark (On-Prem Migration) & Final Selection
+- **목표**: OpenAI 쿼터 소진에 따라 전체 모델을 On-Prem(로컬)으로 전환하고, P1-P5 지표 오류를 수정한 상태에서 최적 모델 선정.
+- **주요 성과**:
+    - **로컬 시뮬레이터 전환**: CandidateSimulator의 백엔드를 gpt-4o-mini에서 xaone3.5:2.4b로 성공적으로 이관.
+    - **Llama 3.2 루프 결함 해결**: 전용 프롬프트 설계를 통해 동일 질문 무한 반복 이슈를 해결하고 Drill-down %를 0%에서 100%로 개선.
+    - **A.X 지연시간 최적화**: 경량 양자화(iq2_m) 모델 도입을 통해 품질 저하 없이 응답 속도를 기존 대비 40~50% 단축 (15s -> 8s).
+- **최종 선정 결과**:
+    - **Main Engine**: **xaone3.5:2.4b** (속도/품질 밸런스 1위)
+    - **Candidate Engines**: cookieshake/a.x (iq2_m) (고품질용), llama3.2korean (빠른 인성용)
+- **검증**: docs/benchmarks/task_033_v2/final_report.md (EXIT 0)

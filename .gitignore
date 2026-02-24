@@ -245,3 +245,7 @@ pgdata/
 **/raw_logs/
 *.txt
 reports/**/raw_logs/*.json
+
+# Project Specific
+ffmpeg/
+.locks/

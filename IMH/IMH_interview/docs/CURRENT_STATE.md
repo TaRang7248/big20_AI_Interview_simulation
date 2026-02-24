@@ -90,7 +90,7 @@
 ## 4. 패키지 및 모듈 상태
 
 - `imh_core`: DONE (기본 설정, 에러, DTO, 전역 로깅)
-- `imh_providers`: DONE (STT, LLM, Emotion, Visual, Voice, Embedding)
+- `imh_providers`: DONE (STT: Faster-Whisper-v3-turbo 확정, LLM: Ollama/OpenAI, Emotion, Visual, Voice, Embedding)
 - `imh_analysis`: DONE (DeepFace, Parselmouth, MediaPipe 연동)
 - `imh_eval`: DONE (루브릭 기반 평가 엔진)
 - `imh_history`: DONE (리포트 저장 및 이력 관리 - PG 전환 완료)
@@ -106,7 +106,11 @@
 ## 5. 현재 작업 섹션
 
 ### ACTIVE
-- **TASK-033 (모델 비교 및 평가 취약점 탐지)**: [ACTIVE] - 4상황(S1~S4) 기반 LLM 비교 및 평가 취약점(Drill-down 실패, JSON 오염, 환각 등) 탐지 테스트 스크립트 작성 진행 중.
+- **TASK-033 (모델 비교 및 평가 취약점 탐지)**: [DONE]
+  - 4상황(S1~S4) 기반 LLM 비교 벤치마크 완료 (On-Prem 100%).
+  - Llama 3.2 루프 결함 수정 및 `exaone3.5:2.4b` 메인 엔진 확정.
+  - 개선된 `cookieshake/a.x (iq2_m)`를 고품질 서브 엔진으로 확보.
+  - Verification: `docs/benchmarks/task_033_v2/final_report.md` Pass.
 
 ### DONE
 - **TASK-031 (Snapshot Immutability)**: [DONE] L2/L3 Guards implemented & verified. strict mutability rejection (L2 & L3).
@@ -114,7 +118,12 @@
 - Goal: `OllamaLLMProvider`와 `OpenAILLMProvider`를 시스템에 연동하고 End-to-End 질문 생성 및 루브릭 평가 파이프라인 정합성 확보.
 - Scope: `packages/imh_providers/llm`, `packages/imh_providers/question.py`, `SessionService` 트랜잭션. RAG Idempotency 및 Threading 고립 적용.
 - Verification: `python scripts/dev/verify_task_032.py` Pass (EXIT 0 with Threaded Idempotency Proof)
+- **TASK-034 (STT 벤치마크 및 엔진 선정)**: [DONE] 
+  - Faster-Whisper-v3-turbo를 공식 로컬 STT 엔진으로 확정. 
+  - `initial_prompt` 기반 전문 용어(IT Key terms) 인식 최적화 완료.
+  - Verification: `docs/STT_ENGINE_SELECTION_REPORT.md` (EXIT 0)
 - TASK-016 (TTS Provider): 스트리밍 아키텍처 연동 고려로 인해 일시 보류.
+
 
 ---
 
@@ -135,7 +144,8 @@
   - Redis Runtime and Cache Layer 및 통계/관측 계층 구축 완료
   - LLM Provider 통합 및 동기 평가 엔진 연동 완료 (TASK-032)
 - **향후 계획**:
-  - TASK-033 부하 테스트 및 안정성 검증 후 외부 운영 가능 상태로 전환
+  - LLM 메인 엔진(`exaone`) 기반 실제 면접 데이터 축적 및 사용자 피드백 반영
+  - 서브 엔진(`a.x`, `llama`)을 활용한 하이브리드 평가 로직(Cross-Evaluation) 검토
 1.  **상태 표기**: 문서 내의 모든 상태는 DONE, ACTIVE, BACKLOG, HOLD, LOCKED, DISABLED 중 하나를 사용한다.
 2. **이모지 금지**: 어떠한 상황에서도 문서 내에 이모지를 사용하지 않는다.
 3. **PASS 기준**: Verification 결과는 반드시 `scripts/verify_task_xxx.py Pass` 형식으로 명시한다.

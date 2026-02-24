@@ -276,8 +276,9 @@
 
 ### TASK-033 모델 비교 및 평가 취약점 탐지 테스트 파이프라인
 - Goal: 4상황(S1~S4) 자동 생성 및 메인/Fallback LLM 성능 검증, 프롬프트/평가 취약점(Drill-down, 오염, 환각 등) 탐지 파이프라인 구축.
-- Scope: `scripts/test_stress_s1_s4.py` 구현 및 L1~L5 Layer 정량적 리포트 산출.
-- Status: ACTIVE
+- Scope: `scripts/benchmark_task_033_v2.py` 구현 및 On-Prem 모델 벤치마크 수행.
+- Status: DONE
+- Verification: docs/benchmarks/task_033_v2/final_report.md Pass
 
 ---
 
@@ -304,16 +305,20 @@
 - Verification: python scripts/verify_task_031.py Pass
 - Status: DONE
 
---  - **안정화 작업 완료**: 
-    - TASK-030 (Authority First) DONE
-    - TASK-031 (Snapshot Immutable) DONE
-    - TASK-032 (LLM & Evaluation Integration) DONE
-  - PostgreSQL Authority 선행 보장 및 원자성 강화 완료 (TASK-030)
-  - Redis Runtime and Cache Layer 및 통계/관측 계층 구축 완료
-  - LLM Provider 통합 및 동기 평가 엔진 연동 완료 (TASK-032)
-- **향후 계획**:
-  - TASK-033 부하 테스트 및 안정성 검증 후 외부 운영 가능 상태로 전환
-범위 고정 이후
-- Status: HOLD
+---
 
-</content>
+### TASK-034 STT 벤치마크 및 엔진 선정
+- Goal: 실제 사용자 음성 데이터를 기반으로 로컬 STT 엔진(Faster-Whisper vs SenseVoice) 비교 및 최종 확정.
+- Scope: 전문 용어(Foreign Terms) 인식 최적화 및 메트릭 분석.
+- Verification: `docs/STT_ENGINE_SELECTION_REPORT.md` (EXIT 0)
+- Status: DONE
+
+---
+
+
+---
+
+### TASK-032 tag_code 허용 값 제약 및 무결성 강화
+- Purpose: 평가 태그(tag_code)가 정의된 범위를 벗어나지 않도록 DB 및 로직 레벨에서 무결성 강제 (R-2 대응)
+- Scope: `evaluation_scores` 테이블 스키마 및 `RubricEvaluator` 검증 로직
+- Status: BACKLOG

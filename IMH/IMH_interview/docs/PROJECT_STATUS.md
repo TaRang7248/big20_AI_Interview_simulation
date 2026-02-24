@@ -53,12 +53,13 @@
   - **안정화 작업 완료**: 
     - TASK-030 (Authority First) DONE
     - TASK-031 (Snapshot Immutable) DONE
-    - TASK-032 (LLM & Evaluation Integration) DONE
+    - TASK-033 (LLM Benchmark & Selection) DONE
   - PostgreSQL Authority 선행 보장 및 원자성 강화 완료 (TASK-030)
   - Redis Runtime and Cache Layer 및 통계/관측 계층 구축 완료
-  - LLM Provider 통합 및 동기 평가 엔진 연동 완료 (TASK-032)
+  - LLM Provider 통합 및 On-Prem 최적 모델 선정 완료 (TASK-033)
 - **향후 계획**:
-  - TASK-033 부하 테스트 및 안정성 검증 후 외부 운영 가능 상태로 전환
+  - 로컬 메인 엔진(`exaone`) 기반 실제 면접 데이터 축적 및 사용자 피드백 반영.
+  - 서브 엔진(`a.x`, `llama`)을 활용한 하이브리드 평가 로직 도입 검토.
 - **보류 사항**:
   - TASK-016 (TTS Provider): 스트리밍 확장 고려를 위해 HOLD 상태 유지.
 
