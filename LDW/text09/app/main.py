@@ -1,7 +1,9 @@
+import os
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from .config import logger, UPLOAD_FOLDER, AUDIO_FOLDER, TTS_FOLDER
+
+from .config import logger, BASE_DIR, UPLOADS_DIR, DATA_DIR, STATIC_DIR
 from .routers import auth, user, job, interview, admin, video_router
 
 app = FastAPI()
@@ -23,16 +25,15 @@ app.include_router(interview.router)
 app.include_router(admin.router)
 app.include_router(video_router.router)
 
-# Static Files
-# Mount 'uploads' to serve uploaded files (resumes, audio, images)
-# The directory setup is relative to where uvicorn is run (server.py root)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# ---------------------------------------------------------
+# Static Files (절대경로로 마운트)
+#   - 저장되는 uploads 경로와
+#   - /uploads로 서빙되는 경로가
+#     항상 동일하게 유지되도록 함
+# ---------------------------------------------------------
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
+app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
-# Mount 'data' to serve static assets like interviewer face image
-app.mount("/data", StaticFiles(directory="data"), name="data")
-
-# Mount root static files (index.html, styles.css, app.js)
-# We serve index.html as the default for root
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-logger.info("Application initialized with routers and static files.")
+logger.info(f"Application initialized. BASE_DIR={BASE_DIR}")
+logger.info(f"Static mounts: /uploads -> {UPLOADS_DIR}, /data -> {DATA_DIR}, / -> {STATIC_DIR}")
