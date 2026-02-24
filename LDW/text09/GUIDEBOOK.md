@@ -161,7 +161,7 @@ C:\big20\big20_AI_Interview_simulation\LDW\text09\
 ├── docker-compose.yml       # 도커 오케스트레이션
 ├── Dockerfile               # 도커 빌드 설정
 ├── GUIDEBOOK.md             # 프로젝트 가이드북
-├── requirements.txt         # 패키지 의존성 목록 (numpy 1.26.2, pyannote-audio 3.1.1 고정, 2026-02-24 최신화)
+├── requirements.txt         # 패키지 의존성 목록 (numpy==1.26.2, pyannote-audio==3.1.1 고정, 2026-02-24 최신화)
 └── server.py                # 서버 실행 및 브라우저 자동 실행 (한국어 주석 적용)
 ```
 
