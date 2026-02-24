@@ -699,43 +699,71 @@ window.startInterviewSetup = (jobId) => {
 };
 
 
-// Automatic Device Test
+// 자동 환경 테스트: 카메라, 마이크, 오디오(스피커) 연결 확인
 async function testDevices() {
+    // 상태 초기화
     $('#cam-status').className = 'status pending';
     $('#cam-status').textContent = '연결 중...';
     $('#mic-status').className = 'status pending';
     $('#mic-status').textContent = '연결 중...';
+    $('#audio-status').className = 'status pending';
+    $('#audio-status').textContent = '연결 중...';
+
+    // 기기명 초기화
+    $('#cam-device').textContent = '';
+    $('#mic-device').textContent = '';
+    $('#audio-device').textContent = '';
 
     try {
+        // 카메라 및 마이크 권한 요청
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        // Use global user-video if possible, or bind here?
-        // Actually, we bind to #user-video in the Interview Page mostly, 
-        // but for test we assume it's "Ready".
-        // We can't show video in Setup page unless we add a video element there.
-        // Assuming "Background" check is sufficient to enable button.
 
+        // 연결된 기기 목록 가져오기
+        const devices = await navigator.mediaDevices.enumerateDevices();
+
+        let camName = '카메라';
+        let micName = '마이크';
+        let speakerName = '기본 스피커';
+
+        // 실제 기기명 추출 (label이 활성화된 기기 찾기)
+        const videoInput = devices.find(d => d.kind === 'videoinput' && d.deviceId);
+        const audioInput = devices.find(d => d.kind === 'audioinput' && d.deviceId);
+        const audioOutput = devices.find(d => d.kind === 'audiooutput' && d.deviceId);
+
+        if (videoInput && videoInput.label) camName = videoInput.label;
+        if (audioInput && audioInput.label) micName = audioInput.label;
+        if (audioOutput && audioOutput.label) speakerName = audioOutput.label;
+
+        // UI 업데이트: 카메라
         $('#cam-status').className = 'status ok';
         $('#cam-status').textContent = '정상';
+        $('#cam-device').textContent = `(${camName})`;
+
+        // UI 업데이트: 마이크
         $('#mic-status').className = 'status ok';
         $('#mic-status').textContent = '정상';
+        $('#mic-device').textContent = `(${micName})`;
+
+        // UI 업데이트: 오디오
+        $('#audio-status').className = 'status ok';
+        $('#audio-status').textContent = '정상';
+        $('#audio-device').textContent = `(${speakerName})`;
+
+        // 모든 기기 확인 완료 시 버튼 활성화
         $('#btn-start-interview').disabled = false;
 
-        // Stop stream to release for now
-        // stream.getTracks().forEach(track => track.stop()); // Don't stop, keep it open or just release. 
-        // Keeping it open might be better for seamless transition? 
-        // But let's stop and request again in interview. 
-        // Actually, if we stop, permissions might persist. 
+        // 테스트 스트림 종료 (리소르 해제)
         stream.getTracks().forEach(track => track.stop());
-
         AppState.interview.devicesReady = true;
 
     } catch (err) {
-        console.error("Device Error:", err);
+        console.error("[오류] 기기 테스트 실패:", err);
         $('#cam-status').className = 'status error';
         $('#cam-status').textContent = '실패';
         $('#mic-status').className = 'status error';
         $('#mic-status').textContent = '실패';
-        // showToast('카메라/마이크 권한이 필요합니다.', 'error'); // Don't toast immediately on load
+        $('#audio-status').className = 'status error';
+        $('#audio-status').textContent = '실패';
         AppState.interview.devicesReady = false;
     }
 }
