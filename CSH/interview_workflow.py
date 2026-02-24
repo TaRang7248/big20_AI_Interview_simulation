@@ -122,7 +122,10 @@ class WorkflowState(TypedDict, total=False):
 
     # ── 대화 기록 ──
     chat_history: List[Dict]
-    memory_messages: list  # LangChain 메시지 리스트
+
+    # ── RAG 사전 조회 결과 (evaluate 노드에서 병렬 조회 → generate_question에서 사용) ──
+    rag_resume_context: str  # 이력서 RAG 검색 결과 → LLM 프롬프트에 주입
+    rag_qa_context: str  # Q&A 참조 RAG 검색 결과 → LLM 프롬프트에 주입
 
     # ── 감사 / 추적 ──
     trace: List[Dict]  # [{node, timestamp, duration_ms, details}]
@@ -352,8 +355,27 @@ class InterviewNodes:
             except Exception:
                 pass
 
-        # 병렬 실행
-        await asyncio.gather(_run_evaluation(), _run_emotion(), _run_prosody())
+        # ── RAG 사전 조회 (질문 생성 노드에서 사용할 컨텍스트) ──
+        # ⚡ 성능 최적화: 평가/감정과 RAG를 동시에 병렬 실행하여
+        #    RAG 검색 시간(~2초)이 평가 시간(~3초)과 겹치도록 함
+        #    generate_question 시점에는 이미 State에 RAG 결과가 준비되어 LLM 호출만 수행
+        rag_resume_ctx = ""
+        rag_qa_ctx = ""
+
+        async def _fetch_rag():
+            """RAG 컨텍스트 사전 조회 — 질문 생성 노드에서 State로 전달"""
+            nonlocal rag_resume_ctx, rag_qa_ctx
+            try:
+                rag_resume_ctx, rag_qa_ctx = await self._interviewer.fetch_rag_contexts(
+                    session_id, user_input
+                )
+            except Exception as e:
+                print(f"⚠️ [Workflow] RAG 사전 조회 실패 (무시): {e}")
+
+        # 병렬 실행 (평가 + 감정 + Prosody + RAG)
+        await asyncio.gather(
+            _run_evaluation(), _run_emotion(), _run_prosody(), _fetch_rag()
+        )
 
         # ── 감정 기반 적응 모드 결정 (★ 멀티모달 융합: Prosody + DeepFace 동시) ──
         emotion_adaptive_mode = ws.get("emotion_adaptive_mode", "normal")
@@ -441,6 +463,8 @@ class InterviewNodes:
             "last_prosody": prosody_result,
             "prosody_history": prosody_history,
             "pending_eval_task_id": pending_task_id,
+            "rag_resume_context": rag_resume_ctx,
+            "rag_qa_context": rag_qa_ctx,
             "trace": trace,
         }
 
@@ -506,10 +530,18 @@ class InterviewNodes:
         }
 
     # ------------------------------------------------------------------ #
-    #  5. generate_question — LLM 질문 생성                                #
+    #  5. generate_question — LLM 질문 생성 (독립적 상태 변환)              #
     # ------------------------------------------------------------------ #
     async def generate_question(self, ws: WorkflowState) -> Dict:
-        """LLM을 이용해 다음 질문을 생성 (감정 적응 프롬프트 포함)"""
+        """State에서 조립된 데이터로 LLM 질문 생성 (독립적 상태 변환)
+
+        이전 Thin Wrapper 방식과 달리, 각 노드가 담당하는 데이터를 State에서
+        직접 수신하여 build_and_call_llm()에 전달합니다:
+          - RAG 컨텍스트: evaluate 노드에서 사전 조회 → State 경유
+          - 감정 적응: evaluate 노드에서 결정 → State 경유
+          - 꼬리질문 정보: route_next 노드에서 판단 → State 경유
+          - 주제 추적/질문 카운트: 이 노드에서만 1회 업데이트 (중복 제거)
+        """
         t0 = time.perf_counter()
         session_id = ws["session_id"]
         user_input = ws.get("user_input", "")
@@ -518,36 +550,57 @@ class InterviewNodes:
         if not session:
             return {"error_info": "세션 없음", "phase": InterviewPhase.ERROR.value}
 
-        # ── 감정 적응 프롬프트 주입 ──
+        # ── State에서 사전 조회된 컨텍스트 수신 (evaluate 노드에서 준비) ──
+        resume_context = ws.get("rag_resume_context", "")
+        qa_context = ws.get("rag_qa_context", "")
         emotion_mode = ws.get("emotion_adaptive_mode", "normal")
-        if emotion_mode != "normal" and session:
-            # 일시적 프롬프트 보강 → generate_llm_question 내부에서 활용하도록
-            # 세션에 emotion_adaptive_mode 저장
+        needs_follow_up = ws.get("needs_follow_up", False)
+        follow_up_reason = ws.get("follow_up_reason", "")
+        current_topic = ws.get("current_topic", "general")
+        topic_count = ws.get("topic_question_count", 0)
+
+        # ── 감정 적응 모드 세션에 동기화 ──
+        if emotion_mode != "normal":
             self._state_mgr.update_session(
-                session_id,
-                {
-                    "emotion_adaptive_mode": emotion_mode,
-                },
+                session_id, {"emotion_adaptive_mode": emotion_mode}
             )
 
-        # ── LLM 질문 생성 (기존 AIInterviewer 로직 활용) ──
-        # NOTE: generate_llm_question() 내부에서 strip_think_tokens() + 빈 응답 재시도 +
-        #       RuntimeError raise를 모두 처리하므로, 여기서는 중복 호출하지 않음
-        question = await self._interviewer.generate_llm_question(session_id, user_input)
+        # ── LLM 질문 생성 (build_and_call_llm: 순수 프롬프트 조립 + LLM 호출) ──
+        # 판단 로직(should_follow_up, RAG, topic_tracking)은 이미 각 노드에서 처리됨
+        question = await self._interviewer.build_and_call_llm(
+            session_id,
+            user_input,
+            resume_context=resume_context,
+            qa_context=qa_context,
+            needs_follow_up=needs_follow_up,
+            follow_up_reason=follow_up_reason,
+            current_topic=current_topic,
+            topic_count=topic_count,
+            emotion_mode=emotion_mode,
+        )
 
-        # 대화 기록 업데이트
+        # ── 대화 기록 업데이트 ──
         session = self._state_mgr.get_session(session_id)
         chat_history = session.get("chat_history", [])
         chat_history.append({"role": "assistant", "content": question})
-        new_q_count = session.get("question_count", 1)
-        self._state_mgr.update_session(session_id, {"chat_history": chat_history})
 
-        # 주제 추적 업데이트
+        # ── 주제 추적 업데이트 (이 노드에서만 1회 호출 — 중복 제거) ──
         if user_input and user_input not in ("[START]", "[NEXT]"):
             is_follow_up = ws.get("follow_up_mode", False)
             self._interviewer.update_topic_tracking(
                 session_id, user_input, is_follow_up
             )
+
+        # ── 질문 카운트 증가 (이 노드에서만 1회 처리 — 중복 제거) ──
+        question_count = session.get("question_count", 1)
+        new_q_count = question_count + 1
+        self._state_mgr.update_session(
+            session_id,
+            {
+                "chat_history": chat_history,
+                "question_count": new_q_count,
+            },
+        )
 
         session = self._state_mgr.get_session(session_id)
 
@@ -556,7 +609,9 @@ class InterviewNodes:
         trace.append(
             _trace_entry(
                 "generate_question",
-                f"질문 길이={len(question)}자, emotion_mode={emotion_mode}, q_count={new_q_count}",
+                f"질문 길이={len(question)}자, emotion_mode={emotion_mode}, "
+                f"q_count={new_q_count}, rag_resume={bool(resume_context)}, "
+                f"rag_qa={bool(qa_context)}",
                 elapsed,
             )
         )
@@ -571,30 +626,62 @@ class InterviewNodes:
         }
 
     # ------------------------------------------------------------------ #
-    #  6. follow_up — 꼬리질문 생성                                         #
+    #  6. follow_up — 꼬리질문 생성 (독립적 상태 변환)                       #
     # ------------------------------------------------------------------ #
     async def follow_up(self, ws: WorkflowState) -> Dict:
-        """꼬리질문 전용 노드 — generate_question과 같지만 추적이 별도"""
+        """꼬리질문 전용 노드 — State에서 조립된 데이터로 LLM 호출
+
+        generate_question과 동일하게 build_and_call_llm()을 사용하되,
+        needs_follow_up=True를 강제 전달하여 꼬리질문 프롬프트를 활성화합니다.
+        주제 추적 시 is_follow_up=True로 기록하여 추적 통계에 반영합니다.
+        """
         t0 = time.perf_counter()
         session_id = ws["session_id"]
         user_input = ws.get("user_input", "")
 
+        # ── State에서 사전 조회된 컨텍스트 수신 ──
+        resume_context = ws.get("rag_resume_context", "")
+        qa_context = ws.get("rag_qa_context", "")
+        emotion_mode = ws.get("emotion_adaptive_mode", "normal")
+        follow_up_reason = ws.get("follow_up_reason", "")
+        current_topic = ws.get("current_topic", "general")
+        topic_count = ws.get("topic_question_count", 0)
+
         # follow_up_mode 세팅
         self._state_mgr.update_session(session_id, {"follow_up_mode": True})
 
-        # LLM 질문 생성 (내부적으로 should_follow_up 정보 활용)
-        # NOTE: generate_llm_question() 내부에서 strip_think_tokens() + 빈 응답 재시도 +
-        #       RuntimeError raise를 모두 처리하므로, 여기서는 중복 호출하지 않음
-        question = await self._interviewer.generate_llm_question(session_id, user_input)
+        # ── LLM 질문 생성 (꼬리질문 모드: needs_follow_up=True 강제) ──
+        question = await self._interviewer.build_and_call_llm(
+            session_id,
+            user_input,
+            resume_context=resume_context,
+            qa_context=qa_context,
+            needs_follow_up=True,
+            follow_up_reason=follow_up_reason,
+            current_topic=current_topic,
+            topic_count=topic_count,
+            emotion_mode=emotion_mode,
+        )
 
+        # ── 대화 기록 + 주제 추적 + 질문 카운트 ──
         session = self._state_mgr.get_session(session_id)
         chat_history = session.get("chat_history", [])
         chat_history.append({"role": "assistant", "content": question})
-        new_q_count = session.get("question_count", 1)
-        self._state_mgr.update_session(session_id, {"chat_history": chat_history})
 
-        # 주제 추적
+        # 주제 추적 (꼬리질문: is_follow_up=True)
         self._interviewer.update_topic_tracking(session_id, user_input, True)
+
+        # 질문 카운트 증가
+        question_count = session.get("question_count", 1)
+        new_q_count = question_count + 1
+        self._state_mgr.update_session(
+            session_id,
+            {
+                "chat_history": chat_history,
+                "question_count": new_q_count,
+            },
+        )
+
         session = self._state_mgr.get_session(session_id)
 
         elapsed = (time.perf_counter() - t0) * 1000
@@ -602,7 +689,8 @@ class InterviewNodes:
         trace.append(
             _trace_entry(
                 "follow_up",
-                f"꼬리질문 생성, 길이={len(question)}자, reason={ws.get('follow_up_reason', '')}",
+                f"꼬리질문 생성, 길이={len(question)}자, reason={follow_up_reason}, "
+                f"rag_resume={bool(resume_context)}, rag_qa={bool(qa_context)}",
                 elapsed,
             )
         )
@@ -921,7 +1009,8 @@ class InterviewWorkflow:
             "emotion_history": [],
             "emotion_adaptive_mode": emotion_adaptive_mode,
             "chat_history": session.get("chat_history", []) if session else [],
-            "memory_messages": [],
+            "rag_resume_context": "",  # evaluate 노드에서 RAG 병렬 조회 후 저장
+            "rag_qa_context": "",  # evaluate 노드에서 RAG 병렬 조회 후 저장
             "trace": [],
             "error_info": None,
             "use_rag": use_rag,

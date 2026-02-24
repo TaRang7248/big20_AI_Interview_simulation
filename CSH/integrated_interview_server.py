@@ -1661,6 +1661,228 @@ class AIInterviewer:
                 messages.append(HumanMessage(content=content))
         return messages
 
+    async def fetch_rag_contexts(self, session_id: str, user_answer: str) -> tuple:
+        """RAG 컨텍스트 병렬 조회 (이력서 + Q&A) — 워크플로우 노드에서 사전 호출용
+
+        evaluate 노드에서 평가/감정 분석과 동시에 asyncio.gather로 병렬 실행됩니다.
+        조회 결과는 WorkflowState에 저장되어, generate_question/follow_up 노드에서
+        LLM 프롬프트 조립 시 바로 사용됩니다.
+        이를 통해 RAG 검색 시간(~2초)이 평가 시간과 겹쳐 전체 응답 시간이 단축됩니다.
+
+        Returns:
+            tuple: (resume_context: str, qa_reference_context: str)
+        """
+        session = state.get_session(session_id)
+        if not session:
+            return "", ""
+
+        session_retriever = session.get("retriever") or self.retriever
+
+        async def _fetch_resume_rag():
+            """이력서 RAG 검색 (타임아웃 10초)"""
+            if not (session_retriever and user_answer):
+                return ""
+            try:
+                docs = await asyncio.wait_for(
+                    run_rag_async(session_retriever, user_answer),
+                    timeout=10,
+                )
+                if docs:
+                    print(f"📚 [RAG] {len(docs)}개 문서에서 컨텍스트 추출 (비동기)")
+                    return "\n".join([d.page_content for d in docs[:3]])
+            except asyncio.TimeoutError:
+                print("⏰ [RAG] 이력서 검색 타임아웃 (10초) — 컨텍스트 없이 진행")
+            except Exception as e:
+                print(f"⚠️ RAG 검색 오류: {e}")
+            return ""
+
+        async def _fetch_qa_rag():
+            """Q&A 참조 RAG 검색 (타임아웃 10초)"""
+            if not (RAG_AVAILABLE and user_answer and getattr(self, "qa_rag", None)):
+                return ""
+            try:
+                qa_docs = await asyncio.wait_for(
+                    run_in_executor(
+                        RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2
+                    ),
+                    timeout=10,
+                )
+                if qa_docs:
+                    print(f"📖 [Q&A RAG] {len(qa_docs)}개 참조 문서에서 모범 답변 추출")
+                    return "\n".join([d.page_content for d in qa_docs[:2]])
+            except asyncio.TimeoutError:
+                print("⏰ [Q&A RAG] 참조 검색 타임아웃 (10초) — 참조 없이 진행")
+            except Exception as e:
+                print(f"⚠️ Q&A 참조 데이터 검색 오류 (무시): {e}")
+            return ""
+
+        # 두 RAG를 동시에 실행 — GPU/DB 부하 분산 및 대기 시간 최소화
+        resume_context, qa_reference_context = await asyncio.gather(
+            _fetch_resume_rag(), _fetch_qa_rag()
+        )
+        return resume_context, qa_reference_context
+
+    async def build_and_call_llm(
+        self,
+        session_id: str,
+        user_answer: str,
+        *,
+        resume_context: str = "",
+        qa_context: str = "",
+        needs_follow_up: bool = False,
+        follow_up_reason: str = "",
+        current_topic: str = "general",
+        topic_count: int = 0,
+        emotion_mode: str = "normal",
+    ) -> str:
+        """순수 프롬프트 조립 + LLM 호출만 수행 (워크플로우 노드용)
+
+        판단 로직(should_follow_up, RAG 검색, topic_tracking, question_count 증가)은
+        워크플로우의 각 노드(evaluate, route_next, generate_question)에서 독립적으로
+        처리하고, 이 메서드는 조립된 데이터만 받아 다음을 수행합니다:
+          1) 시스템 프롬프트 + 채용 공고 + 감정 적응 + 대화 기록 + RAG 컨텍스트 조립
+          2) 질문 생성 프롬프트 빌드
+          3) LLM 호출 + strip_think_tokens + 빈 응답 재시도
+
+        기존 generate_llm_question()은 워크플로우 미사용 시 fallback으로 유지됩니다.
+
+        Args:
+            session_id: 면접 세션 ID
+            user_answer: 사용자 답변 (빈 문자열이면 첫 질문)
+            resume_context: evaluate 노드에서 사전 조회한 이력서 RAG 결과
+            qa_context: evaluate 노드에서 사전 조회한 Q&A RAG 결과
+            needs_follow_up: route_next 노드에서 판단한 꼬리질문 필요 여부
+            follow_up_reason: 꼬리질문 사유
+            current_topic: 현재 질문 주제
+            topic_count: 해당 주제 내 질문 수
+            emotion_mode: 감정 적응 모드 (normal / encouraging / challenging)
+
+        Returns:
+            str: 생성된 면접 질문 텍스트
+        """
+        session = state.get_session(session_id)
+        if not session:
+            return self.get_initial_greeting()
+
+        question_count = session.get("question_count", 1)
+
+        if not self.question_llm:
+            raise RuntimeError(
+                "LLM 서비스가 초기화되지 않았습니다. Ollama 실행 상태를 확인하세요."
+            )
+
+        # ========== 1. 시스템 프롬프트 ==========
+        chat_history = session.get("chat_history", [])
+        messages = [SystemMessage(content=self.INTERVIEWER_PROMPT)]
+
+        # ========== 2. 채용 공고 컨텍스트 (있을 때만) ==========
+        job_posting = session.get("job_posting")
+        if job_posting:
+            jp_context = (
+                f"\n--- [채용 공고 정보] 이 면접의 대상 공고 ---\n"
+                f"회사명: {job_posting.get('company', 'N/A')}\n"
+                f"공고 제목: {job_posting.get('title', 'N/A')}\n"
+                f"근무지: {job_posting.get('location', 'N/A')}\n"
+                f"직무 분야: {job_posting.get('job_category', 'N/A')}\n"
+                f"경력 수준: {job_posting.get('experience_level', 'N/A')}\n"
+                f"급여: {job_posting.get('salary_info', 'N/A')}\n"
+                f"\n[공고 상세 내용]\n{job_posting.get('description', '')}\n"
+                f"------------------------------------------\n"
+                f"☝️ 위 채용 공고의 요구사항, 자격요건, 우대사항, 직무 설명을 활용하여 "
+                f"맞춤형 면접 질문을 생성하세요.\n"
+                f"예시: 공고에서 요구하는 기술 스택 경험, 해당 직무의 실무 시나리오, "
+                f"자격 요건 충족 여부 등을 질문하세요."
+            )
+            messages.append(SystemMessage(content=jp_context))
+
+        # ========== 3. 감정 적응 프롬프트 (evaluate 노드에서 결정된 모드) ==========
+        # 사용자의 감정 상태에 따라 LLM의 질문 톤과 난이도를 동적으로 조절
+        if emotion_mode == "encouraging":
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "⚠️ [감정 적응 시스템] 지원자가 불안하거나 긴장한 상태입니다.\n"
+                        "부드럽고 격려하는 톤으로 질문하세요. 압박 질문은 자제하고,\n"
+                        "지원자가 편안하게 답변할 수 있도록 도와주세요."
+                    )
+                )
+            )
+        elif emotion_mode == "challenging":
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "💪 [감정 적응 시스템] 지원자가 자신감 있고 활발한 상태입니다.\n"
+                        "조금 더 도전적이고 심층적인 질문을 해보세요.\n"
+                        "구체적인 기술적 디테일이나 난이도 높은 시나리오를 제시해도 좋습니다."
+                    )
+                )
+            )
+
+        # ========== 4. chat_history → LangChain Message 변환 (최근 3턴) ==========
+        MAX_HISTORY_MESSAGES = 6
+        history_messages = self.chat_history_to_messages(
+            chat_history, max_messages=MAX_HISTORY_MESSAGES
+        )
+        messages.extend(history_messages)
+
+        # ========== 5. RAG 컨텍스트 (evaluate 노드에서 사전 조회한 결과) ==========
+        if resume_context:
+            context_msg = (
+                f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n"
+                f"{resume_context}\n"
+                f"------------------------------------------"
+            )
+            messages.append(SystemMessage(content=context_msg))
+
+        if qa_context:
+            qa_msg = (
+                f"\n--- [RAG System] 면접 참고 자료 (모범 답변 DB) ---\n"
+                f"{qa_context}\n"
+                f"이 참고 자료를 바탕으로 지원자의 답변 수준을 판단하고, "
+                f"더 깊은 꼬리질문을 만들어주세요.\n"
+                f"------------------------------------------"
+            )
+            messages.append(SystemMessage(content=qa_msg))
+
+        # ========== 6. 질문 생성 프롬프트 (꼬리질문 정보 포함) ==========
+        follow_up_instruction = ""
+        if needs_follow_up and topic_count < 2:
+            follow_up_instruction = (
+                f"\n⚠️ 지원자의 답변이 부실합니다. ({follow_up_reason})\n"
+                f"꼬리질문을 해주세요. 현재 주제({current_topic})에서 "
+                f"{topic_count}번째 질문입니다.\n"
+                f"더 구체적인 예시, 수치, 결과를 요청하세요."
+            )
+        elif topic_count >= 2:
+            follow_up_instruction = (
+                "\n✅ 이 주제에서 충분히 질문했습니다.\n"
+                '"알겠습니다. 다음은..." 이라며 새로운 주제로 전환하세요.'
+            )
+
+        question_prompt = build_question_prompt(
+            question_count=question_count,
+            max_questions=self.MAX_QUESTIONS,
+            current_topic=current_topic,
+            topic_count=topic_count,
+            follow_up_instruction=follow_up_instruction,
+        )
+        messages.append(HumanMessage(content=question_prompt))
+
+        # ========== 7. LLM 호출 + strip_think_tokens + 빈 응답 재시도 ==========
+        response = await run_llm_async(self.question_llm, messages)
+        next_question = strip_think_tokens(response.content)
+
+        if not next_question:
+            print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
+            retry_response = await run_llm_async(self.question_llm, messages)
+            next_question = strip_think_tokens(retry_response.content)
+            if not next_question:
+                raise RuntimeError(
+                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+                )
+
+        return next_question
+
     def detect_topic_from_answer(self, answer: str) -> str:
         """답변에서 주제를 추출 (간단한 키워드 기반)"""
         topic_keywords = {
