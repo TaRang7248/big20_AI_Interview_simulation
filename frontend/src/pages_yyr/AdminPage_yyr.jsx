@@ -99,7 +99,7 @@ export default function AdminPage_yyr() {
 
                     <div className="flex items-center gap-2">
                         <button
-                            onClick={() => nav("/interview")}
+                            onClick={() => alert("TODO: 관리자 화면에서는 면접 화면으로 이동하지 않음")}
                             className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-bold"
                         >
                             면접 화면으로
