@@ -333,13 +333,52 @@ async def run_llm_async(llm, messages):
 
 
 async def run_rag_async(retriever, query):
-    """RAG retriever invoke를 비동기로 실행 (nomic-embed-text 최적화: search_query 접두사 적용)"""
+    """RAG retriever invoke를 비동기로 실행 (★ Redis 캐싱 + nomic-embed-text 최적화)
+
+    1) Redis 캐시 확인 → 히트 시 Ollama 임베딩 호출 생략 (GPU 부하 감소)
+    2) 캐시 미스 → retriever.invoke() 실행 후 결과를 Redis에 캐싱
+    3) nomic-embed-text 최적화: search_query 접두사 적용
+    """
+    import hashlib
+    import pickle
+
+    # ── 1. Redis 캐시 확인 ──
+    cache_key = None
+    try:
+        r = get_redis() if REDIS_AVAILABLE else None
+        if r:
+            query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+            cache_key = f"rag_cache:retriever:{query_hash}"
+            cached = r.get(cache_key)
+            if cached:
+                docs = pickle.loads(cached)
+                print(
+                    f"🟢 [RAG Cache] retriever 캐시 히트 — Ollama 임베딩 생략 ({len(docs)}개 문서)"
+                )
+                return docs
+    except Exception as e:
+        print(f"⚠️ [RAG Cache] 캐시 읽기 실패 (무시): {e}")
+
+    # ── 2. 캐시 미스 → Ollama 임베딩 + pgvector 검색 ──
     prefixed_query = f"search_query: {query}"
     docs = await run_in_executor(RAG_EXECUTOR, retriever.invoke, prefixed_query)
     # search_document: 접두사 제거
     for doc in docs:
         if doc.page_content.startswith("search_document: "):
             doc.page_content = doc.page_content[len("search_document: ") :]
+
+    # ── 3. 결과를 Redis에 캐싱 (TTL: 30분) ──
+    if docs and cache_key:
+        try:
+            r = get_redis() if REDIS_AVAILABLE else None
+            if r:
+                r.setex(cache_key, 1800, pickle.dumps(docs))
+                print(
+                    f"🟡 [RAG Cache] retriever 캐시 저장 ({len(docs)}개 문서, TTL=1800초)"
+                )
+        except Exception as e:
+            print(f"⚠️ [RAG Cache] 캐시 쓰기 실패 (무시): {e}")
+
     return docs
 
 
@@ -1754,25 +1793,25 @@ class AIInterviewer:
         session_retriever = session.get("retriever") or self.retriever
 
         async def _fetch_resume_rag():
-            """이력서 RAG 검색 (타임아웃 10초)"""
+            """이력서 RAG 검색 (타임아웃 20초)"""
             if not (session_retriever and user_answer):
                 return ""
             try:
                 docs = await asyncio.wait_for(
                     run_rag_async(session_retriever, user_answer),
-                    timeout=10,
+                    timeout=20,
                 )
                 if docs:
                     print(f"📚 [RAG] {len(docs)}개 문서에서 컨텍스트 추출 (비동기)")
                     return "\n".join([d.page_content for d in docs[:3]])
             except asyncio.TimeoutError:
-                print("⏰ [RAG] 이력서 검색 타임아웃 (10초) — 컨텍스트 없이 진행")
+                print("⏰ [RAG] 이력서 검색 타임아웃 (20초) — 컨텍스트 없이 진행")
             except Exception as e:
                 print(f"⚠️ RAG 검색 오류: {e}")
             return ""
 
         async def _fetch_qa_rag():
-            """Q&A 참조 RAG 검색 (타임아웃 10초)"""
+            """Q&A 참조 RAG 검색 (타임아웃 20초)"""
             if not (RAG_AVAILABLE and user_answer and getattr(self, "qa_rag", None)):
                 return ""
             try:
@@ -1780,13 +1819,13 @@ class AIInterviewer:
                     run_in_executor(
                         RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2
                     ),
-                    timeout=10,
+                    timeout=20,
                 )
                 if qa_docs:
                     print(f"📖 [Q&A RAG] {len(qa_docs)}개 참조 문서에서 모범 답변 추출")
                     return "\n".join([d.page_content for d in qa_docs[:2]])
             except asyncio.TimeoutError:
-                print("⏰ [Q&A RAG] 참조 검색 타임아웃 (10초) — 참조 없이 진행")
+                print("⏰ [Q&A RAG] 참조 검색 타임아웃 (20초) — 참조 없이 진행")
             except Exception as e:
                 print(f"⚠️ Q&A 참조 데이터 검색 오류 (무시): {e}")
             return ""
@@ -2141,32 +2180,32 @@ class AIInterviewer:
             )
 
             # ========== 3. RAG 컨텍스트 병렬 조회 (이력서 + Q&A) ==========
-            # ⚡ 성능 최적화: 두 RAG 검색을 asyncio.gather로 병렬 실행
-            #    순차 실행 대비 대기 시간 ~50% 감소, 각 RAG에 10초 타임아웃 설정
+            # ⚡ GPU 경합 방지: RAG 임베딩(Ollama)을 LLM 호출(step 7) 전에 먼저 완료
+            #    두 RAG 간 병렬 실행은 유지 (동일 임베딩 모델 사용), 각 RAG에 20초 타임아웃
             resume_context = ""
             qa_reference_context = ""
             session_retriever = session.get("retriever") or self.retriever
 
             async def _fetch_resume_rag():
-                """이력서 RAG 검색 (타임아웃 10초)"""
+                """이력서 RAG 검색 (타임아웃 20초)"""
                 if not (session_retriever and user_answer):
                     return ""
                 try:
                     docs = await asyncio.wait_for(
                         run_rag_async(session_retriever, user_answer),
-                        timeout=10,
+                        timeout=20,
                     )
                     if docs:
                         print(f"📚 [RAG] {len(docs)}개 문서에서 컨텍스트 추출 (비동기)")
                         return "\n".join([d.page_content for d in docs[:3]])
                 except asyncio.TimeoutError:
-                    print("⏰ [RAG] 이력서 검색 타임아웃 (10초) — 컨텍스트 없이 진행")
+                    print("⏰ [RAG] 이력서 검색 타임아웃 (20초) — 컨텍스트 없이 진행")
                 except Exception as e:
                     print(f"⚠️ RAG 검색 오류: {e}")
                 return ""
 
             async def _fetch_qa_rag():
-                """Q&A 참조 RAG 검색 (타임아웃 10초)"""
+                """Q&A 참조 RAG 검색 (타임아웃 20초)"""
                 if not (
                     RAG_AVAILABLE and user_answer and getattr(self, "qa_rag", None)
                 ):
@@ -2176,7 +2215,7 @@ class AIInterviewer:
                         run_in_executor(
                             RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2
                         ),
-                        timeout=10,
+                        timeout=20,
                     )
                     if qa_docs:
                         print(
@@ -2184,12 +2223,14 @@ class AIInterviewer:
                         )
                         return "\n".join([d.page_content for d in qa_docs[:2]])
                 except asyncio.TimeoutError:
-                    print("⏰ [Q&A RAG] 참조 검색 타임아웃 (10초) — 참조 없이 진행")
+                    print("⏰ [Q&A RAG] 참조 검색 타임아웃 (20초) — 참조 없이 진행")
                 except Exception as e:
                     print(f"⚠️ Q&A 참조 데이터 검색 오류 (무시): {e}")
                 return ""
 
-            # 두 RAG를 동시에 실행 — GPU/DB 부하 분산 및 대기 시간 최소화
+            # ⚡ RAG를 LLM 호출 전에 실행 — GPU 경합 방지
+            # 이력서 RAG + Q&A RAG는 둘 다 임베딩(Ollama)을 사용하므로 동시에 실행해도
+            # Ollama 내부에서 순차 처리됨. 두 RAG 간에는 GPU 경합이 미미하므로 병렬 유지.
             resume_context, qa_reference_context = await asyncio.gather(
                 _fetch_resume_rag(), _fetch_qa_rag()
             )
