@@ -87,6 +87,14 @@ function InterviewPageInner() {
   const interventionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pushEventRef = useRef<((raw: Record<string, unknown>) => void) | null>(null);
 
+  // ── VAD (Voice Activity Detection) 실시간 음성 감지 관련 Ref ──
+  // Web Audio API의 AnalyserNode로 마이크 음량(RMS)을 실시간 분석하여
+  // 음성 여부를 판단하고, 서버에 VAD 신호를 주기적으로 전송합니다.
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const vadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const vadSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+
   // WebSocket 재연결 시도 횟수 — connectWebSocket 재귀 호출 시에도 누적되어
   // 무한 재연결 루프를 방지 (이전: 매 호출마다 0으로 초기화되는 지역 변수 사용)
   const wsReconnectAttemptsRef = useRef(0);
@@ -162,7 +170,7 @@ function InterviewPageInner() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [interviewStarted]);
 
-  // 클린업 (카메라, WebSocket, 음성인식)
+  // 클린업 (카메라, WebSocket, 음성인식, VAD)
   useEffect(() => {
     return () => {
       setActiveSession(false); // 페이지 이탈 시 Auth 유휴 타임아웃 복원
@@ -170,9 +178,125 @@ function InterviewPageInner() {
       wsRef.current?.close();
       recognitionRef.current?.stop();
       if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
+      stopVAD(); // VAD 리소스 정리
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setActiveSession]);
+
+  // ========== VAD 실시간 음성 감지 (Web Audio API) ==========
+  /**
+   * 마이크 스트림에서 Web Audio API의 AnalyserNode를 사용하여
+   * 실시간 음량(RMS)을 분석하고, 음성 여부를 판단합니다.
+   *
+   * 동작 방식:
+   *  1. MediaStream → AudioContext → AnalyserNode 연결
+   *  2. 500ms 간격으로 주파수 데이터를 읽어 RMS(Root Mean Square) 계산
+   *  3. RMS가 임계값(0.015) 이상이면 음성(is_speech=true)으로 판단
+   *  4. 결과를 interventionApi.vadSignal()로 서버에 전송
+   *  5. 서버의 InterventionManager가 침묵/발화 상태를 추적
+   *
+   * @param stream - getUserMedia()로 얻은 마이크 포함 MediaStream
+   */
+  const startVAD = (stream: MediaStream) => {
+    try {
+      // 이전 VAD가 실행 중이면 먼저 정리
+      stopVAD();
+
+      // AudioContext 생성 — 브라우저의 오디오 처리 엔진
+      const audioCtx = new AudioContext();
+      audioContextRef.current = audioCtx;
+
+      // MediaStream을 AudioContext의 입력 소스로 연결
+      const source = audioCtx.createMediaStreamSource(stream);
+      vadSourceRef.current = source;
+
+      // AnalyserNode — FFT(Fast Fourier Transform)로 주파수 데이터를 분석
+      // fftSize: 2048 → 주파수 해상도 1024개 빈(bin)
+      // smoothingTimeConstant: 0.3 → 이전 프레임 대비 30% 스무딩 (노이즈 완화)
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.3;
+      analyserRef.current = analyser;
+
+      // 소스 → 분석기 연결 (출력은 연결하지 않아 스피커로 소리가 나지 않음)
+      source.connect(analyser);
+
+      // 주파수 데이터를 저장할 버퍼 (0~255 범위의 바이트 값)
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+      // RMS 임계값 — 이 값 이상이면 음성으로 판단
+      // 0.015는 일반적인 배경 소음과 발화를 구분하는 실용적 기준값
+      // (너무 낮으면 키보드/에어컨 소음에 반응, 너무 높으면 조용한 목소리 감지 실패)
+      const SPEECH_THRESHOLD = 0.015;
+
+      // 500ms 간격으로 음량 분석 + 서버 전송
+      // 500ms는 실시간성과 네트워크 부하의 균형점
+      // (100ms → 너무 빈번한 API 호출, 1000ms → 침묵 감지 지연)
+      vadIntervalRef.current = setInterval(() => {
+        // AudioContext가 suspended 상태일 수 있음 (브라우저 정책)
+        if (audioCtx.state === "suspended") {
+          audioCtx.resume().catch(() => { });
+          return;
+        }
+
+        // 현재 프레임의 시간 도메인 데이터(파형) 읽기
+        analyser.getByteTimeDomainData(dataArray);
+
+        // RMS (Root Mean Square) 계산 — 파형의 실효값으로 음량 측정
+        // 바이트 값(0~255)을 -1.0~1.0 범위로 정규화한 후 제곱 평균의 제곱근 계산
+        let sumSquares = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          const normalized = (dataArray[i] - 128) / 128; // 128 = 무음 중심값
+          sumSquares += normalized * normalized;
+        }
+        const rms = Math.sqrt(sumSquares / dataArray.length);
+
+        // 음성 여부 판단
+        const isSpeech = rms > SPEECH_THRESHOLD;
+
+        // 서버에 VAD 신호 전송 (면접 진행 중일 때만)
+        const sid = sessionIdRef.current;
+        if (sid && interviewStartedRef.current) {
+          interventionApi.vadSignal(sid, isSpeech, rms).catch(() => {
+            // 네트워크 오류 시 무시 — VAD 신호 누락은 치명적이지 않음
+          });
+        }
+      }, 500);
+
+      console.log("🎙️ [VAD] 실시간 음성 감지 시작 (Web Audio API)");
+    } catch (err) {
+      // Web Audio API 미지원 또는 초기화 실패 시
+      // VAD 없이도 면접은 정상 진행 가능 (Graceful Degradation)
+      console.warn("[VAD] 초기화 실패 (면접은 계속 진행):", err);
+    }
+  };
+
+  /**
+   * VAD 리소스 정리 — 페이지 이탈, 면접 종료, 마이크 비활성화 시 호출
+   * AudioContext, AnalyserNode, 주기적 타이머를 모두 해제합니다.
+   */
+  const stopVAD = () => {
+    // 주기적 분석 타이머 해제
+    if (vadIntervalRef.current) {
+      clearInterval(vadIntervalRef.current);
+      vadIntervalRef.current = null;
+    }
+    // AudioContext 소스 연결 해제
+    if (vadSourceRef.current) {
+      try { vadSourceRef.current.disconnect(); } catch { /* ignore */ }
+      vadSourceRef.current = null;
+    }
+    // AnalyserNode 정리
+    if (analyserRef.current) {
+      try { analyserRef.current.disconnect(); } catch { /* ignore */ }
+      analyserRef.current = null;
+    }
+    // AudioContext 종료 — GPU/CPU 리소스 해제
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => { });
+      audioContextRef.current = null;
+    }
+  };
 
   // ========== 면접 시작 ==========
   const startInterview = async () => {
@@ -308,6 +432,13 @@ function InterviewPageInner() {
       setInterviewStarted(true);
       setActiveSession(true); // 면접 시작 → Auth 유휴 타임아웃 비활성화
       setSessionId(sid);
+
+      // ── VAD 실시간 음성 감지 시작 ──
+      // 마이크 스트림이 있으면 Web Audio API로 음량을 분석하여
+      // 서버에 실시간 VAD 신호(음성/침묵 여부)를 전송합니다.
+      if (streamRef.current) {
+        startVAD(streamRef.current);
+      }
 
       // [START] 요청: 첫 인사말 가져오기
       // 만약 API 실패 시에도 기본 인사말을 표시하여 사용자가 빈 화면을 보지 않도록 함
@@ -599,6 +730,7 @@ function InterviewPageInner() {
     setActiveSession(false); // 면접 종료 → Auth 유휴 타임아웃 재활성화
     recognitionRef.current?.stop();
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
+    stopVAD(); // VAD 리소스 정리
 
     setPhase("coding");
   };
@@ -606,7 +738,18 @@ function InterviewPageInner() {
   // ========== 마이크/카메라 토글 ==========
   const toggleMic = () => {
     const track = streamRef.current?.getAudioTracks()[0];
-    if (track) { track.enabled = !track.enabled; setMicEnabled(track.enabled); }
+    if (track) {
+      track.enabled = !track.enabled;
+      setMicEnabled(track.enabled);
+      // 마이크 비활성화 시 VAD도 일시 중지, 활성화 시 재시작
+      // → 마이크가 꺼진 상태에서 무음 신호를 계속 보내면
+      //   서버가 "침묵 감지" 개입을 잘못 발동할 수 있으므로 VAD를 중지합니다.
+      if (track.enabled && streamRef.current) {
+        startVAD(streamRef.current);
+      } else {
+        stopVAD();
+      }
+    }
   };
   const toggleCam = () => {
     const track = streamRef.current?.getVideoTracks()[0];
