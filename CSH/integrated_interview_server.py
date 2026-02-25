@@ -1294,6 +1294,7 @@ class InterviewInterventionManager:
             "silence_duration_ms": 0,
             "intervention_count": 0,
             "soft_warning_given": False,
+            "silence_intervention_given": False,  # 침묵 개입 중복 방지 플래그
             "current_question_keywords": [],
             "vad_buffer": [],  # VAD 신호 버퍼
             "turn_state": "ai_speaking",  # ai_speaking, user_speaking, silence
@@ -1313,6 +1314,9 @@ class InterviewInterventionManager:
         state["last_speech_time"] = datetime.now()
         state["silence_duration_ms"] = 0
         state["soft_warning_given"] = False
+        state["silence_intervention_given"] = (
+            False  # 새 턴 시작 시 침묵 개입 플래그 리셋
+        )
         state["turn_state"] = "user_speaking"
 
         if question_keywords:
@@ -1348,6 +1352,9 @@ class InterviewInterventionManager:
             state["last_speech_time"] = current_time
             state["silence_duration_ms"] = 0
             state["turn_state"] = "user_speaking"
+            # 사용자가 다시 말하기 시작하면 침묵 개입 플래그 리셋
+            # → 다음 침묵 구간에서 새로운 개입 1회 가능
+            state["silence_intervention_given"] = False
         else:
             # 침묵 시간 계산
             if state["last_speech_time"]:
@@ -1453,10 +1460,16 @@ class InterviewInterventionManager:
                     "priority": "medium",
                 }
 
-        # 6. 장시간 침묵 감지
+        # 6. 장시간 침묵 감지 — 동일 침묵 구간에서 1회만 개입
+        # silence_intervention_given 플래그로 중복 방지:
+        #   - False → 첫 침묵 5초 초과 시 개입 메시지 1회 전송 후 True로 설정
+        #   - True → 사용자가 다시 발화할 때까지 추가 침묵 개입 차단
+        #   - update_vad_signal()에서 is_speech=True 수신 시 False로 리셋
         if (
-            intervention is None and state["silence_duration_ms"] > 5000
-        ):  # 5초 이상 침묵
+            intervention is None
+            and state["silence_duration_ms"] > 5000
+            and not state.get("silence_intervention_given", False)
+        ):  # 5초 이상 침묵 & 아직 개입하지 않은 경우
             intervention = {
                 "type": "silence_detected",
                 "reason": f"침묵 감지 ({state['silence_duration_ms'] / 1000:.1f}초)",
@@ -1464,6 +1477,8 @@ class InterviewInterventionManager:
                 "action": "encourage",
                 "priority": "low",
             }
+            # 동일 침묵 구간 내 반복 개입 차단
+            state["silence_intervention_given"] = True
 
         if intervention:
             state["intervention_count"] += 1

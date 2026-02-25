@@ -683,6 +683,8 @@ function InterviewPageInner() {
   };
 
   // ========== 개입 체크 ==========
+  // 백엔드의 silence_intervention_given 플래그가 중복 침묵 개입을 차단하므로,
+  // 프론트엔드는 개입 체크 타이머를 유지하여 턴 모니터링을 계속합니다.
   const startInterventionCheck = (sid: string) => {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     interventionApi.startTurn(sid, currentQuestion).catch(() => { });
@@ -693,6 +695,8 @@ function InterviewPageInner() {
         if (res.needs_intervention && interventionMessage) {
           setMessages(prev => [...prev, { role: "ai", text: `💡 ${interventionMessage}` }]);
           await speakQuestion(interventionMessage);
+          // 개입 메시지 발화 후에는 다시 사용자 응답 대기 상태로 복귀
+          setStatus("listening");
         }
       } catch { /* ignore */ }
     }, 3000);
