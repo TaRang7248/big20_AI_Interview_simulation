@@ -1,4 +1,3 @@
-
 import json
 import os
 import time
@@ -8,17 +7,17 @@ from ..config import GOOGLE_API_KEY, logger
 from ..database import get_db_connection
 from google.api_core.exceptions import ResourceExhausted
 
-# Suppress Google GenAI FutureWarnings
+# Google GenAI FutureWarnings 무시
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.api_core")
 
-# Initialize Gemini Client
+# Gemini 클라이언트 초기화
 if not GOOGLE_API_KEY:
-    logger.error("GOOGLE_API_KEY is missing. Please set it in .env file.")
+    logger.error("GOOGLE_API_KEY가 없습니다. .env 파일에 설정해주세요.")
 else:
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# Use Gemini 2.0 Flash
+# Gemini 2.0 Flash 모델 사용
 MODEL_NAME = "gemini-2.0-flash"
 
 # Gemini 모델 인스턴스를 저장할 전역 변수 (싱글톤 패턴과 유사하게 사용)
@@ -37,9 +36,9 @@ def get_model():
 
 def generate_content_with_retry(model, prompt, generation_config=None, max_retries=3):
     """
-    Helper function to generate content with retry logic for rate limits and timeouts.
+    할당량 초과 및 시간 초과에 대비한 재시도 로직이 포함된 콘텐츠 생성 헬퍼 함수입니다.
     """
-    # Timeout settings (30 seconds for normal requests)
+    # 타임아웃 설정 (일반적인 요청의 경우 30초)
     request_options = {"timeout": 30}
 
     for attempt in range(max_retries):
@@ -52,19 +51,19 @@ def generate_content_with_retry(model, prompt, generation_config=None, max_retri
             return response
         except ResourceExhausted:
             wait_time = (2 ** attempt) + 1
-            logger.warning(f"Rate limit exceeded. Retrying in {wait_time} seconds...")
+            logger.warning(f"사용량 제한 초과. {wait_time}초 후 재시도합니다...")
             time.sleep(wait_time)
         except Exception as e:
-            logger.error(f"GenAI Error (Attempt {attempt+1}/{max_retries}): {e}")
+            logger.error(f"GenAI 오류 (시도 {attempt+1}/{max_retries}): {e}")
             if attempt == max_retries - 1:
                 raise e
-            time.sleep(1) # Short wait for other errors
+            time.sleep(1) # 기타 오류 발생 시 짧게 대기
     
-    raise ResourceExhausted("Max retries exceeded")
+    raise ResourceExhausted("최대 재시도 횟수를 초과했습니다.")
 
 def clean_json_string(json_str):
     """
-    Cleans markdown code blocks from JSON string.
+    JSON 문자열에서 마크다운 코드 블록을 제거합니다.
     """
     if "```json" in json_str:
         json_str = json_str.split("```json")[1].split("```")[0]
@@ -74,40 +73,37 @@ def clean_json_string(json_str):
 
 def get_job_questions(job_title):
     """
-    Fetches questions for a job title.
-    If not in pool, selects from interview_answer using LLM and saves to pool.
+    직무에 맞는 질문을 가져옵니다.
+    풀에 없는 경우 LLM을 사용하여 interview_answer에서 선택하고 풀에 저장합니다.
     """
     conn = get_db_connection()
     c = conn.cursor()
     
-    # 1. Check Pool
+    # 1. 풀 확인
     c.execute("SELECT question_id FROM job_question_pool WHERE job_title = %s", (job_title,))
     rows = c.fetchall()
     
     if rows:
-        # Fetch actual question text
+        # 실제 질문 텍스트 가져오기
         question_ids = [row[0] for row in rows]
-        # Dynamically build query for IN clause
+        # IN 절을 위한 동적 쿼리 생성
         placeholders = ','.join(['%s'] * len(question_ids))
         c.execute(f"SELECT question FROM interview_answer WHERE id IN ({placeholders})", tuple(question_ids))
         questions = [r[0] for r in c.fetchall()]
         conn.close()
         return questions
 
-    # 2. If no pool, create one
-    logger.info(f"No pool found for {job_title}. Creating one using LLM...")
-    c.execute("SELECT id, question FROM interview_answer") # Fetch ALL questions
-    all_questions = c.fetchall() # list of (id, question)
+    # 2. 풀이 없는 경우 LLM을 사용하여 생성
+    logger.info(f"{job_title}에 대한 풀을 찾을 수 없습니다. LLM을 사용하여 생성합니다...")
+    c.execute("SELECT id, question FROM interview_answer") # 모든 질문 가져오기
+    all_questions = c.fetchall() # (id, question) 리스트
     
     if not all_questions:
         conn.close()
         return ["자기소개를 해주세요."]
 
-    # Convert to JSON for LLM
+    # LLM을 위한 JSON 변환
     questions_json = [{"id": q[0], "question": q[1]} for q in all_questions]
-    
-    # Selecting fewer questions context to fit in generic limits if needed, 
-    # but Gemini Flash has large context window so 300 is fine.
     
     prompt = f"""
     당신은 채용 담당자입니다.
@@ -139,17 +135,16 @@ def get_job_questions(job_title):
         selected_ids = result.get("ids", [])
         
         if not selected_ids:
-             # If LLM fails, pick random 5
+             # LLM 실패 시 랜덤하게 5개 선택
              selected_ids = [q[0] for q in all_questions[:5]]
 
-        # Save to Pool
+        # 풀에 저장
         for q_id in selected_ids:
             c.execute("INSERT INTO job_question_pool (job_title, question_id) VALUES (%s, %s)", (job_title, q_id))
         
         conn.commit()
         
-        # Return text
-        # Make sure selected_ids is not empty tuple for ANY syntax
+        # 텍스트 반환
         if not selected_ids:
              questions = ["자기소개를 부탁드립니다."]
         else:
@@ -159,22 +154,20 @@ def get_job_questions(job_title):
         conn.close()
         return questions
 
-
     except Exception as e:
-        logger.error(f"LLM Pool Creation Error: {e}")
+        logger.error(f"LLM 풀 생성 오류: {e}")
         conn.close()
         return ["자기소개를 부탁드립니다.", "성격의 장단점은 무엇인가요?"]
 
-
 def summarize_resume(text):
     """
-    Summarizes the resume text using LLM to extract key skills, experience, and projects.
+    LLM을 사용하여 이력서 텍스트에서 핵심 기술, 경험 및 프로젝트를 요약합니다.
     """
-    logger.info("Summarizing resume...")
+    logger.info("이력서 요약 중...")
     if not text:
         return "내용 없음"
         
-    # If text is short enough, just return it
+    # 텍스트가 충분히 짧으면 그대로 반환
     if len(text) < 500:
         return text
 
@@ -194,16 +187,16 @@ def summarize_resume(text):
         model = get_model()
         response = generate_content_with_retry(model, prompt)
         summary = response.text
-        logger.info(f"Resume Summary: {summary[:100]}...")
+        logger.info(f"이력서 요약: {summary[:100]}...")
         return summary
     except Exception as e:
-        logger.error(f"Resume Summary Error: {e}")
-        return text[:1000] # Fallback to truncation
+        logger.error(f"이력서 요약 오류: {e}")
+        return text[:1000] # 실패 시 잘라서 반환
 
 def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None, history_questions=None, audio_analysis=None):
     """
-    Evaluates the applicant's answer and generates the next question or closing remark.
-    Enhanced to use Resume Summary and Reference Questions from Pool.
+    지원자의 답변을 평가하고 다음 질문 또는 마무리 멘트를 생성합니다.
+    이력서 요약 및 풀의 참고 질문을 사용하도록 강화되었습니다.
     """
     model = get_model()
     
@@ -224,11 +217,11 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
              next_question = "면접이 종료되었습니다. 수고하셨습니다."
              return evaluation, next_question
          except Exception as e:
-             logger.error(f"Evaluation Error (END): {e}")
+             logger.error(f"평가 오류 (종료 단계): {e}")
              return "평가 실패", "면접이 종료되었습니다."
          
     else:
-        # Construct Context for Prompt
+        # 프롬프트를 위한 컨텍스트 구성
         resume_context = ""
         if resume_summary:
             resume_context = f"""
@@ -239,7 +232,6 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
         ref_context = ""
         if ref_questions:
             ref_questions_list = list(ref_questions)
-            # Avoid error if ref_questions has integers or other types
             ref_q_text = "\\n".join([f"- {str(q)}" for q in ref_questions_list[:5]])
             ref_context = f"""
             [직무 관련 참고 질문 (질문 생성 시 참고용)]
@@ -320,10 +312,10 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
             result = json.loads(text_response)
             return result.get("evaluation", "평가 없음"), result.get("next_question", "다음 질문을 준비하지 못했습니다.")
         except ResourceExhausted:
-             logger.error("LLM Quota Exceeded")
+             logger.error("LLM 할당량 초과")
              return "평가 실패 (사용량 초과)", "다음 질문으로 넘어가겠습니다. (잠시 후 다시 시도해주세요)"
         except Exception as e:
-            logger.error(f"Evaluation Error: {e}")
+            logger.error(f"평가 오류: {e}")
             if 'response' in locals():
-                logger.error(f"Response Text: {response.text}")
+                logger.error(f"응답 텍스트: {response.text}")
             return "평가 중 오류 발생", "다음 질문으로 넘어가겠습니다."

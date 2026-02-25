@@ -1,5 +1,4 @@
 # AI 면접 시뮬레이션 서버 및 브라우저 자동 실행 스크립트
-# 이 스크립트는 서버 구동과 웹 브라우저 자동 실행 기능만을 포함합니다.
 
 import uvicorn
 import webbrowser
@@ -30,7 +29,7 @@ def wait_and_open_browser():
             time.sleep(1)
             continue
 
-    print(f"[알림] 서버가 준비되었습니다. 브라우저를 즐행합니다.")
+    print(f"[알림] 서버가 준비되었습니다. 브라우저를 실행합니다.")
     # 기본 브라우저로 접속 주소 열기
     webbrowser.open(URL)
 
