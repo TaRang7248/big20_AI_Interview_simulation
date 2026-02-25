@@ -683,10 +683,8 @@ function InterviewPageInner() {
   };
 
   // ========== 개입 체크 ==========
-  // 서버에서 silence_detected 개입이 오면 메시지 1회 표시 후 타이머를 중지합니다.
-  // → 사용자가 다시 발화(답변 제출)하면 getNextQuestion() → startInterventionCheck()으로 재시작됩니다.
-  // 백엔드에서도 silence_intervention_given 플래그로 중복을 차단하지만,
-  // 프론트엔드에서도 타이머를 즉시 중지하여 불필요한 폴링을 방지합니다.
+  // 백엔드의 silence_intervention_given 플래그가 중복 침묵 개입을 차단하므로,
+  // 프론트엔드는 개입 체크 타이머를 유지하여 턴 모니터링을 계속합니다.
   const startInterventionCheck = (sid: string) => {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     interventionApi.startTurn(sid, currentQuestion).catch(() => { });
@@ -697,15 +695,8 @@ function InterviewPageInner() {
         if (res.needs_intervention && interventionMessage) {
           setMessages(prev => [...prev, { role: "ai", text: `💡 ${interventionMessage}` }]);
           await speakQuestion(interventionMessage);
-
-          // silence_detected(침묵 개입)인 경우 타이머 중지
-          // → 같은 침묵 구간에서 반복 메시지 방지
-          if (res.intervention?.type === "silence_detected") {
-            if (interventionTimerRef.current) {
-              clearInterval(interventionTimerRef.current);
-              interventionTimerRef.current = null;
-            }
-          }
+          // 개입 메시지 발화 후에는 다시 사용자 응답 대기 상태로 복귀
+          setStatus("listening");
         }
       } catch { /* ignore */ }
     }, 3000);
