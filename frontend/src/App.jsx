@@ -256,9 +256,18 @@ function App() {
         }
       />
 
-      {/* ✅ B: 단독 결과 페이지 */}
+      {/* ✅ 단독 결과 페이지 */}
+      {/* 면접자/공용 결과 */}
       <Route path="/result/:threadId" element={<ResultRoutePage_yyr />} />
-      <Route path="/admin/result/:threadId" element={<ResultRoutePage_yyr />} />
+      {/* 관리자 전용 결과 */}
+      <Route
+        path="/admin/result/:threadId"
+        element={
+          <RequireAdmin_yyr>
+            <ResultRoutePage_yyr />
+          </RequireAdmin_yyr>
+        }
+      />
 
       {/* ✅ 로비: 면접 시작 전(공고 선택/이력서/환경 테스트) */}
       <Route
