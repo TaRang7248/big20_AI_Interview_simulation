@@ -64,19 +64,19 @@
 
 <body>
 
-    <!-- Loading Overlay -->
+    <!-- 로딩 오버레이 -->
     <div id="loading-overlay" class="hidden">
         <div class="spinner"></div>
         <div class="loading-text" id="loading-text">잠시만 기다려주세요...</div>
     </div>
 
-    <!-- Notification / Toast Container -->
+    <!-- 알림 / 토스트 컨테이너 -->
     <div id="toast-container"></div>
 
-    <!-- Main App Container -->
+    <!-- 메인 앱 컨테이너 -->
     <div id="app">
 
-        <!-- Navigation (Conditional Rendering in JS) -->
+        <!-- 네비게이션 (JS 조건부 렌더링) -->
         <nav id="navbar" class="hidden">
             <div class="logo">AI Interview</div>
             <div class="nav-links">
@@ -85,7 +85,7 @@
             </div>
         </nav>
 
-        <!-- 1.1 Login Screen -->
+        <!-- 1.1 로그인 화면 -->
         <section id="login-page" class="page active">
             <div class="auth-container">
                 <h1>AI 면접 프로그램</h1>
@@ -106,7 +106,7 @@
             </div>
         </section>
 
-        <!-- 1.1.2 ID/PW Find Screen -->
+        <!-- 1.1.2 아이디/비밀번호 찾기 화면 -->
         <section id="find-account-page" class="page hidden">
             <div class="auth-container">
                 <h2>ID/PW 찾기</h2>
@@ -115,7 +115,7 @@
                     <button id="btn-tab-find-pw" class="btn-secondary" style="flex: 1;">PW 찾기</button>
                 </div>
 
-                <!-- ID Find Form -->
+                <!-- 아이디 찾기 폼 -->
                 <div id="form-find-id">
                     <form id="find-id-form">
                         <div class="form-group">
@@ -133,9 +133,9 @@
                     </div>
                 </div>
 
-                <!-- PW Find Form -->
+                <!-- 비밀번호 찾기 폼 -->
                 <div id="form-find-pw" class="hidden">
-                    <!-- Step 1: ID Input -->
+                    <!-- 1단계: 아이디 입력 -->
                     <div id="find-pw-step1-ui">
                         <form id="find-pw-form-step1">
                             <div class="form-group">
@@ -146,7 +146,7 @@
                         </form>
                     </div>
 
-                    <!-- Step 2: Code Input -->
+                    <!-- 2단계: 인증번호 입력 -->
                     <div id="find-pw-step2-ui" class="hidden">
                         <p id="find-pw-msg" style="margin-bottom: 15px; font-size: 0.9em;"></p>
                         <form id="find-pw-form-step2">
@@ -158,7 +158,7 @@
                         </form>
                     </div>
 
-                    <!-- Result -->
+                    <!-- 결과 -->
                     <div id="find-pw-result"
                         style="margin-top: 15px; padding: 10px; background: #e8f4fd; border-radius: 5px; display: none;">
                     </div>
@@ -170,7 +170,7 @@
             </div>
         </section>
 
-        <!-- 1.2 Sign Up Screen -->
+        <!-- 1.2 회원가입 화면 -->
         <section id="signup-page" class="page hidden">
             <div class="auth-container">
                 <h2>회원가입</h2>
@@ -244,7 +244,7 @@
             </div>
         </section>
 
-        <!-- 1.3.1 Password Check Screen -->
+        <!-- 1.3.1 비밀번호 확인 화면 -->
         <section id="password-check-page" class="page hidden">
             <div class="container">
                 <h2>정보 수정 본인 확인</h2>
@@ -261,13 +261,13 @@
             </div>
         </section>
 
-        <!-- 1.3.2 My Info Screen -->
+        <!-- 1.3.2 내 정보 화면 -->
         <section id="myinfo-page" class="page hidden">
             <div class="container">
                 <h2>회원 정보 수정</h2>
                 <div class="profile-card">
                     <form id="myinfo-form">
-                        <!-- Read-only fields -->
+                        <!-- 읽기 전용 필드 -->
                         <div class="form-group">
                             <label>아이디</label>
                             <input type="text" id="edit-id" readonly disabled class="readonly-input">
@@ -285,7 +285,7 @@
                             <input type="text" id="edit-gender" readonly disabled class="readonly-input">
                         </div>
 
-                        <!-- Editable fields -->
+                        <!-- 수정 가능 필드 -->
                         <div class="form-group">
                             <label>이메일</label>
                             <input type="email" id="edit-email">
@@ -310,7 +310,7 @@
             </div>
         </section>
 
-        <!-- 1.3.3 Password Change Page -->
+        <!-- 1.3.3 비밀번호 변경 화면 -->
         <section id="password-change-page" class="page hidden">
             <div class="container">
                 <h2>비밀번호 변경</h2>
@@ -331,7 +331,7 @@
             </div>
         </section>
 
-        <!-- 2.1 Applicant Dashboard -->
+        <!-- 2.1 지원자 대시보드 -->
         <section id="applicant-dashboard-page" class="page hidden">
             <div class="container dashboard-layout">
                 <aside class="sidebar">
@@ -345,13 +345,13 @@
                 <main class="content">
                     <h2>지원 가능한 공고</h2>
                     <ul id="job-list" class="card-list">
-                        <!-- Job Items rendered by JS -->
+                        <!-- JS에 의해 렌더링될 공고 아이템들 -->
                     </ul>
                 </main>
             </div>
         </section>
 
-        <!-- 2.1.0 My Interview Records -->
+        <!-- 2.1.0 내 면접 기록 -->
         <section id="my-records-page" class="page hidden">
             <div class="container dashboard-layout">
                 <aside class="sidebar">
@@ -376,7 +376,7 @@
                                 </tr>
                             </thead>
                             <tbody id="my-records-list">
-                                <!-- Records will be rendered here -->
+                                <!-- 여기에 기록들이 렌더링됩니다 -->
                             </tbody>
                         </table>
                     </div>
@@ -384,7 +384,7 @@
             </div>
         </section>
 
-        <!-- 2.1.1 Job Detail Page -->
+        <!-- 2.1.1 공고 상세 페이지 -->
         <section id="job-detail-page" class="page hidden">
             <div class="container">
                 <h2>공고 상세 정보</h2>
@@ -460,7 +460,7 @@
             </div>
         </section>
 
-        <!-- 2.1 Interview Setup (Modified for Automatic Test) -->
+        <!-- 2.1 면접 설정 -->
         <section id="interview-setup-page" class="page hidden">
             <div class="container setup-container">
                 <h2 id="setup-job-title">공고 제목</h2>
@@ -489,7 +489,7 @@
                     </div>
                     <div class="step-card">
                         <h3>2. 환경 테스트</h3>
-                        <!-- Device check happens automatically -->
+                        <!-- 기기 검사는 자동으로 진행됩니다 -->
                         <div class="device-check">
                             <div class="check-item"><span class="icon">📷</span> 카메라: <span id="cam-status"
                                     class="status pending">확인 중...</span> <span id="cam-device"
@@ -512,7 +512,7 @@
             </div>
         </section>
 
-        <!-- 2.2 Interview In-Progress -->
+        <!-- 2.2 면접 진행 화면 -->
         <section id="interview-page" class="page hidden">
             <div class="interview-room">
                 <div class="interview-header">
@@ -525,7 +525,7 @@
                 </div>
 
                 <div class="interview-main">
-                    <!-- AI Interviewer Area -->
+                    <!-- AI 면접관 영역 -->
                     <div class="interviewer-area">
                         <div class="avatar-wrapper">
                             <!-- AI 면접관 얼굴 256x256 비디오 태그 (정사각형 보장) -->
@@ -536,22 +536,21 @@
                         <div class="chat-bubble ai hidden" id="ai-message">면접관 연결 중...</div>
                     </div>
 
-                    <!-- User Area -->
+                    <!-- 사용자 영역 -->
                     <div class="user-area">
                         <video id="user-video" autoplay playsinline muted></video>
-                        <span class="feed-label" id="feed-label">내 모습 (Recording...)</span>
+                        <span class="feed-label" id="feed-label">내 모습 (녹화 중...)</span>
                         <canvas id="video-capture-canvas" style="display: none;"></canvas>
                     </div>
                 </div>
 
-                <!-- Interaction Area -->
+                <!-- 상호작용 영역 -->
                 <div class="interview-controls">
                     <div class="chat-log" id="chat-log">
-                        <!-- History of Q&A -->
+                        <!-- 질의응답 기록 -->
                     </div>
                     <div class="input-area">
-                        <!-- Removed Code Board for now as request focused on Q&A -->
-                        <!-- Text area for fallback or status, mostly handled by audio -->
+                        <!-- 음성 위주로 처리되지만 fallback으로 사용 가능한 텍스트 영역 -->
                         <textarea id="user-answer" placeholder="답변을 말씀하시면 음성이 녹음됩니다..." rows="3" disabled></textarea>
                         <button id="btn-submit-answer" class="btn-primary">답변 제출 (녹음 종료)</button>
                     </div>
@@ -559,7 +558,7 @@
             </div>
         </section>
 
-        <!-- 2.3 Interview Result -->
+        <!-- 2.3 면접 결과 화면 -->
         <section id="result-page" class="page hidden">
             <div class="container result-container">
                 <h2>면접 종료</h2>
@@ -574,7 +573,7 @@
             </div>
         </section>
 
-        <!-- 3. Admin Dashboard -->
+        <!-- 3. 관리자 대시보드 -->
         <section id="admin-dashboard-page" class="page hidden">
             <div class="container dashboard-layout">
                 <aside class="sidebar">
@@ -586,7 +585,7 @@
                     </ul>
                 </aside>
                 <main class="content">
-                    <!-- Admin Views (Jobs, Applicants) -->
+                    <!-- 관리자 화면 (공고, 지원자) -->
                     <div id="admin-view-jobs">
                         <div class="content-header">
                             <h2>면접 공고 관리</h2>
@@ -604,11 +603,11 @@
                                     <th>관리</th>
                                 </tr>
                             </thead>
-                            <tbody><!-- JS Render --></tbody>
+                            <tbody><!-- JS 렌더링 --></tbody>
                         </table>
                     </div>
 
-                    <!-- Job Register -->
+                    <!-- 공고 등록 -->
                     <div id="admin-job-register-page" class="hidden">
                         <h2>공고 등록</h2>
                         <div class="profile-card">
@@ -655,7 +654,7 @@
                         </div>
                     </div>
 
-                    <!-- Job Edit -->
+                    <!-- 공고 수정 -->
                     <div id="admin-job-edit-page" class="hidden">
                         <h2>공고 수정</h2>
                         <div class="profile-card">
@@ -724,7 +723,7 @@
 
     </div>
 
-    <!-- Applicant Detail Modal -->
+    <!-- 지원자 상세 정보 모달 -->
     <div id="applicant-detail-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
@@ -733,12 +732,12 @@
             </div>
             <div class="modal-body">
                 <div class="detail-grid">
-                    <!-- Final Result Summary -->
+                    <!-- 최종 평가 요약 -->
                     <div class="result-summary">
                         <div class="detail-section-title">최종 평가 결과</div>
                         <div id="detail-pass-status" class="pass-status"></div>
                         <div class="score-grid">
-                            <!-- Tech -->
+                            <!-- 기술/직무 -->
                             <div class="score-card">
                                 <div class="score-header">
                                     <span class="score-label">기술/직무</span>
@@ -746,7 +745,7 @@
                                 </div>
                                 <div id="eval-text-tech" class="score-text">평가 내용이 없습니다.</div>
                             </div>
-                            <!-- Problem Solving -->
+                            <!-- 문제해결 -->
                             <div class="score-card">
                                 <div class="score-header">
                                     <span class="score-label">문제해결</span>
@@ -754,7 +753,7 @@
                                 </div>
                                 <div id="eval-text-problem" class="score-text">평가 내용이 없습니다.</div>
                             </div>
-                            <!-- Communication -->
+                            <!-- 의사소통 -->
                             <div class="score-card">
                                 <div class="score-header">
                                     <span class="score-label">의사소통</span>
@@ -762,7 +761,7 @@
                                 </div>
                                 <div id="eval-text-comm" class="score-text">평가 내용이 없습니다.</div>
                             </div>
-                            <!-- Attitude -->
+                            <!-- 태도/인성 -->
                             <div class="score-card">
                                 <div class="score-header">
                                     <span class="score-label">태도/인성</span>
@@ -773,13 +772,13 @@
                         </div>
                     </div>
 
-                    <!-- Resume Section -->
+                    <!-- 이력서 섹션 -->
                     <div class="detail-column">
                         <div class="detail-section-title">이력서 내용</div>
                         <div id="detail-resume" class="resume-box"></div>
                     </div>
 
-                    <!-- Interview Log Section -->
+                    <!-- 면접 기록 섹션 -->
                     <div class="detail-column">
                         <div class="detail-section-title">면접 대화 기록</div>
                         <div id="detail-log" class="log-box"></div>
@@ -788,7 +787,7 @@
             </div>
         </div>
     </div>
-    <!-- Image Zoom Modal -->
+    <!-- 이미지 확대 모달 -->
     <div id="image-zoom-modal" class="modal hidden" style="z-index: 3000;">
         <span class="close-zoom">&times;</span>
         <img class="modal-content-img" id="zoomed-image">
