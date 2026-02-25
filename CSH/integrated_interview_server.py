@@ -2100,7 +2100,18 @@ class AIInterviewer:
         return needs_follow_up, follow_up_reason
 
     def update_topic_tracking(self, session_id: str, answer: str, is_follow_up: bool):
-        """주제 추적 정보 업데이트"""
+        """주제 추적 정보 업데이트
+
+        핵심 로직:
+        - is_follow_up=True: 같은 주제 카운트 +1 (꼬리질문)
+        - is_follow_up=False:
+          - 감지된 주제가 이전과 같으면 → 카운트 +1 (실질적으로 같은 주제 계속)
+          - 감지된 주제가 다르면 → 새 주제로 전환, 카운트 리셋
+          - topic_count >= 2이면 → 강제 주제 전환 (같은 주제 감지되어도 리셋)
+
+        ※ 이전 버그: is_follow_up=False일 때 동일 주제가 감지되어도 무조건
+          topic_question_count=1로 리셋하여 꼬리질문 제한이 작동하지 않았음.
+        """
         session = state.get_session(session_id)
         if not session:
             return
@@ -2117,19 +2128,50 @@ class AIInterviewer:
                 {"topic_question_count": topic_count + 1, "follow_up_mode": True},
             )
         else:
-            # 새 질문: 주제 전환
-            if current_topic:
-                topic_history.append({"topic": current_topic, "count": topic_count})
-
-            state.update_session(
-                session_id,
-                {
-                    "current_topic": detected_topic,
-                    "topic_question_count": 1,
-                    "topic_history": topic_history,
-                    "follow_up_mode": False,
-                },
-            )
+            # ── 동일 주제 감지 시 카운트 누적 (리셋하지 않음) ──
+            # 이전에는 동일 주제여도 무조건 count=1로 리셋되어 제한이 무력화됨
+            if detected_topic == current_topic:
+                # 같은 주제 → 카운트 증가 (주제 전환 없이 계속 파고드는 것 방지)
+                new_count = topic_count + 1
+                state.update_session(
+                    session_id,
+                    {"topic_question_count": new_count, "follow_up_mode": False},
+                )
+                print(
+                    f"📌 [TopicTrack] 동일 주제 유지: {detected_topic} "
+                    f"(count: {topic_count} → {new_count})"
+                )
+            elif topic_count >= 2:
+                # 주제당 2회 이상 → 강제로 새 주제로 전환
+                if current_topic:
+                    topic_history.append({"topic": current_topic, "count": topic_count})
+                state.update_session(
+                    session_id,
+                    {
+                        "current_topic": detected_topic,
+                        "topic_question_count": 1,
+                        "topic_history": topic_history,
+                        "follow_up_mode": False,
+                    },
+                )
+                print(
+                    f"🔄 [TopicTrack] 강제 주제 전환: {current_topic} → {detected_topic} "
+                    f"(이전 주제 {topic_count}회 질문)"
+                )
+            else:
+                # 새 주제 감지 → 정상 전환
+                if current_topic:
+                    topic_history.append({"topic": current_topic, "count": topic_count})
+                state.update_session(
+                    session_id,
+                    {
+                        "current_topic": detected_topic,
+                        "topic_question_count": 1,
+                        "topic_history": topic_history,
+                        "follow_up_mode": False,
+                    },
+                )
+                print(f"🔄 [TopicTrack] 주제 전환: {current_topic} → {detected_topic}")
 
     def get_initial_greeting(self, job_posting: dict = None) -> str:
         """
