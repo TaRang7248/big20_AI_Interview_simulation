@@ -5786,8 +5786,19 @@ async def chat_stream(
 
             # ChatOllama.astream()은 토큰 단위로 AIMessageChunk를 생성합니다.
             # 각 chunk의 .content 속성에 토큰 텍스트가 담겨있습니다.
+            # ★ 안전장치: LLM_TIMEOUT_SEC 초 초과 시 스트리밍 강제 중단
             try:
+                _stream_start = asyncio.get_event_loop().time()
                 async for chunk in interviewer.question_llm.astream(messages):
+                    # 타임아웃 체크 — 모델이 stop 토큰을 놓쳐 무한 생성되는 것을 방지
+                    if (
+                        asyncio.get_event_loop().time() - _stream_start
+                        > LLM_TIMEOUT_SEC
+                    ):
+                        print(
+                            f"⏰ [LLM Stream] 스트리밍 타임아웃 ({LLM_TIMEOUT_SEC}초 초과, {len(full_response)}자 생성됨)"
+                        )
+                        break
                     token_text = chunk.content
                     if token_text:
                         full_response += token_text
