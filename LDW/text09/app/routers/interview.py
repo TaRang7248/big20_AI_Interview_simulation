@@ -55,7 +55,17 @@ async def start_interview(background_tasks: BackgroundTasks, data: StartIntervie
         # 세션 이름 결정 (예: 면접-1)
         c.execute("SELECT COUNT(DISTINCT interview_number) FROM Interview_Progress WHERE id_name = %s", (data.id_name,))
         interview_count = c.fetchone()[0]
-        session_name = f"면접-{interview_count + 1}"
+        base_session_name = f"면접-{interview_count + 1}"
+        session_name = base_session_name
+        
+        # 중복 체크 로직: 이미 존재하는 세션 이름인지 확인하고, 중복 시 고유값 할당
+        suffix = 1
+        while True:
+            c.execute("SELECT COUNT(*) FROM Interview_Progress WHERE id_name = %s AND session_name = %s", (data.id_name, session_name))
+            if c.fetchone()[0] == 0:
+                break
+            session_name = f"{base_session_name}({suffix})"
+            suffix += 1
 
         # 이력서 요약 (새 기능)
         resume_summary = summarize_resume(resume_text)

@@ -216,6 +216,7 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 - **Rate Limit 대응**: 무료 등급 사용 시 발생할 수 있는 할당량 초과(429 Error)에 대비하여 지수 백오프(Exponential Backoff) 기반의 재시도 로직을 구현했습니다.
 - **테스트 스크립트 정리**: `scripts/check_env.py` 및 `tests/manual_verification/` 하위 스크립트를 통해 각 기능을 독립적으로 검증할 수 있습니다.
 - **오디오 파일 저장 개선**: 면접 답변 음성 파일의 이름을 `YYYY-MM-DD-HH-MM-SS-{면접세션명}.webm` 형식으로 저장하여, 언제 어떤 면접에서 녹음된 파일인지 쉽게 식별할 수 있도록 개선했습니다.
+- **면접 세션 고유화 (중복 방지)**: 지원자가 동일 직무로 여러 번 면접을 진행할 때 `interview_progress` 테이블의 `session_name` 컬럼에 기존 값을 확인하고 순차적으로 중첩되지 않는 고유한 값(예: 면접-1, 면접-2)이 동적으로 부여되도록 로직을 개선했습니다.
 - **STT 교차 검증 시스템 도입**: **Google Gemini (Multimodal)**와 **OpenAI Whisper**를 동시에 사용하여 음성 인식 정확도를 획기적으로 높였습니다. 두 모델의 인식 결과가 **95% 이상 일치(Levenshtein Distance)**할 경우에만 Gemini 결과를 채택하고, 그렇지 않을 경우 더 안정적인 Whisper 결과를 1순위로 사용하여 환각(Hallucination) 현상을 최소화했습니다.
 - **비디오 심층 분석 통합**: `uploads/audio` 폴더에 저장된 `.webm` 영상 파일을 면접 종료 시 자동으로 스캔하여 **OpenCV**, **MoveNet Thunder**, **DeepFace**로 정밀 분석합니다. 프레임 단위로 감정과 자세를 분석하여 최종 태도/인성 평가에 반영합니다.
 - **오디오 심층 분석 시스템 (Audio Deep Analysis)** **[NEW]**: 지원자의 목소리 데이터를 정밀 분석하여 비언어적 요소를 평가에 반영합니다.
