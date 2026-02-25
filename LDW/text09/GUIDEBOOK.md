@@ -67,7 +67,12 @@ python scripts/setup_test_user.py
 `server.py` 파일을 실행하면 서버가 구동되고 자동으로 **시스템 기본 웹 브라우저**가 열립니다.
 (보안 및 성능을 위해 127.0.0.1:8000 접속을 기본으로 합니다.)
 `server.py`는 서버 구동과 웹 브라우저 자동 실행 기능에만 집중하여 최적화되어 있으며, 모든 주석이 한국어로 제공됩니다.
+
 ```bash
+# 작업 디렉토리로 이동
+cd 'C:\big20\big20_AI_Interview_simulation\LDW\text09'
+
+# 서버 실행
 python server.py
 ```
 - 서버는 기본적으로 `http://127.0.0.1:8000` 에서 동작합니다.
