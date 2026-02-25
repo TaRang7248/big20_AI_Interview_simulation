@@ -193,12 +193,98 @@ def summarize_resume(text):
         logger.error(f"이력서 요약 오류: {e}")
         return text[:1000] # 실패 시 잘라서 반환
 
-def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None, history_questions=None, audio_analysis=None):
+def generate_next_question(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None, history_questions=None, audio_analysis=None):
     """
-    지원자의 답변을 평가하고 다음 질문 또는 마무리 멘트를 생성합니다.
-    이력서 요약 및 풀의 참고 질문을 사용하도록 강화되었습니다.
+    지원자의 답변 데이터를 바탕으로 다음 번에 질문할 내용을 빠르고 동기적으로 생성합니다.
+    (답변 평가는 진행하지 않습니다)
     """
     model = get_model()
+    
+    if next_phase == "END":
+         return "면접이 종료되었습니다. 수고하셨습니다."
+         
+    # 프롬프트를 위한 컨텍스트 구성
+    resume_context = ""
+    if resume_summary:
+        resume_context = f"""
+        [지원자 이력서 요약]
+        {resume_summary}
+        """
+        
+    ref_context = ""
+    if ref_questions:
+        ref_questions_list = list(ref_questions)
+        ref_q_text = "\\n".join([f"- {str(q)}" for q in ref_questions_list[:5]])
+        ref_context = f"""
+        [직무 관련 참고 질문 (질문 생성 시 참고용)]
+        {ref_q_text}
+        """
+
+    history_context = ""
+    if history_questions:
+        history_questions_list = list(history_questions)
+        hist_text = "\\n".join([f"- {str(q)}" for q in history_questions_list])
+        history_context = f"""
+        [이미 질문한 내역 (중복 질문 절대 금지)]
+        {hist_text}
+        
+        ※ 주의: 위 [이미 질문한 내역]에 있는 질문들과 의미가 유사하거나 겹치는 질문은 절대로 다시 하지 마세요. 새로운 관점이나 더 깊이 있는 질문을 해주세요.
+        """
+
+    prompt = f"""
+    [상황]
+    직무: {job_title}
+    면접자: {applicant_name}
+    현재 진행 단계: {current_q_count}번째 질문 완료. 다음은 {current_q_count + 1}번째 질문인 [{next_phase}] 단계입니다.
+    
+    {resume_context}
+    {ref_context}
+    {history_context}
+
+    [이전 질문]
+    {prev_question}
+    
+    [지원자 답변]
+    {applicant_answer}
+    
+    [작업] 다음 질문을 생성해주세요.
+    - 다음 단계([{next_phase}])에 맞는 질문이어야 합니다.
+    - [지원자 이력서 요약]이나 [직무 관련 참고 질문]을 참고하되, [이미 질문한 내역]과 겹치지 않게 하세요.
+    - 이전 답변과 자연스럽게 이어지거나, 새로운 주제로 전환하세요.
+    - 질문은 구어체로 정중하게 1~2문장으로 작성해주세요.
+    
+    [출력 형식]
+    JSON 형식으로만 출력해주세요. 마크다운 코드 블록(```json ... ```)은 사용하지 마세요.
+    {{
+        "next_question": "다음 질문 내용..."
+    }}
+    """
+    
+    try:
+        response = generate_content_with_retry(
+            model, 
+            prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
+        
+        text_response = clean_json_string(response.text)
+        result = json.loads(text_response)
+        return result.get("next_question", "다음 질문을 준비하지 못했습니다.")
+    except ResourceExhausted:
+         logger.error("LLM 할당량 초과")
+         return "다음 질문으로 넘어가겠습니다. (잠시 후 다시 시도해주세요)"
+    except Exception as e:
+        logger.error(f"질문 생성 오류: {e}")
+        return "다음 질문으로 넘어가겠습니다."
+
+
+def evaluate_answer_bg(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, audio_analysis=None, interview_number=None, current_row_id=None, video_summary=None):
+    """
+    지원자의 답변을 백그라운드에서 비동기적으로 평가하고 DB를 업데이트합니다.
+    """
+    model = get_model()
+    evaluation = "평가 내용 없음"
+    conn = None
     
     if next_phase == "END":
          evaluation_prompt = f"""
@@ -214,41 +300,10 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
          try:
              response = generate_content_with_retry(model, evaluation_prompt)
              evaluation = response.text
-             next_question = "면접이 종료되었습니다. 수고하셨습니다."
-             return evaluation, next_question
          except Exception as e:
              logger.error(f"평가 오류 (종료 단계): {e}")
-             return "평가 실패", "면접이 종료되었습니다."
-         
+             evaluation = "평가 실패"
     else:
-        # 프롬프트를 위한 컨텍스트 구성
-        resume_context = ""
-        if resume_summary:
-            resume_context = f"""
-            [지원자 이력서 요약]
-            {resume_summary}
-            """
-            
-        ref_context = ""
-        if ref_questions:
-            ref_questions_list = list(ref_questions)
-            ref_q_text = "\\n".join([f"- {str(q)}" for q in ref_questions_list[:5]])
-            ref_context = f"""
-            [직무 관련 참고 질문 (질문 생성 시 참고용)]
-            {ref_q_text}
-            """
-
-        history_context = ""
-        if history_questions:
-            history_questions_list = list(history_questions)
-            hist_text = "\\n".join([f"- {str(q)}" for q in history_questions_list])
-            history_context = f"""
-            [이미 질문한 내역 (중복 질문 절대 금지)]
-            {hist_text}
-            
-            ※ 주의: 위 [이미 질문한 내역]에 있는 질문들과 의미가 유사하거나 겹치는 질문은 절대로 다시 하지 마세요. 새로운 관점이나 더 깊이 있는 질문을 해주세요.
-            """
-
         analysis_context = ""
         if audio_analysis:
             analysis_context = f"""
@@ -260,44 +315,31 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
             - 자신감 점수: {audio_analysis.get('confidence_score', 0)} / 100
             
             ※ 평가 시 위 데이터를 참고하여 지원자의 태도(자신감, 긴장도, 전달력)를 구체적으로 평가에 반영해주세요. 
-            예: "목소리 떨림이 감지되어 긴장한 것으로 보이나...", "말하기 속도가 침착하여..."
             """
 
         prompt = f"""
         [상황]
         직무: {job_title}
         면접자: {applicant_name}
-        현재 진행 단계: {current_q_count}번째 질문 완료. 다음은 {current_q_count + 1}번째 질문인 [{next_phase}] 단계입니다.
+        현재 진행 단계: {current_q_count}번째 질문에 대한 평가.
         
-        {resume_context}
-        {ref_context}
-        {history_context}
         {analysis_context}
 
-        [이전 질문]
+        [질문]
         {prev_question}
         
         [지원자 답변]
         {applicant_answer}
         
-        [작업 1] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
+        [작업] 이 답변을 평가해주세요. (관리자용, 지원자에게 보이지 않음, 장단점 및 점수 포함)
         - 만약 답변이 "답변 없음"이라면, "답변을 하지 않았습니다."라고 평가하고 점수를 매우 낮게(0-10점 사이) 책정하세요.
         - 답변이 중단되었거나 불완전하더라도 지금까지 말한 음성 답변만으로 최선을 다해 평가하세요.
         - [오디오/비언어적 분석 데이터]가 있다면 이를 적극적으로 해석하여 태도 점수에 반영하세요.
                 
-        [작업 2] 다음 질문을 생성해주세요.
-        - 다음 단계([{next_phase}])에 맞는 질문이어야 합니다.
-        - [지원자 이력서 요약]이 있다면, 해당 내용을 검증하거나 구체적인 경험을 묻는 질문을 우선적으로 생성하세요.
-        - [직무 관련 참고 질문]이 있다면, 그 질문들과 유사한 맥락이거나 그 중 하나를 상황에 맞게 변형하여 질문하세요.
-        - 이미 질문한 내용과 중복되지 않도록 주의하세요.
-        - 이전 답변과 자연스럽게 이어지거나, 새로운 주제로 전환하세요.
-        - 질문은 구어체로 정중하게 1~2문장으로 작성해주세요.
-        
         [출력 형식]
         JSON 형식으로만 출력해주세요. 마크다운 코드 블록(```json ... ```)은 사용하지 마세요.
         {{
-            "evaluation": "평가 내용...",
-            "next_question": "다음 질문 내용..."
+            "evaluation": "평가 내용..."
         }}
         """
         
@@ -310,12 +352,29 @@ def evaluate_answer(job_title, applicant_name, current_q_count, prev_question, a
             
             text_response = clean_json_string(response.text)
             result = json.loads(text_response)
-            return result.get("evaluation", "평가 없음"), result.get("next_question", "다음 질문을 준비하지 못했습니다.")
-        except ResourceExhausted:
-             logger.error("LLM 할당량 초과")
-             return "평가 실패 (사용량 초과)", "다음 질문으로 넘어가겠습니다. (잠시 후 다시 시도해주세요)"
+            evaluation = result.get("evaluation", "평가 내용 없음")
         except Exception as e:
-            logger.error(f"평가 오류: {e}")
-            if 'response' in locals():
-                logger.error(f"응답 텍스트: {response.text}")
-            return "평가 중 오류 발생", "다음 질문으로 넘어가겠습니다."
+            logger.error(f"배경 평가 중 오류: {e}")
+            evaluation = "평가 중 오류 발생"
+            
+    if video_summary:
+        evaluation += f"\n\n{video_summary}"
+
+    # 처리된 평가 결과를 DB에 비동기적으로 업데이트
+    if current_row_id:
+        try:
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("""
+                UPDATE Interview_Progress 
+                SET Answer_Evaluation = %s
+                WHERE id = %s
+            """, (evaluation, current_row_id))
+            conn.commit()
+            logger.info(f"Row {current_row_id}의 평가가 백그라운드에서 업데이트되었습니다.")
+        except Exception as e:
+            logger.error(f"백그라운드 평가 DB 업데이트 오류: {e}")
+        finally:
+            if conn:
+                conn.close()
+

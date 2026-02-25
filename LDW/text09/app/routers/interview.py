@@ -10,7 +10,7 @@ from ..database import get_db_connection, logger
 from ..config import UPLOAD_FOLDER, AUDIO_FOLDER
 from ..models import StartInterviewRequest
 from ..services.pdf_service import extract_text_from_pdf
-from ..services.llm_service import summarize_resume, evaluate_answer, get_job_questions
+from ..services.llm_service import summarize_resume, generate_next_question, evaluate_answer_bg, get_job_questions
 from ..services.stt_service import transcribe_audio
 from ..services.tts_service import generate_tts_audio
 from ..services.analysis_service import analyze_interview_result
@@ -199,15 +199,14 @@ async def submit_answer(
         ref_questions = get_job_questions(job_title)
 
         # 6. 평가 및 다음 질문 생성
+        # 6. 다음 질문 우선 생성 (빠른 응답을 위해)
         # 중복을 방지하기 위해 이전의 모든 질문을 가져옵니다.
         c.execute("SELECT Create_Question FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
         history_rows = c.fetchall()
         
-        # history_rows는 튜플의 리스트입니다. (예: [('q1',), ('q2',)])
-        # 일관된 이름인 'history_questions'를 사용합니다.
         history_questions = [r[0] for r in history_rows if r[0]]
 
-        evaluation, next_question = evaluate_answer(
+        next_question = generate_next_question(
             job_title, 
             applicant_name, 
             current_q_count, 
@@ -216,31 +215,21 @@ async def submit_answer(
             next_phase, 
             resume_summary, 
             ref_questions,
-            history_questions,  # Pass history
-            audio_analysis=audio_analysis # Pass analysis
+            history_questions,
+            audio_analysis=audio_analysis
         )
 
-        # --- NEW: 비디오 분석 요약 추가 ---
-        from ..services.analysis_service import get_recent_video_log_summary
-        # 가능하면 answer_time에서 지속 시간을 결정하고, 그렇지 않으면 기본값 60초 사용
-        # answer_time 문자열 형식을 알 수 없으므로, 기본적으로 마지막 60초를 확인합니다.
-        video_summary = get_recent_video_log_summary(interview_number, duration_seconds=60)
-        
-        if video_summary:
-            evaluation += f"\n\n{video_summary}"
-        # ------------------------------------------
-
-        # 7. 현재 답변 및 평가 저장
+        # 7. 현재 답변, 시간 등을 DB에 업데이트 (평가는 나중에 채워넣도록 함)
+        # Answer_Evaluation 칼럼은 일단 NULL 또는 '평가 중...' 으로 설정
         c.execute("""
             UPDATE Interview_Progress 
             SET Question_answer = %s, answer_time = %s, Answer_Evaluation = %s
             WHERE id = %s
-        """, (applicant_answer, answer_time, evaluation, current_row_id))
+        """, (applicant_answer, answer_time, "평가 진행 중...", current_row_id))
         
         interview_finished = False
         if next_phase == "END":
              interview_finished = True
-             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, id_name, announcement_id)
         else:
             # 8. 다음 질문 레코드 삽입 (END가 아닐 경우)
             c.execute('''
@@ -248,6 +237,32 @@ async def submit_answer(
                     Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name, announcement_id
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ''', (interview_number, applicant_name, job_title, resume_summary, next_question, id_name, session_name, announcement_id))
+        
+        conn.commit()
+        
+        # --- NEW: 비디오 분석 요약 추가 및 백그라운드 평가 태스크 추가 ---
+        from ..services.analysis_service import get_recent_video_log_summary
+        video_summary = get_recent_video_log_summary(interview_number, duration_seconds=60)
+
+        # 백그라운드 태스크로 평가는 넘김
+        background_tasks.add_task(
+            evaluate_answer_bg,
+            job_title=job_title,
+            applicant_name=applicant_name,
+            current_q_count=current_q_count,
+            prev_question=prev_question,
+            applicant_answer=applicant_answer,
+            next_phase=next_phase,
+            resume_summary=resume_summary,
+            audio_analysis=audio_analysis,
+            interview_number=interview_number,
+            current_row_id=current_row_id,
+            video_summary=video_summary
+        )
+
+        if interview_finished:
+             background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, id_name, announcement_id)
+
         
         conn.commit()
         conn.close()
