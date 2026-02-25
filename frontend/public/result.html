@@ -526,8 +526,14 @@ loadReport();
 
 <body>
     <div class="wrap">
-        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
-            <button id="themeToggle" class="toggle-theme" type="button">다크모드</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <button id="backToAdmin" class="toggle-theme" type="button" style="display:none;">
+                ← 관리자 목록으로
+            </button>
+
+            <button id="themeToggle" class="toggle-theme" type="button">
+                다크모드
+            </button>
         </div>
         <div class="top">
             <div class="card" id="scoreCard">
@@ -551,6 +557,20 @@ loadReport();
 
     <!-- ✅ JS는 여기서 딱 1번만 로드 -->
     <script src="./result.js"></script>
+    <script>
+        (function () {
+            const params = new URLSearchParams(location.search);
+            const btn = document.getElementById("backToAdmin");
+            if (!btn) return;
+
+            if (params.get("from") === "admin") {
+                btn.style.display = "inline-flex";
+                btn.addEventListener("click", () => {
+                    location.href = "/admin";
+                });
+            }
+        })();
+    </script>
 
 </body>
 

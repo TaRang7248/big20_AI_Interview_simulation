@@ -240,7 +240,7 @@ export default function AdminPage_yyr() {
                                     <div className="mt-3 flex items-center justify-between">
                                         <div className="text-xs text-slate-500">thread_id: {i.threadId}</div>
 
-                                        {i.status === "완료" ? (
+                                        {i.threadId === "my_new_interview_01" ? (
                                             <Link
                                                 to={`/admin/result/${i.threadId}`}
                                                 className="inline-flex items-center gap-2 text-sm font-extrabold text-indigo-700 hover:underline"
@@ -248,9 +248,7 @@ export default function AdminPage_yyr() {
                                                 결과 보기 <FaArrowRight />
                                             </Link>
                                         ) : (
-                                            <span className="text-xs font-bold text-slate-400">
-                                                결과 없음
-                                            </span>
+                                            <span className="text-xs font-bold text-slate-400">결과 없음</span>
                                         )}
                                     </div>
                                 </div>
