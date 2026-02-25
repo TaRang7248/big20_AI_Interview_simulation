@@ -1,12 +1,9 @@
-// ResultRoutePage = URL 기반으로 데이터 가져와서 화면에 꽂아주는 라우팅용 컨테이너
-
+// frontend/src/pages_yyr/ResultRoutePage_yyr.jsx
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import ResultPage_yyr from "./ResultPage_yyr";
-
-// ✅ mock 데이터 (API 실패 시 fallback)
-import { mockInterviewResults } from "./mockInterviewResults";
+import { mockInterviewResults } from "./mockInterviewResults"; // ✅ 추가
 
 const API_BASE_URL = "http://127.0.0.1:8001";
 
@@ -25,20 +22,17 @@ export default function ResultRoutePage_yyr() {
                 setLoading(true);
                 setErrorMsg("");
 
-                // ✅ 저장된 리포트 "조회" (생성 아님)
                 const res = await axios.get(`${API_BASE_URL}/report/${threadId}/result`);
-
                 if (!cancelled) setReportData(res.data || null);
             } catch (e) {
-                // ✅ API 실패 시 mock 데이터 fallback
-                const mockData = mockInterviewResults?.[threadId];
+                // ✅ API 실패(422 포함) → mock 먼저 사용
+                const mock = mockInterviewResults?.[threadId];
 
-                if (mockData) {
-                    console.warn("API 실패 → mock 데이터 사용:", threadId);
-                    if (!cancelled) setReportData(mockData);
-                } else {
-                    if (!cancelled)
-                        setErrorMsg("리포트를 불러오지 못했습니다. (API + mock 모두 실패)");
+                if (!cancelled && mock) {
+                    setReportData(mock);
+                    setErrorMsg(""); // mock이면 에러 메시지 안 띄움
+                } else if (!cancelled) {
+                    setErrorMsg("리포트를 불러오지 못했습니다. (API/DB 확인 필요, mock도 없음)");
                 }
             } finally {
                 if (!cancelled) setLoading(false);
