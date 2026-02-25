@@ -44,7 +44,7 @@ def get_applicant_details(interview_number: str):
     try:
         c = conn.cursor(cursor_factory=RealDictCursor)
         
-        # 1. Get Interview Result
+        # 1. 면접 결과 가져오기
         c.execute("SELECT * FROM Interview_Result WHERE interview_number = %s", (interview_number,))
         result = c.fetchone()
         if not result:
@@ -52,7 +52,7 @@ def get_applicant_details(interview_number: str):
         
         session_name = result.get('session_name')
         
-        # 2. Get Interview Q&A Progress
+        # 2. 면접 Q&A 진행 상황 가져오기
         if session_name:
             c.execute("SELECT Create_Question, Question_answer, Answer_Evaluation, answer_time FROM Interview_Progress WHERE session_name = %s ORDER BY id ASC", (session_name,))
         else:
@@ -60,8 +60,8 @@ def get_applicant_details(interview_number: str):
             
         progress = c.fetchall()
         
-        # 3. Get Resume Text
-        # First check interview_information for original PDF text
+        # 3. 이력서 텍스트 가져오기
+        # 먼저 원본 PDF 텍스트에 대해 interview_information을 확인합니다.
         c.execute("SELECT id_name, announcement_job FROM Interview_Result WHERE interview_number = %s", (interview_number,))
         res_info = c.fetchone()
         
@@ -74,12 +74,12 @@ def get_applicant_details(interview_number: str):
                 if os.path.exists(resume_path):
                     resume_text = extract_text_from_pdf(resume_path)
             
-        # Fallback to truncated text in Interview_Progress if PDF extraction failed or file missing
+        # PDF 추출에 실패하거나 파일이 누락된 경우 Interview_Progress의 잘린 텍스트로 대체합니다.
         if not resume_text:
             c.execute("SELECT Resume FROM Interview_Progress WHERE Interview_Number = %s LIMIT 1", (interview_number,))
             prog_row = c.fetchone()
             if prog_row:
-                resume_text = prog_row['Resume'] # Capital R
+                resume_text = prog_row['Resume'] # 대문자 R
 
         return {
             "success": True,

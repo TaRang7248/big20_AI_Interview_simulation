@@ -21,21 +21,21 @@ router = APIRouter(prefix="/api", tags=["interview"])
 @router.post("/interview/start")
 async def start_interview(background_tasks: BackgroundTasks, data: StartInterviewRequest):
     """
-    1. Load Resume & Job Info.
-    2. Prepare Pool (Get or Create).
-    3. Generate 1st Question via LLM.
-    4. Save to Interview_Progress.
+    1. 이력서 및 직무 정보 로드.
+    2. 풀 준비 (가져오기 또는 생성).
+    3. LLM을 통해 첫 번째 질문 생성.
+    4. Interview_Progress에 저장.
     """
     interview_number = str(uuid.uuid4())
     conn = get_db_connection()
     c = conn.cursor()
     
     try:
-        # Get Resume Path
+        # 이력서 경로 가져오기
         c.execute("SELECT resume FROM interview_information WHERE id_name = %s AND job = %s ORDER BY created_at DESC LIMIT 1", (data.id_name, data.job_title))
         row = c.fetchone()
         if not row:
-             # Fallback: try finding any resume for this user
+             # 대체 방안: 해당 사용자의 아무 이력서나 찾기
              c.execute("SELECT resume FROM interview_information WHERE id_name = %s ORDER BY created_at DESC LIMIT 1", (data.id_name,))
              row = c.fetchone()
              if not row:
@@ -44,26 +44,26 @@ async def start_interview(background_tasks: BackgroundTasks, data: StartIntervie
         resume_path = row[0]
         resume_text = extract_text_from_pdf(resume_path)
         
-        # Determine Applicant Name
+        # 지원자 이름 확인
         c.execute("SELECT name FROM users WHERE id_name = %s", (data.id_name,))
         user_row = c.fetchone()
         applicant_name = user_row[0] if user_row else "지원자"
 
-        # 1. First Question: Self Introduction (Fixed)
+        # 1. 첫 번째 질문: 자기소개 (고정)
         first_question = f"안녕하세요, {applicant_name}님. 면접을 시작하겠습니다. 먼저 간단하게 자기소개를 부탁드립니다."
         
-        # Determine Session Name (e.g., 면접-1)
+        # 세션 이름 결정 (예: 면접-1)
         c.execute("SELECT COUNT(DISTINCT interview_number) FROM Interview_Progress WHERE id_name = %s", (data.id_name,))
         interview_count = c.fetchone()[0]
         session_name = f"면접-{interview_count + 1}"
 
-        # Resume Summarization (New Feature)
+        # 이력서 요약 (새 기능)
         resume_summary = summarize_resume(resume_text)
 
-        # Prepare Question Pool in Background
+        # 백그라운드에서 질문 풀 준비
         background_tasks.add_task(get_job_questions, data.job_title)
 
-        # Save to DB
+        # DB에 저장
         c.execute('''
             INSERT INTO Interview_Progress (
                 Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name, announcement_id
@@ -113,19 +113,19 @@ async def submit_answer(
 ):
     """
     1. STT (Whisper).
-    2. Find Previous Question.
-    3. Evaluate Answer.
-    4. Generate Next Question.
-    5. Save & Return.
+    2. 이전 질문 찾기.
+    3. 답변 평가.
+    4. 다음 질문 생성.
+    5. 저장 및 반환.
     """
     
     conn = None
     try:
-        # 1. Connect DB & Get Session Info FIRST to determine filename
+        # 1. 파일명을 결정하기 위해 DB를 연결하고 세션 정보를 먼저 가져옵니다.
         conn = get_db_connection()
         c = conn.cursor()
         
-        # We find the latest row for this interview
+        # 이 면접의 가장 마지막 행을 찾습니다.
         c.execute("""
             SELECT id, Create_Question, Resume, id_name, announcement_id FROM Interview_Progress 
             WHERE Interview_Number = %s 
@@ -144,12 +144,12 @@ async def submit_answer(
         id_name = row[3]
         announcement_id = row[4]
         
-        # Get session_name
+        # 세션 이름 가져오기
         c.execute("SELECT session_name FROM Interview_Progress WHERE id = %s", (current_row_id,))
         session_name = c.fetchone()[0]
 
-        # 2. Save Audio File with NEW FORMAT
-        # Format: YYYY-MM-DD-HH-MM-SS-{session_name}.webm
+        # 2. 새로운 형식으로 오디오 파일 저장
+        # 형식: YYYY-MM-DD-HH-MM-SS-{session_name}.webm
         timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
         audio_filename = f"{timestamp}-{session_name}.webm"
         audio_path = os.path.join(AUDIO_FOLDER, audio_filename)
@@ -157,20 +157,20 @@ async def submit_answer(
         with open(audio_path, "wb") as buffer:
             shutil.copyfileobj(audio.file, buffer)
             
-        # 3. STT (Whisper + Gemini + Analysis)
+        # 3. STT (Whisper + Gemini + 분석)
         stt_result = transcribe_audio(audio_path)
         
-        # Handle new dict return format
+        # 딕셔너리 반환 형식 처리
         if isinstance(stt_result, dict):
             applicant_answer = stt_result.get("text", "")
             audio_analysis = stt_result.get("analysis", {})
             logger.info(f"Audio Analysis: {audio_analysis}")
         else:
-            # Fallback for legacy return
+            # 레거시 반환을 위한 대체 수단
             applicant_answer = str(stt_result)
             audio_analysis = None
         
-        # 4. Determine Question Phase
+        # 4. 질문 단계 결정
         c.execute("SELECT COUNT(*) FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
         current_q_count = c.fetchone()[0]
         logger.info(f"Answer Submission. Interview={interview_number}, Count={current_q_count}")
@@ -185,16 +185,16 @@ async def submit_answer(
         else:
             next_phase = "END"
 
-        # 5. Fetch Job Questions for Reference
+        # 5. 참고용 직무 질문 가져오기
         ref_questions = get_job_questions(job_title)
 
-        # 6. Evaluate & Generate Next Question
-        # Fetch ALL previous questions to prevent duplicates
+        # 6. 평가 및 다음 질문 생성
+        # 중복을 방지하기 위해 이전의 모든 질문을 가져옵니다.
         c.execute("SELECT Create_Question FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
         history_rows = c.fetchall()
         
-        # history_rows is list of tuples, e.g. [('q1',), ('q2',)]
-        # Use a consistent name 'history_questions'
+        # history_rows는 튜플의 리스트입니다. (예: [('q1',), ('q2',)])
+        # 일관된 이름인 'history_questions'를 사용합니다.
         history_questions = [r[0] for r in history_rows if r[0]]
 
         evaluation, next_question = evaluate_answer(
@@ -210,17 +210,17 @@ async def submit_answer(
             audio_analysis=audio_analysis # Pass analysis
         )
 
-        # --- NEW: Append Video Analysis Summary ---
+        # --- NEW: 비디오 분석 요약 추가 ---
         from ..services.analysis_service import get_recent_video_log_summary
-        # Determine duration from answer_time if possible, else default 60s
-        # answer_time string format is unknown, defaulting to check last 60s
+        # 가능하면 answer_time에서 지속 시간을 결정하고, 그렇지 않으면 기본값 60초 사용
+        # answer_time 문자열 형식을 알 수 없으므로, 기본적으로 마지막 60초를 확인합니다.
         video_summary = get_recent_video_log_summary(interview_number, duration_seconds=60)
         
         if video_summary:
             evaluation += f"\n\n{video_summary}"
         # ------------------------------------------
 
-        # 7. Save Current Answer & Evaluation
+        # 7. 현재 답변 및 평가 저장
         c.execute("""
             UPDATE Interview_Progress 
             SET Question_answer = %s, answer_time = %s, Answer_Evaluation = %s
@@ -232,7 +232,7 @@ async def submit_answer(
              interview_finished = True
              background_tasks.add_task(analyze_interview_result, interview_number, job_title, applicant_name, id_name, announcement_id)
         else:
-            # 8. Insert Next Question Record (if not END)
+            # 8. 다음 질문 레코드 삽입 (END가 아닐 경우)
             c.execute('''
                 INSERT INTO Interview_Progress (
                     Interview_Number, Applicant_Name, Job_Title, Resume, Create_Question, id_name, session_name, announcement_id
@@ -241,7 +241,7 @@ async def submit_answer(
         
         conn.commit()
         conn.close()
-        conn = None # Prevent finally block from creating issues if closed
+        conn = None # 연결이 닫힌 경우 finally 블록에서 이슈가 발생하지 않도록 방지
 
         # 면접이 계속되면 다음 질문 TTS 생성
         audio_url = None
@@ -283,7 +283,7 @@ async def upload_resume(resume: UploadFile = File(...), id_name: str = Form(...)
     if not resume.filename.lower().endswith('.pdf'):
          raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
     
-    filename = f"{id_name}_{uuid.uuid4()}_{resume.filename}" # More secure filename
+    filename = f"{id_name}_{uuid.uuid4()}_{resume.filename}" # 더 안전한 파일 이름
     filepath = os.path.join(UPLOAD_FOLDER, filename)
     
     try:
@@ -292,7 +292,7 @@ async def upload_resume(resume: UploadFile = File(...), id_name: str = Form(...)
             
         conn = get_db_connection()
         c = conn.cursor()
-        # Delete old resume for this user/job if needed, or just insert new
+        # 필요한 경우 이 사용자/직무에 대한 기존 이력서를 삭제하거나 단순히 새로 삽입합니다.
         c.execute('''
             INSERT INTO interview_information (id_name, job, resume)
             VALUES (%s, %s, %s)

@@ -1,7 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional
 
-# --- User Models ---
+# --- 사용자 모델 ---
 class UserRegister(BaseModel):
     id_name: str
     pw: str
@@ -34,7 +34,7 @@ class UserUpdate(BaseModel):
 class IdCheckRequest(BaseModel):
     id_name: str
 
-# --- Job Models ---
+# --- 공고 모델 ---
 class JobCreate(BaseModel):
     title: str
     job: Optional[str] = ''
@@ -59,13 +59,13 @@ class JobUpdate(BaseModel):
     number_of_hires: Optional[str] = ''
     id_name: Optional[str] = None
 
-# --- Interview Models ---
+# --- 면접 모델 ---
 class StartInterviewRequest(BaseModel):
     id_name: str
     job_title: str
     announcement_id: Optional[int] = None
 
-# --- ID/PW Recovery Models ---
+# --- 아이디/비밀번호 찾기 모델 ---
 class FindIdRequest(BaseModel):
     name: str
     email: str

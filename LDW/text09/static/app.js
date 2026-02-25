@@ -1,15 +1,15 @@
 /**
- * AI Interview Program - Main Application Logic
- * Stack: Vanilla JS (ES6+)
- * Features: SPA Routing, API Integration, Audio Recording, Interview Logic
+ * AI 면접 프로그램 - 메인 애플리케이션 로직
+ * 스택: 바닐라 JS (ES6+)
+ * 기능: SPA 라우팅, API 연동, 오디오 녹음, 면접 로직
  */
 
-// --- 0. Mock Data (Data Model) ---
+// --- 0. 목 데이터 (데이터 모델) ---
 const MOCK_DB = {
     jobs: [],
 };
 
-// --- 1. Global State ---
+// --- 1. 전역 상태 ---
 const AppState = {
     currentUser: null,
     currentJobId: null,
@@ -36,7 +36,7 @@ const AppState = {
     }
 };
 
-// --- 2. Helper Functions ---
+// --- 2. 헬퍼 함수 ---
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => document.querySelectorAll(selector);
 
@@ -73,7 +73,7 @@ function clearSignupForm() {
     }
 }
 
-// --- 3. Initialization ---
+// --- 3. 초기화 ---
 document.addEventListener('DOMContentLoaded', () => {
     console.log("[System] Application initialization started.");
 
@@ -237,7 +237,7 @@ function resetFindForms() {
     $('#find-pw-step2-ui').classList.add('hidden');
 }
 
-// --- 4. Router ---
+// --- 4. 라우터 ---
 function initRouter() {
     window.navigateTo = (pageId) => {
         $$('.page').forEach(el => el.classList.add('hidden'));
@@ -252,12 +252,12 @@ function initRouter() {
             if (pageId === 'admin-dashboard-page') fetchJobs();
             if (pageId === 'my-records-page') fetchMyRecords();
 
-            // Auto-start device test when entering setup page
+            // 설정 페이지 진입 시 기기 테스트 자동 시작
             if (pageId === 'interview-setup-page') {
                 testDevices();
             }
 
-            // Clear signup form when entering signup page
+            // 회원가입 페이지 진입 시 폼 초기화
             if (pageId === 'signup-page') {
                 clearSignupForm();
             }
@@ -277,9 +277,9 @@ function initRouter() {
     });
 }
 
-// --- 5. Auth ---
+// --- 5. 인증 ---
 function initAuth() {
-    // ID Duplicate Check
+    // 아이디 중복 확인
     $('#btn-check-id').addEventListener('click', async () => {
         const idInput = $('#reg-id');
         const msgBox = $('#id-check-msg');
@@ -387,7 +387,7 @@ function loginUser(user) {
     else navigateTo('applicant-dashboard-page');
 }
 
-// --- 6. Dashboard & Jobs ---
+// --- 6. 대시보드 및 공고 ---
 function initDashboard() {
     $('#link-my-info').addEventListener('click', () => {
         // [Modified] Show Password Check Page first
@@ -509,7 +509,7 @@ function renderMyRecords(records) {
     });
 }
 
-// --- 6.1 My Info Logic ---
+// --- 6.1 내 정보 로직 ---
 async function loadMyInfo() {
     if (!AppState.currentUser) return;
 
@@ -650,7 +650,7 @@ $('#btn-cancel-pw-change').addEventListener('click', () => {
     navigateTo('myinfo-page');
 });
 
-// --- 6.2 Password Check Logic (New) ---
+// --- 6.2 비밀번호 확인 로직 (신규) ---
 $('#password-check-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const pw = $('#check-pw-input').value;
@@ -686,7 +686,7 @@ $('#btn-cancel-pw-check').addEventListener('click', () => {
     else navigateTo('applicant-dashboard-page');
 });
 
-// --- 7. Interview Setup ---
+// --- 7. 면접 설정 ---
 window.startInterviewSetup = (jobId) => {
     AppState.currentJobId = jobId;
     const job = MOCK_DB.jobs.find(j => j.id === jobId);
@@ -783,7 +783,7 @@ async function testDevices() {
 
 $('#btn-cancel-interview').addEventListener('click', () => navigateTo('applicant-dashboard-page'));
 
-// --- 8. Interview Logic ---
+// --- 8. 면접 로직 ---
 function initInterview() {
     $('#btn-start-interview').addEventListener('click', handleStartInterview);
     $('#btn-submit-answer').addEventListener('click', handleSubmitAnswer);
@@ -1394,7 +1394,7 @@ function playAudio(url, callback) {
 }
 
 
-// --- 9. Admin Functions ---
+// --- 9. 관리자 기능 ---
 function initAdmin() {
     $('#admin-menu-jobs').addEventListener('click', () => {
         $('#admin-view-jobs').classList.remove('hidden');

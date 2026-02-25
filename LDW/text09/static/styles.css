@@ -26,7 +26,7 @@ body {
     line-height: 1.6;
 }
 
-/* Utilities */
+/* 유틸리티 */
 .hidden {
     display: none !important;
 }
@@ -47,7 +47,8 @@ body {
 }
 
 .btn-primary:disabled {
-    background-color: #999; /* Darker gray for better visibility */
+    background-color: #999;
+    /* Darker gray for better visibility */
     cursor: not-allowed;
     opacity: 0.7;
 }
@@ -94,7 +95,7 @@ body {
     background-color: #f0f0f0;
 }
 
-/* Navbar */
+/* 네비게이션 바 */
 #navbar {
     background-color: white;
     padding: 15px 30px;
@@ -127,7 +128,7 @@ body {
     color: var(--text-color);
 }
 
-/* Layouts */
+/* 레이아웃 */
 .page {
     padding: 40px 20px;
     display: flex;
@@ -185,7 +186,7 @@ body {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
-/* Auth forms */
+/* 인증 폼 */
 .auth-container {
     background: var(--card-bg);
     padding: 40px;
@@ -216,12 +217,15 @@ body {
     padding: 10px;
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    font-family: inherit; /* Ensure font consistency */
+    font-family: inherit;
+    /* Ensure font consistency */
 }
 
 .form-group textarea {
-    resize: vertical; /* Allow vertical resizing only */
-    min-height: 150px; /* Default height for better UX */
+    resize: vertical;
+    /* Allow vertical resizing only */
+    min-height: 150px;
+    /* Default height for better UX */
 }
 
 .auth-links {
@@ -234,7 +238,7 @@ body {
     color: var(--primary-color);
 }
 
-/* Job List */
+/* 공고 목록 */
 .job-card {
     border: 1px solid var(--border-color);
     padding: 15px;
@@ -254,7 +258,7 @@ body {
     font-size: 0.9rem;
 }
 
-/* Interview Setup */
+/* 면접 설정 */
 .setup-container {
     max-width: 600px;
 }
@@ -290,7 +294,7 @@ body {
     color: var(--success-color);
 }
 
-/* Interview Room */
+/* 면접실 */
 .interview-room {
     display: flex;
     flex-direction: column;
@@ -387,7 +391,8 @@ body {
 }
 
 .user-area {
-    width: 341px; /* To maintain aspect ratio with interviewer height if needed or just fixed */
+    width: 341px;
+    /* To maintain aspect ratio with interviewer height if needed or just fixed */
     height: 256px;
     background: black;
     border-radius: 8px;
@@ -461,7 +466,7 @@ body {
     resize: none;
 }
 
-/* Result Page */
+/* 결과 페이지 */
 .result-card {
     background: white;
     padding: 30px;
@@ -503,7 +508,7 @@ body {
     transition: width 1s;
 }
 
-/* Animations */
+/* 애니메이션 */
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -516,7 +521,7 @@ body {
     }
 }
 
-/* Toast */
+/* 토스트창 */
 #toast-container {
     position: fixed;
     top: 20px;
@@ -533,7 +538,7 @@ body {
     animation: fadeIn 0.3s;
 }
 
-/* Modal Styles */
+/* 모달 스타일 */
 .modal {
     position: fixed;
     top: 0;
@@ -575,7 +580,7 @@ body {
     color: #999;
 }
 
-/* Detail View Layout */
+/* 상세 뷰 레이아웃 */
 .detail-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -596,7 +601,7 @@ body {
     padding: 25px;
     border-radius: 12px;
     margin-bottom: 25px;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
     border: 1px solid #e0e0e0;
     text-align: center;
 }
@@ -623,7 +628,7 @@ body {
 
 .score-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
 }
 
 .score-header {
@@ -631,7 +636,8 @@ body {
     flex-direction: column;
     align-items: center;
     margin-bottom: 15px;
-    border-bottom: 2px solid #e0e0e0; /* Separator */
+    border-bottom: 2px solid #e0e0e0;
+    /* Separator */
     padding-bottom: 10px;
 }
 
@@ -643,7 +649,8 @@ body {
 }
 
 .score-number {
-    font-size: 2.2rem; /* Larger Font Size for Score */
+    font-size: 2.2rem;
+    /* Larger Font Size for Score */
     font-weight: 800;
     color: var(--primary-color);
 }
@@ -652,17 +659,22 @@ body {
     font-size: 0.95rem;
     color: #444;
     line-height: 1.6;
-    text-align: left; /* Align text to left for readability */
-    word-break: break-word; /* Prevent overflow */
-    white-space: pre-wrap; /* Preserve line breaks */
+    text-align: left;
+    /* Align text to left for readability */
+    word-break: break-word;
+    /* Prevent overflow */
+    white-space: pre-wrap;
+    /* Preserve line breaks */
     background: #fff;
     padding: 10px;
     border-radius: 6px;
     border: 1px solid #eee;
-    flex-grow: 1; /* Fill remaining height */
+    flex-grow: 1;
+    /* Fill remaining height */
 }
 
-.resume-box, .log-box {
+.resume-box,
+.log-box {
     background: #fff;
     border: 1px solid #ddd;
     border-radius: 8px;
@@ -703,10 +715,17 @@ body {
     margin-top: 10px;
 }
 
-.pass-status.pass { background: #d4edda; color: #155724; }
-.pass-status.fail { background: #f8d7da; color: #721c24; }
+.pass-status.pass {
+    background: #d4edda;
+    color: #155724;
+}
 
-/* Resume Image Gallery */
+.pass-status.fail {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* 이력서 이미지 갤러리 */
 .resume-gallery {
     display: flex;
     flex-direction: column;
@@ -718,7 +737,7 @@ body {
     width: 100%;
     max-width: 300px;
     border: 1px solid #ddd;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
     cursor: pointer;
     transition: transform 0.2s;
 }
@@ -728,9 +747,10 @@ body {
     border-color: var(--primary-color);
 }
 
-/* Image Zoom Modal */
+/* 이미지 확대 모달 */
 #image-zoom-modal {
-    background-color: rgba(0,0,0,0.9); /* Darker background */
+    background-color: rgba(0, 0, 0, 0.9);
+    /* Darker background */
 }
 
 .modal-content-img {
@@ -738,7 +758,8 @@ body {
     display: block;
     width: auto;
     height: auto;
-    max-width: 90%; /* A4 Size Logic: Fit to screen but keep aspect ratio */
+    max-width: 90%;
+    /* A4 Size Logic: Fit to screen but keep aspect ratio */
     max-height: 95vh;
     border: 5px solid white;
 }

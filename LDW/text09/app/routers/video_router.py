@@ -9,21 +9,21 @@ from ..config import UPLOAD_FOLDER
 router = APIRouter(prefix="/api/video", tags=["video"])
 logger = logging.getLogger(__name__)
 
-# Ensure video logs directory exists
+# 비디오 로그 디렉토리가 존재하는지 확인
 VIDEO_LOGS_DIR = os.path.join(UPLOAD_FOLDER, "video_logs")
 os.makedirs(VIDEO_LOGS_DIR, exist_ok=True)
 
 def append_video_log(interview_number: str, analysis_result: dict):
     """
-    Appends the analysis result to a JSON file for the specific interview.
+    특정 면접의 JSON 파일에 분석 결과를 추가합니다.
     """
     try:
         file_path = os.path.join(VIDEO_LOGS_DIR, f"{interview_number}.json")
         
-        # Add timestamp
+        # 타임스탬프 추가
         analysis_result["timestamp"] = time.time()
         
-        # Read existing or create new
+        # 기존 파일 읽기 또는 새로 만들기
         if os.path.exists(file_path):
             with open(file_path, "r+", encoding="utf-8") as f:
                 try:
@@ -49,15 +49,15 @@ async def analyze_frame(
     frame: UploadFile = File(...)
 ):
     """
-    Receives a video frame, analyzes it, and logs the result.
+    비디오 프레임을 수신하여 분석하고 결과를 로깅합니다.
     """
     try:
         contents = await frame.read()
         
-        # Perform analysis
+        # 분석 수행
         result = video_analysis_service.process_frame(contents)
         
-        # Log to file in background
+        # 백그라운드에서 파일에 로깅
         background_tasks.add_task(append_video_log, interview_number, result)
         
         return {"success": True, "analysis": result}

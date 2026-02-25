@@ -8,7 +8,7 @@ from .routers import auth, user, job, interview, admin, video_router
 
 app = FastAPI()
 
-# CORS
+# CORS 설정
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,7 +17,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routers
+# 라우터 포함
 app.include_router(auth.router)
 app.include_router(user.router)
 app.include_router(job.router)
