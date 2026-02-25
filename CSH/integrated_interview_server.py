@@ -1932,14 +1932,10 @@ class AIInterviewer:
                 )
             )
 
-        # ========== 4. chat_history → LangChain Message 변환 (최근 3턴) ==========
-        MAX_HISTORY_MESSAGES = 6
-        history_messages = self.chat_history_to_messages(
-            chat_history, max_messages=MAX_HISTORY_MESSAGES
-        )
-        messages.extend(history_messages)
-
-        # ========== 5. RAG 컨텍스트 (evaluate 노드에서 사전 조회한 결과) ==========
+        # ========== 4. RAG 컨텍스트 (배경 지식으로 대화 전에 배치) ==========
+        # ★ 핵심: RAG를 대화 기록 앞에 배치하여 자연스러운 대화 흐름을 유지
+        # RAG가 대화 뒤에 끼어들면 LLM이 사용자 답변보다 RAG 내용에 집중하여
+        # 맥락 없는 질문을 생성하는 문제 밌생
         if resume_context:
             context_msg = (
                 f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n"
@@ -1958,7 +1954,18 @@ class AIInterviewer:
             )
             messages.append(SystemMessage(content=qa_msg))
 
-        # ========== 6. 질문 생성 프롬프트 (꼬리질문 정보 포함) ==========
+        # ========== 5. chat_history → LangChain Message 변환 (최근 5턴) ==========
+        # ★ 핵심: 대화 기록이 메시지 목록의 마지막 위치에 오도록 하여
+        # LLM이 직전 대화 맥락을 가장 강하게 인식하고,
+        # 바로 다음에 오는 question_prompt와 자연스럽게 연결됨.
+        # 6→10으로 증가: 면접 후반부에도 초반 대화 맥락 유지
+        MAX_HISTORY_MESSAGES = 10  # 5턴 = assistant 5 + user 5
+        history_messages = self.chat_history_to_messages(
+            chat_history, max_messages=MAX_HISTORY_MESSAGES
+        )
+        messages.extend(history_messages)
+
+        # ========== 6. 질문 생성 프롬프트 (꼬리질문 정보 + 사용자 답변 포함) ==========
         follow_up_instruction = ""
         if needs_follow_up and topic_count < 2:
             follow_up_instruction = (
@@ -1979,6 +1986,7 @@ class AIInterviewer:
             current_topic=current_topic,
             topic_count=topic_count,
             follow_up_instruction=follow_up_instruction,
+            user_answer=user_answer,  # ★ 사용자 답변을 프롬프트에 명시적으로 포함
         )
         messages.append(HumanMessage(content=question_prompt))
 
@@ -2304,26 +2312,36 @@ class AIInterviewer:
                     f"📋 LLM에 공고 컨텍스트 주입: [{job_posting.get('company')}] {job_posting.get('title')}"
                 )
 
-            # ========== 4-2. chat_history → LangChain Message 변환 ==========
-            # ⚡ 성능 최적화: 최근 3턴(6메시지)만 포함하여 컨텍스트 윈도우 절약
-            #    num_ctx=8192에서 전체 히스토리를 넣으면 후반부에 토큰이 부족해질 수 있으므로
-            #    최근 대화만 유지하여 안정적인 응답 생성 보장
-            #    단일 소스(chat_history)에서 변환하므로 이중 관리 문제 없음
-            MAX_HISTORY_MESSAGES = 6  # 3턴 = assistant 3개 + user 3개
+            # ========== 4-2. RAG 컨텍스트 (배경 지식으로 대화 전에 배치) ==========
+            # ★ 핵심: RAG를 대화 기록 앞에 배치하여 자연스러운 대화 흐름을 유지
+            # RAG가 대화 뒤에 끼어들면 LLM이 사용자 답변보다 RAG 내용에 집중하여
+            # 맥락 없는 질문을 생성하는 문제 발생
+            if resume_context:
+                context_msg = (
+                    f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n"
+                    f"{resume_context}\n"
+                    f"------------------------------------------"
+                )
+                messages.append(SystemMessage(content=context_msg))
+
+            if qa_reference_context:
+                qa_msg = (
+                    f"\n--- [RAG System] 면접 참고 자료 (모범 답변 DB) ---\n"
+                    f"{qa_reference_context}\n"
+                    f"이 참고 자료를 바탕으로 지원자의 답변 수준을 판단하고, "
+                    f"더 깊은 꼬리질문을 만들어주세요.\n"
+                    f"------------------------------------------"
+                )
+                messages.append(SystemMessage(content=qa_msg))
+
+            # ========== 4-3. chat_history → LangChain Message 변환 (최근 5턴) ==========
+            # ★ 핵심: 대화 기록이 메시지 목록의 마지막 위치에 오도록 하여
+            # LLM이 직전 대화 맥락을 가장 강하게 인식함
+            MAX_HISTORY_MESSAGES = 10  # 5턴 = assistant 5 + user 5
             history_messages = self.chat_history_to_messages(
                 chat_history, max_messages=MAX_HISTORY_MESSAGES
             )
             messages.extend(history_messages)
-
-            # ========== 5. 이력서 RAG 컨텍스트 추가 ==========
-            if resume_context:
-                context_msg = f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n{resume_context}\n------------------------------------------"
-                messages.append(SystemMessage(content=context_msg))
-
-            # ========== 5-1. 면접 Q&A 참조 데이터 컨텍스트 추가 ==========
-            if qa_reference_context:
-                qa_msg = f"\n--- [RAG System] 면접 참고 자료 (모범 답변 DB) ---\n{qa_reference_context}\n이 참고 자료를 바탕으로 지원자의 답변 수준을 판단하고, 더 깊은 꼬리질문을 만들어주세요.\n------------------------------------------"
-                messages.append(SystemMessage(content=qa_msg))
 
             # ========== 6. 질문 생성 프롬프트 (꼬리질문 정보 포함) ==========
             follow_up_instruction = ""
@@ -2343,6 +2361,7 @@ class AIInterviewer:
                 current_topic=current_topic,
                 topic_count=topic_count,
                 follow_up_instruction=follow_up_instruction,
+                user_answer=user_answer,  # ★ 사용자 답변을 프롬프트에 명시적으로 포함
             )
 
             messages.append(HumanMessage(content=question_prompt))
@@ -5701,18 +5720,16 @@ async def chat_stream(
                 )
                 messages.append(SystemMessage(content=jp_ctx))
 
-            # chat_history → LangChain Message 변환 (최근 3턴)
-            MAX_HIST = 6
-            history_msgs = interviewer.chat_history_to_messages(
-                chat_history, max_messages=MAX_HIST
-            )
-            messages.extend(history_msgs)
-
-            # RAG 컨텍스트 추가
+            # RAG 컨텍스트 (배경 지식으로 대화 전에 배치)
+            # ★ 핵심: RAG를 대화 기록 앞에 배치하여 자연스러운 대화 흐름을 유지
             if resume_context:
                 messages.append(
                     SystemMessage(
-                        content=f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n{resume_context}\n------------------------------------------"
+                        content=(
+                            f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n"
+                            f"{resume_context}\n"
+                            f"------------------------------------------"
+                        )
                     )
                 )
             if qa_context:
@@ -5726,6 +5743,15 @@ async def chat_stream(
                         )
                     )
                 )
+
+            # chat_history → LangChain Message 변환 (최근 5턴)
+            # ★ 핵심: 대화 기록이 RAG 뒤, 지시 프롬프트 앞에 위치하여
+            # LLM이 직전 대화 맥락을 가장 강하게 인식
+            MAX_HIST = 10  # 5턴 = assistant 5 + user 5
+            history_msgs = interviewer.chat_history_to_messages(
+                chat_history, max_messages=MAX_HIST
+            )
+            messages.extend(history_msgs)
 
             # 질문 생성 프롬프트 (꼬리질문 정보 포함)
             follow_up_instruction = ""
@@ -5748,6 +5774,7 @@ async def chat_stream(
                 current_topic=current_topic,
                 topic_count=topic_count,
                 follow_up_instruction=follow_up_instruction,
+                user_answer=sanitized_message,  # ★ 사용자 답변을 프롬프트에 명시적으로 포함
             )
             messages.append(HumanMessage(content=q_prompt))
 

@@ -22,6 +22,9 @@ INTERVIEWER_PROMPT = """당신은 IT 기업의 30년차 수석 개발자 면접�
 3. 동일한 기술적 주제에 대해 2번의 답변을 들었다면, "알겠습니다. 다음은..."이라며 주제를 전환하세요.
 4. 면접은 총 10개의 질문으로 진행됩니다.
 5. 현재 질문 번호를 인지하고, 10번째 질문에서는 마무리 질문을 하세요.
+6. ★ 반드시 지원자의 직전 답변 내용을 정확히 읽고, 그 답변에서 언급된 구체적인 기술·경험·프로젝트에 직접 관련된 후속 질문을 하세요.
+7. 지원자가 답변에서 특정 기술(예: React, Docker 등)이나 경험을 언급했다면, 반드시 그 기술/경험을 기반으로 깊이 있는 질문을 이어가세요.
+8. 절대로 지원자의 답변과 무관한 질문을 하지 마세요. 맥락 없는 질문 전환은 금지됩니다.
 
 질문을 할 때 너무 공격적이지 않게, 정중하지만 날카로운 태도를 유지하세요.
 면접은 자기소개로 시작합니다."""
@@ -72,16 +75,32 @@ def build_question_prompt(
     current_topic: str,
     topic_count: int,
     follow_up_instruction: str = "",
+    user_answer: str = "",
 ) -> str:
-    """질문 생성용 공통 프롬프트를 반환합니다."""
+    """질문 생성용 공통 프롬프트를 반환합니다.
+
+    Args:
+        question_count: 현재까지 진행된 질문 수
+        max_questions: 최대 질문 수
+        current_topic: 현재 토픽 (예: project, technical 등)
+        topic_count: 현재 토픽 내에서 진행된 질문 수
+        follow_up_instruction: 꼬리질문/주제전환 지시 (선택)
+        user_answer: 지원자의 직전 답변 원문 (LLM이 문맥을 정확히 파악하도록)
+    """
+    # 지원자 답변 요약 (너무 길면 앞 300자만 포함)
+    answer_section = ""
+    if user_answer and user_answer not in ("[START]", "[NEXT]", ""):
+        truncated = user_answer[:300] + ("..." if len(user_answer) > 300 else "")
+        answer_section = f"\n[지원자의 직전 답변]\n{truncated}\n"
+
     return f"""[현재 상황]
 - 진행된 질문 수: {question_count}/{max_questions}
 - 남은 질문 수: {max_questions - question_count}
 - 현재 주제: {current_topic}
 - 주제 내 질문 횟수: {topic_count}/2
 {follow_up_instruction}
-
-지원자의 답변을 바탕으로 다음 질문을 **정확히 1개만** 생성해주세요.
+{answer_section}
+★ 위 답변 내용에서 언급된 구체적 기술·경험·프로젝트를 기반으로 다음 질문을 **정확히 1개만** 생성해주세요.
 {"마지막 질문이니 마무리 질문을 해주세요." if question_count == max_questions - 1 else ""}
 질문만 작성하세요. 부가 설명은 필요 없습니다. 여러 질문을 나열하지 마세요.
 반드시 한국어로 질문하세요."""
