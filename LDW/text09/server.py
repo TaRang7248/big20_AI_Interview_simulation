@@ -50,7 +50,6 @@ if __name__ == "__main__":
     browser_thread.start()
 
     # FastAPI 앱을 Uvicorn ASGI 서버를 통해 실행합니다.
-    # 서버 실행과 앱 시작을 담당하는 핵심 부분입니다.
     try:
         uvicorn.run(
             "app.main:app",
@@ -60,5 +59,5 @@ if __name__ == "__main__":
             log_level="info",
         )
     except Exception as e:
-        # 서버 실행 중 발생할 수 있는 잠재적인 오류를 잡아내고 출력합니다.
+        # 서버 실행 중 발생할 수 있는 잠재적인 오류를 출력합니다.
         print(f"[오류] 서버 실행 중 다음과 같은 문제가 발생했습니다: {e}")

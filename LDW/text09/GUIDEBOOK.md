@@ -129,7 +129,7 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 - **Google Gemini (Multimodal)**: 고성능 음성 인식 (STT) - [유지]
 - **OpenAI Whisper**: 음성 인식 (STT) 교차 검증용 모델 - **[NEW]** Gemini와 결과 비교
 - **Python Levenshtein**: 두 STT 결과 간의 유사도 정밀 분석 **[NEW]**
-- **Edge-TTS**: 자연스러운 음성 합성 (TTS)
+- **gTTS**: 안정적인 구글 기반 음성 합성 (TTS) - **[UPDATED]** 기존 Edge-TTS의 403 연결 오류 대체
 - **PyAudio**: 오디오 입출력 처리
 - **MoveNet Thunder (Google)**: 실시간 자세(Pose) 분석
 - **DeepFace (Facebook) / OpenCV**: 표정 기반 감정 분석 (영상 분석 데이터로 활용)

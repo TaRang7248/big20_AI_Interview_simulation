@@ -30,7 +30,7 @@ websockets==12.0
 
 # TTS (음성 합성)
 aiohttp==3.11.12
-edge-tts==6.1.13
+gTTS==2.5.1
 
 # LLM 오케스트레이션 / RAG
 google-generativeai==0.7.2
