@@ -2,7 +2,7 @@ import os
 import uuid
 from ..config import TTS_FOLDER, logger
 
-async def generate_tts_audio(text, voice="ko-KR-SunHiNeural"):
+async def generate_tts_audio(text, voice="fr-FR-RemyMultilingualNeural"):
     """
     Microsoft Edge TTS를 사용하여 음성을 합성하고 파일로 저장합니다.
     이후 Wav2Lip 비디오 생성을 시도하며, 실패 시 오디오 URL만 반환합니다.
