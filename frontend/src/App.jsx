@@ -1,7 +1,5 @@
 // App.jsx
 import React, { useState, useEffect, useRef } from "react";
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-
 import axios from "axios";
 
 import RequireAuth_yyr from "./pages_yyr/RequireAuth_yyr";
@@ -10,6 +8,9 @@ import AdminPage_yyr from "./pages_yyr/AdminPage_yyr";
 
 import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
 import InterviewPage_yyr from "./pages_yyr/InterviewPage_yyr";
+import UserHomePage_yyr from "./pages_yyr/UserHomePage_yyr";
+
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 // 백엔드 주소
 const API_BASE_URL = "http://127.0.0.1:8001";
@@ -21,6 +22,7 @@ function createSessionId() {
 
 function App() {
   const location = useLocation();
+  const nav = useNavigate();
 
   const [visionResult, setVisionResult] = useState("분석 대기 중...");
   const [chatLog, setChatLog] = useState([]);
@@ -40,24 +42,27 @@ function App() {
 
   const audioPlayerRef = useRef(null);
 
-  // ✅ /interview 진입 시마다 "새 세션" 발급
+  // ✅ /user/home 진입 시 "새 세션" 발급 (로비 시작점)
   useEffect(() => {
-    if (location.pathname === "/interview") {
-      const newId = createSessionId();
-      setSessionId(newId);
+    if (location.pathname !== "/user/home") return;
 
-      // 새 면접 시작이니 UI 상태도 초기화(이전 면접과 섞이는 거 방지)
-      setChatLog([]);
-      setIsResumeUploaded(false);
-      setShowReport(false);
-      setReportData(null);
-      setVisionResult("분석 대기 중...");
-      setInterviewPhase("lobby");
-      setIsProcessing(false);
+    // 이미 발급된 세션이 있으면 재발급하지 않음 (중요)
+    if (sessionId) return;
 
-      console.log("✅ New interview session:", newId);
-    }
-  }, [location.pathname]);
+    const newId = createSessionId();
+    setSessionId(newId);
+
+    // 로비 진입이니 초기화
+    setChatLog([]);
+    setIsResumeUploaded(false);
+    setShowReport(false);
+    setReportData(null);
+    setVisionResult("분석 대기 중...");
+    setInterviewPhase("lobby");
+    setIsProcessing(false);
+
+    console.log("✅ New session in user/home:", newId);
+  }, [location.pathname, sessionId]);
 
   // 1) 비전 분석 (WebcamView에서 3초마다 스냅샷 전달)
   const handleVideoFrame = async (imageBlob) => {
@@ -109,7 +114,10 @@ function App() {
         setInterviewPhase("ready");
         setChatLog((prev) => [
           ...prev,
-          { sender: "system", text: "✅ 이력서 분석이 완료되었습니다. 이제 맞춤형 질문이 시작됩니다." },
+          {
+            sender: "system",
+            text: "✅ 이력서 분석이 완료되었습니다. 이제 맞춤형 질문이 시작됩니다.",
+          },
         ]);
         alert("이력서가 등록되었습니다!");
       }
@@ -187,9 +195,30 @@ function App() {
     }
   };
 
-  // ✅ 면접 시작 (lobby → live)
+  // ✅ 새 면접 시작(= 새 세션 발급 + 초기화) : 다른 이력서/새 세션 용
+  const handleNewInterview = () => {
+    const newId = createSessionId();
+    setSessionId(newId);
+
+    setChatLog([]);
+    setIsResumeUploaded(false);
+    setShowReport(false);
+    setReportData(null);
+    setVisionResult("분석 대기 중...");
+    setInterviewPhase("lobby");
+    setIsProcessing(false);
+
+    nav("/user/home");
+  };
+
+  // ✅ 면접 시작 (ready → live) + /interview로 이동
   const handleStartInterview = () => {
+    if (!isResumeUploaded) {
+      alert("이력서 업로드를 먼저 완료해주세요.");
+      return;
+    }
     setInterviewPhase("live");
+    nav("/interview");
   };
 
   const handleLogout = () => {
@@ -207,7 +236,25 @@ function App() {
       <Route path="/result/:threadId" element={<ResultRoutePage_yyr />} />
       <Route path="/admin/result/:threadId" element={<ResultRoutePage_yyr />} />
 
-      {/* ✅ A: 면접 화면 (UI는 InterviewPage_yyr로 분리) */}
+      {/* ✅ 로비(면접 시작 전) */}
+      <Route
+        path="/user/home"
+        element={
+          <RequireAuth_yyr>
+            <UserHomePage_yyr
+              sessionId={sessionId}
+              interviewPhase={interviewPhase}
+              isResumeUploaded={isResumeUploaded}
+              onFileUpload={handleFileUpload}
+              onStartInterview={handleStartInterview}
+              onNewInterview={handleNewInterview}
+              onLogout={handleLogout}
+            />
+          </RequireAuth_yyr>
+        }
+      />
+
+      {/* ✅ 면접 진행 화면 */}
       <Route
         path="/interview"
         element={

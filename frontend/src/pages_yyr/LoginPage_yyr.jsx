@@ -59,7 +59,7 @@ export default function LoginPage_yyr() {
                         onClick={() => {
                             localStorage.setItem("auth_token", "demo-token");
                             localStorage.setItem("role", "user");
-                            nav("/interview");
+                            nav("/user/home");
                         }}
                         className="w-full mt-2 px-4 py-3 rounded-xl bg-blue-600 text-white font-extrabold hover:bg-blue-700 transition"
                     >
