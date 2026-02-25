@@ -1,6 +1,6 @@
 // src/pages_yyr/UserHomePage_yyr.jsx
 import React from "react";
-import { FaFileUpload, FaCheckCircle, FaPlay, FaTools } from "react-icons/fa";
+import { FaFileUpload, FaCheckCircle, FaPlay, FaTools, FaRedoAlt } from "react-icons/fa";
 
 export default function UserHomePage_yyr({
     sessionId,
@@ -8,6 +8,7 @@ export default function UserHomePage_yyr({
     isResumeUploaded,
     onFileUpload,
     onStartInterview,
+    onResetSession,   // ✅ 추가: 세션 리셋(새 면접 시작)
     onLogout,
 }) {
     const glass =
@@ -91,6 +92,13 @@ export default function UserHomePage_yyr({
                                 </span>
                             )}
                         </div>
+
+                        {/* ✅ 추가: 다른 이력서로 새로 시작 안내 */}
+                        {isResumeUploaded && (
+                            <p className="text-xs text-slate-500 mt-3">
+                                다른 이력서로 다시 진행하려면 아래 <b>“새 면접 시작(리셋)”</b>을 눌러주세요.
+                            </p>
+                        )}
                     </div>
 
                     {/* 2.1-4 면접 환경 테스트 (MVP: 안내만) */}
@@ -111,11 +119,12 @@ export default function UserHomePage_yyr({
                     <div className={`${glass} p-6`}>
                         <p className="text-xs text-slate-500 font-semibold">Start</p>
                         <p className="text-base font-extrabold mt-1">면접 시작</p>
+
                         <button
                             onClick={onStartInterview}
                             disabled={!canStart}
                             className={`mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-extrabold transition
-                ${canStart
+              ${canStart
                                     ? "text-white bg-gradient-to-r from-sky-500 to-violet-500 hover:opacity-95"
                                     : "bg-slate-200 text-slate-500 cursor-not-allowed"
                                 }`}
@@ -129,6 +138,25 @@ export default function UserHomePage_yyr({
                                 이력서 업로드가 완료되면 면접을 시작할 수 있어요.
                             </p>
                         )}
+
+                        {/* ✅ 추가: 세션 리셋 버튼 */}
+                        <button
+                            onClick={() => {
+                                if (!onResetSession) return;
+                                const ok = window.confirm(
+                                    "새 면접을 시작할까요?\n(현재 세션/업로드/대화 기록이 초기화됩니다)"
+                                );
+                                if (ok) onResetSession();
+                            }}
+                            className="mt-3 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl text-sm font-extrabold bg-white/70 border border-white/60 hover:bg-white transition"
+                        >
+                            <FaRedoAlt />
+                            새 면접 시작(리셋)
+                        </button>
+
+                        <p className="text-[11px] text-slate-500 mt-2">
+                            * 리셋은 “다른 이력서 업로드/다른 공고 선택” 같은 경우를 위한 MVP 버튼입니다.
+                        </p>
                     </div>
                 </section>
             </main>

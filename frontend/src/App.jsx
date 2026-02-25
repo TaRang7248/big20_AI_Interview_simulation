@@ -1,16 +1,15 @@
-// App.jsx
+// frontend/src/App.jsx
 import React, { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import RequireAuth_yyr from "./pages_yyr/RequireAuth_yyr";
 import LoginPage_yyr from "./pages_yyr/LoginPage_yyr";
 import AdminPage_yyr from "./pages_yyr/AdminPage_yyr";
 
-import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
-import InterviewPage_yyr from "./pages_yyr/InterviewPage_yyr";
 import UserHomePage_yyr from "./pages_yyr/UserHomePage_yyr";
-
-import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import InterviewPage_yyr from "./pages_yyr/InterviewPage_yyr";
+import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
 
 // 백엔드 주소
 const API_BASE_URL = "http://127.0.0.1:8001";
@@ -42,29 +41,44 @@ function App() {
 
   const audioPlayerRef = useRef(null);
 
-  // ✅ /user/home 진입 시 "새 세션" 발급 (로비 시작점)
-  useEffect(() => {
-    if (location.pathname !== "/user/home") return;
-
-    // 이미 발급된 세션이 있으면 재발급하지 않음 (중요)
-    if (sessionId) return;
-
-    const newId = createSessionId();
+  /* =========================================================
+     ✅ 세션 초기화 공통 함수
+     - 로비 진입 / 새 면접 시작(리셋) 둘 다 여기로 모으기
+  ========================================================= */
+  const resetSessionState = (newId) => {
     setSessionId(newId);
 
-    // 로비 진입이니 초기화
+    // 로비 시작점 기준 초기화
     setChatLog([]);
     setIsResumeUploaded(false);
+
     setShowReport(false);
     setReportData(null);
+    setLoadingReport(false);
+
     setVisionResult("분석 대기 중...");
     setInterviewPhase("lobby");
     setIsProcessing(false);
 
-    console.log("✅ New session in user/home:", newId);
+    console.log("✅ Session reset:", newId);
+  };
+
+  /* =========================================================
+     ✅ /user/home 진입 시: sessionId가 없으면 1회만 발급
+     - 새로고침/재진입해도 동일 세션 유지(중요)
+     - "새 이력서로 다시 시작"은 별도의 reset 버튼으로 처리
+  ========================================================= */
+  useEffect(() => {
+    if (location.pathname !== "/user/home") return;
+    if (sessionId) return; // 이미 세션 있으면 재발급 X
+
+    const newId = createSessionId();
+    resetSessionState(newId);
   }, [location.pathname, sessionId]);
 
-  // 1) 비전 분석 (WebcamView에서 3초마다 스냅샷 전달)
+  /* =========================================================
+     1) 비전 분석 (WebcamView에서 3초마다 스냅샷 전달)
+  ========================================================= */
   const handleVideoFrame = async (imageBlob) => {
     if (isProcessing) return;
 
@@ -81,11 +95,14 @@ function App() {
         if (emotion) setVisionResult(String(emotion).toUpperCase());
       }
     } catch (error) {
-      // 조용히 실패 처리(원하면 console.error로 바꿔도 됨)
+      // 조용히 실패 처리
     }
   };
 
-  // 2) 이력서 업로드
+  /* =========================================================
+     2) 이력서 업로드 (PDF) + thread_id(sessionId) 연동
+     - 성공 시 interviewPhase = "ready"
+  ========================================================= */
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -114,10 +131,7 @@ function App() {
         setInterviewPhase("ready");
         setChatLog((prev) => [
           ...prev,
-          {
-            sender: "system",
-            text: "✅ 이력서 분석이 완료되었습니다. 이제 맞춤형 질문이 시작됩니다.",
-          },
+          { sender: "system", text: "✅ 이력서 분석이 완료되었습니다. 이제 맞춤형 질문이 시작됩니다." },
         ]);
         alert("이력서가 등록되었습니다!");
       }
@@ -127,7 +141,9 @@ function App() {
     }
   };
 
-  // 3) 음성 답변 제출
+  /* =========================================================
+     3) 음성 답변 제출 (Audio → AI 음성 응답)
+  ========================================================= */
   const handleAudioSubmit = async (audioBlob) => {
     if (!sessionId) {
       alert("세션이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
@@ -164,7 +180,11 @@ function App() {
     }
   };
 
-  // 4) 리포트 생성 + 조회 (면접 종료)
+  /* =========================================================
+     4) 리포트 생성 + 조회 (면접 종료)
+     - POST /report/{thread_id} : 생성(1회)
+     - GET  /report/{thread_id}/result : 조회(표준)
+  ========================================================= */
   const handleEndInterview = async () => {
     if (!sessionId) {
       alert("세션이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
@@ -178,13 +198,11 @@ function App() {
     setReportData(null);
 
     try {
-      // 1) 생성(1회)
       await axios.post(`${API_BASE_URL}/report/${sessionId}`);
-
-      // 2) 조회(표준)
       const res = await axios.get(`${API_BASE_URL}/report/${sessionId}/result`);
 
       setReportData(res.data);
+      setInterviewPhase("report");
       console.log("reportData(GET result):", res.data);
     } catch (error) {
       console.error("리포트 생성/조회 실패:", error);
@@ -195,23 +213,10 @@ function App() {
     }
   };
 
-  // ✅ 새 면접 시작(= 새 세션 발급 + 초기화) : 다른 이력서/새 세션 용
-  const handleNewInterview = () => {
-    const newId = createSessionId();
-    setSessionId(newId);
-
-    setChatLog([]);
-    setIsResumeUploaded(false);
-    setShowReport(false);
-    setReportData(null);
-    setVisionResult("분석 대기 중...");
-    setInterviewPhase("lobby");
-    setIsProcessing(false);
-
-    nav("/user/home");
-  };
-
-  // ✅ 면접 시작 (ready → live) + /interview로 이동
+  /* =========================================================
+     ✅ 면접 시작: (ready → live) + /interview 이동
+     - 로비(/user/home)에서 '면접 시작' 버튼 눌렀을 때 호출됨
+  ========================================================= */
   const handleStartInterview = () => {
     if (!isResumeUploaded) {
       alert("이력서 업로드를 먼저 완료해주세요.");
@@ -221,8 +226,19 @@ function App() {
     nav("/interview");
   };
 
+  /* =========================================================
+     ✅ 세션 리셋: "다른 이력서로 다시 시작"을 위한 MVP
+     - 새 sessionId 발급 + 모든 상태 초기화 + /user/home 유지
+  ========================================================= */
+  const handleResetSession = () => {
+    const newId = createSessionId();
+    resetSessionState(newId);
+    nav("/user/home");
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("auth_token");
+    localStorage.removeItem("role");
     window.location.href = "/login";
   };
 
@@ -236,7 +252,7 @@ function App() {
       <Route path="/result/:threadId" element={<ResultRoutePage_yyr />} />
       <Route path="/admin/result/:threadId" element={<ResultRoutePage_yyr />} />
 
-      {/* ✅ 로비(면접 시작 전) */}
+      {/* ✅ 로비: 면접 시작 전(공고 선택/이력서/환경 테스트) */}
       <Route
         path="/user/home"
         element={
@@ -247,14 +263,14 @@ function App() {
               isResumeUploaded={isResumeUploaded}
               onFileUpload={handleFileUpload}
               onStartInterview={handleStartInterview}
-              onNewInterview={handleNewInterview}
+              onResetSession={handleResetSession}
               onLogout={handleLogout}
             />
           </RequireAuth_yyr>
         }
       />
 
-      {/* ✅ 면접 진행 화면 */}
+      {/* ✅ 면접 화면 */}
       <Route
         path="/interview"
         element={
@@ -281,6 +297,9 @@ function App() {
           </RequireAuth_yyr>
         }
       />
+
+      {/* ✅ 없는 경로는 로비로 */}
+      <Route path="*" element={<Navigate to="/user/home" replace />} />
     </Routes>
   );
 }
