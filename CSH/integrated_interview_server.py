@@ -6484,7 +6484,9 @@ async def _process_audio_with_stt_and_recording(
             punctuate=True,
             interim_results=True,
             vad_events=True,
-            endpointing=300,
+            diarize=True,
+            endpointing=500,
+            utterance_end_ms=1000,
         ) as dg_connection:
 
             def on_message(message) -> None:
@@ -6601,6 +6603,40 @@ async def _process_audio_with_stt_and_recording(
             )
             dg_connection.on(EventType.ERROR, on_error)
 
+            # ── UtteranceEnd 이벤트: utterance_end_ms(1000ms) 침묵 후 발화 종료 감지 ──
+            # 프론트엔드에 발화 종료 시점을 알려 VAD 연동 및 답변 구간 분리에 활용
+            def on_utterance_end(utterance_end_msg) -> None:
+                """발화 종료 감지 — utterance_end_ms 침묵 후 Deepgram이 전송"""
+                try:
+                    asyncio.create_task(
+                        broadcast_stt_result(
+                            session_id,
+                            {
+                                "type": "utterance_end",
+                                "timestamp": time.time(),
+                            },
+                        )
+                    )
+                except Exception as e:
+                    print(f"[STT] UtteranceEnd 처리 오류: {e}")
+
+            # UtteranceEnd 이벤트 등록 (Deepgram SDK 버전에 따라 속성명이 다를 수 있음)
+            _utter_evt = getattr(EventType, "UTTERANCE_END", None)
+            if _utter_evt:
+                dg_connection.on(_utter_evt, on_utterance_end)
+            else:
+                try:
+                    from deepgram import LiveTranscriptionEvents
+
+                    dg_connection.on(
+                        LiveTranscriptionEvents.UtteranceEnd, on_utterance_end
+                    )
+                except (ImportError, AttributeError):
+                    print(
+                        "[STT] ⚠️ UtteranceEnd 이벤트 등록 실패 "
+                        "(SDK 버전 확인 필요, 기능에 영향 없음)"
+                    )
+
             state.stt_connections[session_id] = dg_connection
             print(f"[STT] 세션 {session_id} 오디오 처리 시작")
 
@@ -6682,6 +6718,7 @@ async def _process_audio_with_stt(track, session_id: str):
         import numpy as np
 
         # Deepgram WebSocket 연결 (SDK v5.3.2 스타일)
+        # _process_audio_with_stt_and_recording 과 동일한 설정 유지
         with deepgram_client.listen.v1.connect(
             model="nova-3",
             language="ko",
@@ -6691,7 +6728,9 @@ async def _process_audio_with_stt(track, session_id: str):
             punctuate=True,
             interim_results=True,
             vad_events=True,
-            endpointing=300,
+            diarize=True,  # 화자 분리 활성화
+            endpointing=500,  # 발화 종료 판단 500ms
+            utterance_end_ms=1000,  # 1초 침묵 시 UtteranceEnd 이벤트 전송
         ) as dg_connection:
             # 이벤트 핸들러 정의
             def on_message(message) -> None:
@@ -6799,6 +6838,38 @@ async def _process_audio_with_stt(track, session_id: str):
                 lambda _: print(f"[STT] 세션 {session_id} Deepgram 연결 종료"),
             )
             dg_connection.on(EventType.ERROR, on_error)
+
+            # ── UtteranceEnd 이벤트: utterance_end_ms(1000ms) 침묵 후 발화 종료 감지 ──
+            def on_utterance_end(utterance_end_msg) -> None:
+                """발화 종료 감지 — utterance_end_ms 침묵 후 Deepgram이 전송"""
+                try:
+                    asyncio.create_task(
+                        broadcast_stt_result(
+                            session_id,
+                            {
+                                "type": "utterance_end",
+                                "timestamp": time.time(),
+                            },
+                        )
+                    )
+                except Exception as e:
+                    print(f"[STT] UtteranceEnd 처리 오류: {e}")
+
+            _utter_evt = getattr(EventType, "UTTERANCE_END", None)
+            if _utter_evt:
+                dg_connection.on(_utter_evt, on_utterance_end)
+            else:
+                try:
+                    from deepgram import LiveTranscriptionEvents
+
+                    dg_connection.on(
+                        LiveTranscriptionEvents.UtteranceEnd, on_utterance_end
+                    )
+                except (ImportError, AttributeError):
+                    print(
+                        "[STT] ⚠️ UtteranceEnd 이벤트 등록 실패 "
+                        "(SDK 버전 확인 필요, 기능에 영향 없음)"
+                    )
 
             state.stt_connections[session_id] = dg_connection
             print(f"[STT] 세션 {session_id} 오디오 처리 시작")
