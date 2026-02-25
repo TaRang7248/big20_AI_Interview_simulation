@@ -13,6 +13,9 @@ export default function InterviewPage_yyr({
     isProcessing,
     isResumeUploaded,
 
+    interviewPhase,
+    onStartInterview,
+
     onLogout,
     onFileUpload,
     onAudioSubmit,
@@ -117,14 +120,30 @@ export default function InterviewPage_yyr({
                                 <p className="text-sm font-extrabold">면접 화면</p>
                             </div>
 
-                            <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
-                                <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                                LIVE
-                            </span>
+                            {interviewPhase === "live" ? (
+                                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600 text-white text-xs font-bold">
+                                    <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                                    LIVE
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-200 text-slate-800 text-xs font-bold">
+                                    READY
+                                </span>
+                            )}
                         </div>
 
                         <div className="px-5 pb-5">
-                            <WebcamView onVideoFrame={onVideoFrame} isProcessing={isProcessing} />
+                            {interviewPhase === "live" ? (
+                                <WebcamView onVideoFrame={onVideoFrame} isProcessing={isProcessing} />
+                            ) : (
+                                <div className="h-[260px] rounded-2xl bg-slate-900 text-white flex items-center justify-center text-center px-6">
+                                    <p className="text-sm font-bold opacity-90">
+                                        {interviewPhase === "lobby"
+                                            ? "면접 시작 전입니다. 이력서를 업로드하고 ‘면접 시작’을 눌러주세요."
+                                            : "준비 완료! ‘면접 시작’을 누르면 카메라/마이크가 활성화됩니다."}
+                                    </p>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -202,7 +221,7 @@ export default function InterviewPage_yyr({
                                         </span>
                                         <p className="text-sm text-slate-500">
                                             준비가 되면 이력서를 업로드하고<br />
-                                            <b>[답변 시작]</b>을 눌러주세요.
+                                            <b>[면접 시작]</b>을 눌러주세요.
                                         </p>
                                     </div>
                                 </div>
@@ -224,8 +243,26 @@ export default function InterviewPage_yyr({
 
                         {/* Action */}
                         <div className="px-6 py-5 border-t border-white/60">
-                            <AudioRecorder onAudioSubmit={onAudioSubmit} isProcessing={isProcessing} />
-                            <audio ref={audioPlayerRef} hidden />
+                            {interviewPhase === "live" ? (
+                                <>
+                                    <AudioRecorder onAudioSubmit={onAudioSubmit} isProcessing={isProcessing} />
+                                    <audio ref={audioPlayerRef} hidden />
+                                </>
+                            ) : (
+                                <div className="flex items-center justify-center">
+                                    <button
+                                        onClick={onStartInterview}
+                                        disabled={!isResumeUploaded}
+                                        className={`px-6 py-4 rounded-2xl text-white font-extrabold text-lg
+          ${isResumeUploaded
+                                                ? "bg-gradient-to-r from-sky-500 to-violet-500 hover:opacity-95"
+                                                : "bg-slate-300 cursor-not-allowed"
+                                            }`}
+                                    >
+                                        면접 시작
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </section>

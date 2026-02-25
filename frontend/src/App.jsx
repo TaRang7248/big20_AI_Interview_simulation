@@ -27,6 +27,9 @@ function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [isResumeUploaded, setIsResumeUploaded] = useState(false);
 
+  // ✅ 면접 진행 단계 (lobby | ready | live | report)
+  const [interviewPhase, setInterviewPhase] = useState("lobby");
+
   // ✅ 면접 세션(thread_id)
   const [sessionId, setSessionId] = useState(null);
 
@@ -49,6 +52,8 @@ function App() {
       setShowReport(false);
       setReportData(null);
       setVisionResult("분석 대기 중...");
+      setInterviewPhase("lobby");
+      setIsProcessing(false);
 
       console.log("✅ New interview session:", newId);
     }
@@ -101,6 +106,7 @@ function App() {
 
       if (response.data?.status === "success") {
         setIsResumeUploaded(true);
+        setInterviewPhase("ready");
         setChatLog((prev) => [
           ...prev,
           { sender: "system", text: "✅ 이력서 분석이 완료되었습니다. 이제 맞춤형 질문이 시작됩니다." },
@@ -181,6 +187,11 @@ function App() {
     }
   };
 
+  // ✅ 면접 시작 (lobby → live)
+  const handleStartInterview = () => {
+    setInterviewPhase("live");
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("auth_token");
     window.location.href = "/login";
@@ -207,6 +218,8 @@ function App() {
               chatLog={chatLog}
               isProcessing={isProcessing}
               isResumeUploaded={isResumeUploaded}
+              interviewPhase={interviewPhase}
+              onStartInterview={handleStartInterview}
               onLogout={handleLogout}
               onFileUpload={handleFileUpload}
               onEndInterview={handleEndInterview}
