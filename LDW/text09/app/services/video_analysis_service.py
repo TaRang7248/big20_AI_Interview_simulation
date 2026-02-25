@@ -5,7 +5,7 @@ import cv2
 
 logger = logging.getLogger(__name__)
 
-# Optional dependencies for Video Analysis
+# 비디오 분석을 위한 선택적 의존성 확인
 VIDEO_ANALYSIS_AVAILABLE = False
 try:
     import tensorflow as tf
@@ -13,7 +13,7 @@ try:
     from deepface import DeepFace
     VIDEO_ANALYSIS_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Video Analysis dependencies missing: {e}. Video analysis features will be disabled.")
+    logger.warning(f"비디오 분석 의존성 누락: {e}. 비디오 분석 기능이 비활성화됩니다.")
 
 class VideoAnalysisService:
     def __init__(self):
@@ -22,69 +22,65 @@ class VideoAnalysisService:
         
         if VIDEO_ANALYSIS_AVAILABLE:
             try:
-                # 1. Load MoveNet Thunder (Pose)
-                logger.info("Loading MoveNet Thunder model...")
+                # 1. MoveNet Thunder 로드 (자세 분석)
+                logger.info("MoveNet Thunder 모델 로딩 중...")
                 self.movenet = hub.load("https://tfhub.dev/google/movenet/singlepose/thunder/4")
                 self.movenet_model = self.movenet.signatures['serving_default']
-                logger.info("MoveNet Thunder loaded.")
+                logger.info("MoveNet Thunder 로드 완료.")
                 
-                # DeepFace
+                # DeepFace 로드
                 self.DeepFace = DeepFace
             except Exception as e:
-                logger.error(f"Failed to load Video Analysis models: {e}")
+                logger.error(f"비디오 분석 모델 로드 실패: {e}")
                 self.movenet_model = None
 
-        # 2. Load Dlib (Face & Gaze) - REMOVED
+        # 2. Dlib (얼굴 및 시선) - 제거됨
         self.detector = None
         self.predictor = None
 
 
     def process_frame(self, image_bytes: bytes):
         """
-        Process a single image frame (bytes) and return analysis results.
+        단일 이미지 프레임(bytes)을 처리하고 분석 결과를 반환합니다.
         """
         try:
-            # Decode image
+            # 이미지 디코딩
             nparr = np.frombuffer(image_bytes, np.uint8)
             frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
             if frame is None:
-                return {"error": "Failed to decode image"}
+                return {"error": "이미지 디코딩 실패"}
 
-            # Resize for consistent processing if needed, but MoveNet handles its own resizing.
-            # Dlib works on original or grayscale.
-            
             results = {
-                "face_mesh": None, # Kept key for compatibility, will populate with Dlib info
-                "hands": None,     # MoveNet doesn't do hands specifically like MP Hands, but has wrist/elbow keypoints
+                "face_mesh": None, # 호환성을 위해 키 유지
+                "hands": None,     # MoveNet은 손목/팔꿈치 키포인트는 있지만 전용 손 분석은 아님
                 "pose": None,
                 "emotion": None,
                 "gaze": None
             }
 
-            # --- 1. Dlib Face & Gaze Analysis ---
-            # Dlib functionality has been removed.
-            # Keeping keys for compatibility.
+            # --- 1. Dlib 얼굴 및 시선 분석 ---
+            # Dlib 기능은 제거되었습니다. 호환성을 위해 키만 유지합니다.
             results["face_mesh"] = None 
             results["gaze"] = None
 
             
-            # --- 2. MoveNet Pose Analysis ---
-            # MoveNet expects int32 tensor of shape [1, height, width, 3]
+            # --- 2. MoveNet 자세 분석 ---
+            # MoveNet은 [1, height, width, 3] 형태의 int32 텐서를 기대합니다.
             if self.movenet_model:
                 input_image = tf.expand_dims(frame, axis=0)
                 input_image = tf.cast(tf.image.resize_with_pad(input_image, 256, 256), dtype=tf.int32)
                 
-                # Run inference
+                # 추론 실행
                 outputs = self.movenet_model(input_image)
                 keypoints = outputs['output_0'].numpy()[0][0] # [17, 3] (y, x, score)
                 
-                # Check for high confidence keypoints (e.g., > 0.3)
+                # 신뢰도가 높은 키포인트 확인 (예: > 0.3)
                 if np.max(keypoints[:, 2]) > 0.3:
                     results["pose"] = "detected"
                     results["pose_data"] = keypoints.tolist()
 
-            # --- 3. DeepFace Emotion (Existing) ---
+            # --- 3. DeepFace 감정 분석 ---
             if self.DeepFace:
                 try:
                     emotions = self.DeepFace.analyze(
@@ -99,36 +95,32 @@ class VideoAnalysisService:
                     elif emotions and isinstance(emotions, dict):
                         results["emotion"] = emotions['dominant_emotion']
                 except Exception as e:
-                    # logger.error(f"DeepFace processing error: {e}")
                     pass
 
             return results
 
         except Exception as e:
-            logger.error(f"Error processing frame: {e}")
+            logger.error(f"프레임 처리 중 오류 발생: {e}")
             return {"error": str(e)}
-
-
-
 
     def analyze_video_file(self, file_path: str):
         """
-        Analyzes a single video file frame by frame (sampling every N frames).
-        Returns aggregated stats for logic.
+        단일 비디오 파일을 프레임별로 분석합니다 (N 프레임마다 샘플링).
+        로직을 위한 집계된 통계를 반환합니다.
         """
         if not os.path.exists(file_path):
-            logger.error(f"Video file not found: {file_path}")
+            logger.error(f"비디오 파일을 찾을 수 없음: {file_path}")
             return None
 
         cap = cv2.VideoCapture(file_path)
         if not cap.isOpened():
-            logger.error(f"Failed to open video file: {file_path}")
+            logger.error(f"비디오 파일을 열 수 없음: {file_path}")
             return None
 
         fps = cap.get(cv2.CAP_PROP_FPS)
-        if fps <= 0: fps = 30 # fallback
+        if fps <= 0: fps = 30 # 폴백
 
-        frame_interval = int(fps) # Analyze 1 frame per second
+        frame_interval = int(fps) # 초당 1프레임 분석
         current_frame = 0
         
         analysis_stats = {
@@ -145,7 +137,7 @@ class VideoAnalysisService:
                 break
             
             if current_frame % frame_interval == 0:
-                # Encode frame to bytes for existing process_frame method
+                # 기존 process_frame 메서드를 위해 프레임을 bytes로 인코딩
                 _, buffer = cv2.imencode('.jpg', frame)
                 frame_bytes = buffer.tobytes()
                 
@@ -154,19 +146,15 @@ class VideoAnalysisService:
                 if result:
                     analysis_stats["analyzed_frames"] += 1
                     
-                    # Collect Emotion
+                    # 감정 수집
                     if result.get("emotion"):
                         analysis_stats["emotions"].append(result["emotion"])
                     
-                    # Collect Pose Logic
-                    # process_frame returns "pose": "detected" if confident
+                    # 자세 로직 (신뢰도가 높으면 감지됨으로 처리)
                     if result.get("pose") == "detected":
-                        # Here we could accept more detailed logic if process_frame returned it.
-                        # For now, let's assume if pose is NOT detected or low confidence, it might be an issue?
-                        # Or if we had logic for "slouching"
                         pass
                     
-                    # If we had "bad_posture" logic in process_frame:
+                    # "bad_posture" 로직이 있는 경우
                     if result.get("pose") == "bad_posture":
                          analysis_stats["posture_issues"] += 1
 
@@ -178,10 +166,9 @@ class VideoAnalysisService:
 
     def process_session_videos(self, session_name: str, upload_dir: str):
         """
-        Finds all .webm files in upload_dir that end with -{session_name}.webm
-        and analyzes them.
+        upload_dir에서 -{session_name}.webm으로 끝나는 모든 비디오 파일을 찾아 분석합니다.
         """
-        logger.info(f"Searching for videos with session_name: {session_name} in {upload_dir}")
+        logger.info(f"세션명 {session_name}으로 {upload_dir}에서 비디오 검색 중")
         
         aggregated_results = {
             "processed_files": 0,
@@ -191,7 +178,7 @@ class VideoAnalysisService:
         }
 
         if not os.path.exists(upload_dir):
-            logger.error(f"Upload directory does not exist: {upload_dir}")
+            logger.error(f"업로드 디렉토리가 존재하지 않음: {upload_dir}")
             return aggregated_results
 
         from concurrent.futures import ThreadPoolExecutor
@@ -209,7 +196,6 @@ class VideoAnalysisService:
 
         # 비디오 파일 분석을 병렬로 수행하여 성능을 강화합니다.
         with ThreadPoolExecutor() as executor:
-            # analyze_video_file은 순수 CPU 작업보다는 I/O 및 ML 추론이 섞여 있으므로 스레딩이 효과적입니다.
             futures = {executor.submit(self.analyze_video_file, fp): os.path.basename(fp) for fp in video_files}
             
             for future in futures:

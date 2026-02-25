@@ -9,7 +9,7 @@ from ..config import UPLOAD_FOLDER
 
 def get_video_analysis_summary(interview_number):
     """
-    Reads the video log JSON for the interview and returns a summary string.
+    면접의 비디오 로그 JSON 파일을 읽고 요약 문자열을 반환합니다.
     """
     log_path = os.path.join(UPLOAD_FOLDER, "video_logs", f"{interview_number}.json")
     if not os.path.exists(log_path):
@@ -29,21 +29,19 @@ def get_video_analysis_summary(interview_number):
         hand_fidgeting_count = 0
         
         for log in logs:
-            # Emotion
+            # 감정 분석
             if "emotion" in log and log["emotion"]:
                 emotions.append(log["emotion"])
             
-            # Gaze (Placeholder logic: if face not detected or specific gaze flag)
-            # In real implementation, we would check specific landmarks
+            # 시선 분석 (임시 로직: 얼굴 인식 여부 등 확인)
             if log.get("face_mesh") != "detected": 
-                 # Assuming if face mesh didn't detect efficiently or logic was added
                  pass 
             
-            # Posture (Placeholder)
-            if log.get("pose") == "bad_posture": # Placeholder if we added logic
+            # 자세 분석 (임시)
+            if log.get("pose") == "bad_posture": 
                 bad_posture_count += 1
                 
-            # Hands
+            # 손 동작 분석
             if log.get("hands", 0) > 0:
                 hand_fidgeting_count += 1
 
@@ -61,13 +59,13 @@ def get_video_analysis_summary(interview_number):
         return summary
 
     except Exception as e:
-        logger.error(f"Error reading video logs: {e}")
+        logger.error(f"비디오 로그를 읽는 중 오류 발생: {e}")
         return "비디오 분석 데이터 처리 중 오류 발생."
 
 def get_recent_video_log_summary(interview_number: str, duration_seconds: int = 60) -> str:
     """
-    Retrieves video logs for the specified interview_number within the last 'duration_seconds'.
-    Returns a text summary of emotions and posture.
+    지정된 interview_number에 대해 최근 'duration_seconds' 동안의 비디오 로그를 검색합니다.
+    감정과 자세에 대한 텍스트 요약을 반환합니다.
     """
     log_path = os.path.join(UPLOAD_FOLDER, "video_logs", f"{interview_number}.json")
     if not os.path.exists(log_path):
@@ -84,50 +82,43 @@ def get_recent_video_log_summary(interview_number: str, duration_seconds: int = 
         if not logs:
             return ""
 
-        # Filter logs by timestamp if available, else take last N
+        # 타임스탬프가 있는 경우 필터링, 없는 경우 최근 N개 사용
         recent_logs = []
         for log in logs:
-            # Assuming log has 'timestamp', if not, we can't filter by time accurately
-            # But the video_router adds it.
             if "timestamp" in log:
                  if log["timestamp"] >= start_time:
                      recent_logs.append(log)
-            else:
-                # If no timestamp, fallback to taking the last portion (heuristic)
-                # This is a fallback
-                pass
         
-        # If we found no time-based logs (maybe old format), take last 30 frames ~ 1 sec @ 30fps? 
-        # Actually simulation might be slow. Let's just create a summary of whatever we found.
+        # 최근 로그가 없는 경우 빈 문자열 반환
         if not recent_logs:
-             # If strictly no logs in time window, maybe return empty or last few 
              return ""
         
         emotions = [log["emotion"] for log in recent_logs if log.get("emotion")]
         
-        # Count analysis
+        # 빈도 분석
         emotion_counts = collections.Counter(emotions)
         top_emotion = emotion_counts.most_common(1)
         top_emotion_str = top_emotion[0][0] if top_emotion else "분석불가"
-        
-        bad_posture = sum(1 for log in recent_logs if log.get("pose") == "bad_posture")
         
         summary = f"[영상분석] 주 감정: {top_emotion_str}, 분석 프레임: {len(recent_logs)}"
         return summary
 
     except Exception as e:
-        logger.error(f"Error getting recent video logs: {e}")
+        logger.error(f"최근 비디오 로그 검색 중 오류 발생: {e}")
         return ""
 
 def analyze_interview_result(interview_number, job_title, applicant_name, id_name, announcement_id=None):
-    logger.info(f"Analyzing interview result for {interview_number}...")
+    """
+    전체 면접 결과 분석을 수행하고 DB에 저장합니다.
+    """
+    logger.info(f"{interview_number}에 대한 면접 결과 분석을 시작합니다...")
     conn = get_db_connection()
     c = conn.cursor()
     
     try:
         model = get_model()
         
-        # Fetch Announcement Details (Title & Job Description)
+        # 공고 상세 정보(제목 및 직무 설명) 가져오기
         if announcement_id:
              c.execute("SELECT title, job FROM interview_announcement WHERE id = %s", (announcement_id,))
         else:
@@ -144,7 +135,7 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
         announcement_title = announcement_row[0] if announcement_row else job_title
         announcement_job = announcement_row[1] if announcement_row else "직무 내용 없음"
 
-        # Fetch all Q&A and session_name
+        # 모든 질문/답변 내역 및 세션명 가져오기
         c.execute("""
             SELECT Create_Question, Question_answer, Answer_Evaluation, session_name
             FROM Interview_Progress 
@@ -162,15 +153,13 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             e = row[2] if row[2] else "평가 없음"
             interview_log += f"Q: {q}\nA: {a}\nEval: {e}\n\n"
             
-        # Get Video Analysis Summary (Real processing)
-        # Note: The user specified uploads/audio as the directory where webm files are
+        # 비디오 분석 요약 가져오기 (실제 처리)
         video_upload_dir = os.path.join(os.getcwd(), "uploads", "audio")
         
         from .video_analysis_service import video_analysis_service
         video_results = video_analysis_service.process_session_videos(session_name, video_upload_dir)
         
-        # Summarize video results for LLM
-        import collections
+        # LLM을 위한 비디오 결과 요약
         emotion_counts = collections.Counter(video_results["total_emotions"])
         top_emotions = emotion_counts.most_common(3)
         emotion_str = ", ".join([f"{e}: {c}회" for e, c in top_emotions]) if top_emotions else "데이터 없음"
@@ -294,8 +283,8 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
         
         conn.commit()
         
-        # --- Generate Resume Images ---
-        # 1. Find resume path
+        # --- 이력서 이미지 생성 ---
+        # 1. 이력서 경로 찾기
         c.execute("SELECT resume FROM interview_information WHERE id_name = %s AND job = %s ORDER BY created_at DESC LIMIT 1", (id_name, announcement_job))
         res_row = c.fetchone()
         if res_row:
@@ -305,14 +294,14 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
                  image_paths = convert_pdf_to_images(resume_path, image_folder)
                  
                  if image_paths:
-                     # Update DB with image paths (JSON string)
-                     c.execute("UPDATE Interview_Result SET resume_image_path = %s WHERE interview_number = %s", (json.dumps(image_paths), interview_number))
-                     conn.commit()
+                      # DB 업데이트 (이미지 경로를 JSON 문자열로 저장)
+                      c.execute("UPDATE Interview_Result SET resume_image_path = %s WHERE interview_number = %s", (json.dumps(image_paths), interview_number))
+                      conn.commit()
 
-        logger.info(f"Interview result saved for {interview_number}")
+        logger.info(f"{interview_number}에 대한 면접 결과가 성공적으로 저장되었습니다.")
         
     except Exception as e:
-        logger.error(f"Analysis Error: {e}")
+        logger.error(f"분석 중 오류 발생: {e}")
         try:
              c.execute("""
                 INSERT INTO Interview_Result (
@@ -328,7 +317,7 @@ def analyze_interview_result(interview_number, job_title, applicant_name, id_nam
             """, (interview_number, job_title, id_name, session_name))
              conn.commit()
         except Exception as db_e:
-             logger.error(f"Failed to write error record: {db_e}")
+             logger.error(f"에러 기록 저장 실패: {db_e}")
 
     finally:
         conn.close()

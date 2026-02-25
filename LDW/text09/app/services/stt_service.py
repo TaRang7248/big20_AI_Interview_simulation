@@ -14,9 +14,6 @@ from openai import OpenAI
 import google.generativeai as genai
 from parselmouth.praat import call
 from ..config import logger, GOOGLE_API_KEY, OPENAI_API_KEY, BASE_DIR
-# from .vad_service import calculate_average_rms, check_vad_activity
-# vad_service를 직접 사용하지 않고 내부 로직으로 통합하거나 수정된 방식을 사용합니다.
-
 
 # Gemini 모델 인스턴스 재사용을 위한 전역 변수
 _STT_MODEL_CACHE = {}
@@ -37,7 +34,7 @@ def get_gemini_model(model_name="gemini-2.0-flash"):
 if GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
 
-# OpenAI API 설정 (필요시 사용, 현재는 로컬 Whisper 우선)
+# OpenAI API 설정 (필요시 사용)
 openai_client = None
 if OPENAI_API_KEY:
     openai_client = OpenAI(api_key=OPENAI_API_KEY)
@@ -136,18 +133,17 @@ def analyze_audio_features(audio_path, y, sr):
 
     try:
         if y is None:
-            # 전달되지 않은 경우 다시 로드 (예: 전처리 실패 시)
+            # 전달되지 않은 경우 다시 로드
             try:
                 y, sr = librosa.load(audio_path, sr=None)
             except Exception as load_err:
                  logger.warning(f"오디오 분석 건너뜀 (오디오를 로드할 수 없음): {load_err}")
-                 return analysis_result # 빈 분석 결과 안전하게 반환
+                 return analysis_result 
         
         duration = librosa.get_duration(y=y, sr=sr)
         
         # --- 1. 무음 측정 ---
-        # 임계값(예: top_db=30) 미만인 구간
-        # 참고: split은 무음이 아닌 구간을 반환함
+        # 임계값 미만인 구간
         non_silent_intervals = librosa.effects.split(y, top_db=30)
         non_silent_duration = sum(end - start for start, end in non_silent_intervals) / sr
         silence_duration = duration - non_silent_duration
@@ -171,10 +167,6 @@ def analyze_audio_features(audio_path, y, sr):
         analysis_result["pitch_shimmer"] = round(shimmer * 100, 4) if shimmer != shimmer else 0.0
 
         # --- 4. 신뢰도/긴장도 로직 ---
-        # 휴리스틱: 높은 Jitter (>1.5%) 또는 높은 Shimmer (>4.0%)는 극심한 긴장을 나타낼 수 있음.
-        # 일반적인 대화에서는 낮을수록 좋음.
-        # 불안정한 볼륨(높은 RMS 표준편차/평균 비율)도 긴장을 나타낼 수 있음.
-        
         nervous_score = 0
         if analysis_result["pitch_jitter"] > 1.5: nervous_score += 1
         if analysis_result["pitch_shimmer"] > 4.0: nervous_score += 1
@@ -196,6 +188,9 @@ def analyze_audio_features(audio_path, y, sr):
 # 3. STT 함수
 # ---------------------------------------------------------
 def transcribe_with_gemini(audio_path):
+    """
+    Google Gemini 2.0 Flash (Multimodal) 모델을 사용하여 음성 전사를 수행합니다.
+    """
     try:
         if not GOOGLE_API_KEY: return None
         
@@ -241,7 +236,6 @@ def transcribe_with_whisper(audio_path):
         model = get_whisper_model()
         
         logger.info(f"Whisper 로컬 모델 전사 시작: {audio_path}")
-        # fp16=False는 CPU 환경에서의 경고 방지용
         device = "cuda" if torch.cuda.is_available() else "cpu"
         result = model.transcribe(
             audio_path, 
@@ -273,7 +267,7 @@ def calculate_levenshtein_similarity(text1, text2):
 def select_best_transcript(gemini_text, whisper_text, audio_context_prompt=""):
     """
     스마트 선택 로직: Gemini와 Whisper 결과 중 최적의 전사 결과를 선택합니다.
-    자연스러움보다 '원본과의 동일성'과 '상세함'을 우선시합니다.
+    '원본과의 동일성'과 '상세함'을 우선시합니다.
     """
     if not gemini_text and not whisper_text: return "답변 없음"
     if not gemini_text: return whisper_text
@@ -284,11 +278,10 @@ def select_best_transcript(gemini_text, whisper_text, audio_context_prompt=""):
     logger.info(f"STT 유사도: {similarity:.2f}")
     
     if similarity >= 0.95:
-        # 매우 유사한 경우, 더 긴 결과(보통 더 많은 세부 사항 보존)를 선택
+        # 매우 유사한 경우, 더 긴 결과(세부 사항 보존)를 선택
         return gemini_text if len(gemini_text) >= len(whisper_text) else whisper_text
     
-    # [변경 사항] 유사도가 0.95 미만인 경우, LLM 판단을 거치지 않고 바로 Whisper 결과를 사용합니다.
-    # Whisper가 일반적으로 간투사 인식 및 안정성 면에서 뛰어난 성능을 보이기 때문입니다.
+    # 유사도가 0.95 미만인 경우 Whisper 결과를 우선 선택 (간투사 인식 우수)
     logger.info("STT 유사도가 낮아 Whisper 결과를 우선 선택합니다.")
     return whisper_text
 
@@ -302,18 +295,17 @@ def transcribe_audio(original_audio_path):
     2. 특징 분석 (Parselmouth, Librosa)
     3. STT (Gemini + Whisper + 선택)
     4. 발화 속도 계산
-    5. 종합 결과 딕셔너리 반환
+    5. 종합 결과 반환
     """
     if not os.path.exists(original_audio_path):
         return {"text": "파일 없음", "analysis": {}}
 
-    # 0. RMS 체크 (사전 필터링) - 임계값 하향 조정 및 전체 구간 신호 탐색
+    # 0. RMS 체크 (사전 필터링)
     try:
         y_orig, sr_orig = librosa.load(original_audio_path, sr=None)
-        # 전체 구간에서 RMS 계산
         rms_total = np.sqrt(np.mean(y_orig**2))
         
-        # RMS 임계값을 0.001로 하향 조정 (작은 소리도 허용)
+        # RMS 임계값 아주 작은 소리도 허용
         if rms_total < 0.001:
             logger.info(f"전체 오디오 신호가 너무 약함 ({rms_total:.5f}). 무음 처리합니다.")
             return {
@@ -324,10 +316,10 @@ def transcribe_audio(original_audio_path):
     except Exception as e:
         logger.error(f"초기 신호 확인 중 오류: {e}")
 
-    # VAD 체크 (전체적인 발화 존재 여부 확인)
+    # VAD 체크 (발화 존재 여부 확인)
     from .vad_service import check_vad_activity
     vad_ratio = check_vad_activity(original_audio_path)
-    if vad_ratio < 0.01: # 발화 비율 임계값도 더 낮춤
+    if vad_ratio < 0.01:
         logger.info(f"VAD 발화 비율이 매우 낮음 ({vad_ratio:.2f}). 무음 처리합니다.")
         return {
             "text": "답변 없음",
@@ -341,18 +333,17 @@ def transcribe_audio(original_audio_path):
     # 2. 특징 분석
     analysis = analyze_audio_features(processed_path, y, sr)
     
-    # VAD 방어 로직
+    # 3. 침묵 비중 체크
     duration = librosa.get_duration(y=y, sr=sr) if y is not None else 0
-    # 전체 오디오 길이 중 침묵 비중이 95% 이상이면 STT 생략
     if duration > 0 and (analysis.get("silence_duration", 0) / duration > 0.95):
-        logger.info("오디오의 대부분이 침묵입니다. STT를 건너뛰고 '답변 없음' 처리합니다.")
+        logger.info("오디오의 대부분이 침묵입니다. '답변 없음' 처리합니다.")
         return {
             "text": "답변 없음",
             "analysis": analysis,
             "debug_info": {"skipped_due_to_silence": True}
         }
 
-    # 3. STT (Gemini + Whisper 병렬 실행)
+    # 4. STT (Gemini + Whisper 병렬 실행)
     from concurrent.futures import ThreadPoolExecutor
     
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -365,14 +356,11 @@ def transcribe_audio(original_audio_path):
         
     final_text = select_best_transcript(gemini_res, whisper_res)
     
-    # 4. 발화 속도 계산
-    # 초당 음절 수 (한국어)
-    # 공백을 제외한 글자 수로 음절 수 추정
+    # 5. 발화 속도 계산 (초당 음절 수)
     syllable_count = len(final_text.replace(" ", ""))
     
     try:
         if y is None or sr is None:
-             # y가 없는 경우 파일에서 직접 길이 측정 시도
              duration = librosa.get_duration(path=processed_path)
         else:
              duration = librosa.get_duration(y=y, sr=sr)
@@ -386,7 +374,7 @@ def transcribe_audio(original_audio_path):
     
     analysis["speech_rate"] = speech_rate
     
-    # 발화 속도 피드백 추가
+    # 발화 속도 피드백
     if speech_rate < 2.5: analysis["speed_feedback"] = "느림"
     elif speech_rate > 5.5: analysis["speed_feedback"] = "빠름"
     else: analysis["speed_feedback"] = "적절"

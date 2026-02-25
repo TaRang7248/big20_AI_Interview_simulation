@@ -16,8 +16,8 @@ from ..config import (
 
 async def _run_process_exec(cmd_list: list[str], cwd: str | None = None, env: dict | None = None) -> tuple[int, str, str]:
     """
-    비동기 subprocess 실행 유틸
-    - Windows에서 따옴표/공백 문제를 줄이기 위해 shell=False(exec) 사용
+    비동기 subprocess 실행 유틸리티
+    - Windows에서 따옴표/공백 문제를 줄이기 위해 shell=False(exec)를 사용합니다.
     """
     process = await asyncio.create_subprocess_exec(
         *cmd_list,
@@ -31,7 +31,7 @@ async def _run_process_exec(cmd_list: list[str], cwd: str | None = None, env: di
 
 async def _convert_audio_to_wav_16k_mono(input_audio_path: str, output_wav_path: str) -> bool:
     """
-    Wav2Lip 입력 안정화를 위해 mp3 등 입력 오디오를 wav(16k, mono, pcm_s16le)로 변환
+    Wav2Lip 입력 안정화를 위해 mp3 등 입력 오디오를 wav(16k, mono, pcm_s16le)로 변환합니다.
     """
     if not FFMPEG_EXE:
         logger.error("[비디오 생성] FFmpeg 실행 파일을 찾지 못해 오디오 변환을 할 수 없습니다.")
@@ -56,22 +56,22 @@ async def _convert_audio_to_wav_16k_mono(input_audio_path: str, output_wav_path:
 
 async def generate_wav2lip_video(audio_filepath: str) -> str | None:
     """
-    Wav2Lip-GAN을 사용하여 정지 이미지(data/man.png) + 입력 오디오로 립싱크 비디오 생성
+    Wav2Lip-GAN을 사용하여 정지 이미지(data/man.png)와 입력 오디오로 립싱크 비디오를 생성합니다.
 
     Returns:
         성공 시 비디오 파일의 웹 접근 경로(/uploads/Wav2Lip_mp4/xxx.mp4),
-        실패 시 None
+        실패 시 None 반환
     """
     wav2lip_dir = os.path.abspath(WAV2LIP_DIR)
     inference_script = os.path.abspath(WAV2LIP_INFERENCE_SCRIPT)
     checkpoint_path = os.path.abspath(WAV2LIP_CHECKPOINT)
     face_image = os.path.abspath(WAV2LIP_FACE_IMAGE)
 
-    # 출력 디렉토리(절대경로로 이미 config에서 통일됨)
+    # 출력 디렉토리 (config에서 절대경로로 통일됨)
     output_dir = os.path.abspath(WAV2LIP_OUTPUT_FOLDER)
     os.makedirs(output_dir, exist_ok=True)
 
-    # 파일명
+    # 파일명 생성
     temp_filename = f"temp_wav2lip_{uuid.uuid4().hex[:8]}.mp4"
     temp_filepath = os.path.join(output_dir, temp_filename)
 
@@ -101,7 +101,7 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
         logger.error(f"[비디오 생성] 입력 오디오 파일이 없습니다: {audio_filepath}")
         return None
 
-    # ── 오디오를 wav로 변환(안정화) ──
+    # ── 오디오를 wav로 변환 (안정화) ──
     wav_audio_path = os.path.join(output_dir, f"tts_{uuid.uuid4().hex[:8]}.wav")
     logger.info(f"[비디오 생성] 오디오 변환 시작: {audio_filepath} -> {wav_audio_path}")
     ok = await _convert_audio_to_wav_16k_mono(os.path.abspath(audio_filepath), wav_audio_path)
@@ -113,7 +113,7 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
     existing_pythonpath = process_env.get("PYTHONPATH", "")
     process_env["PYTHONPATH"] = wav2lip_dir + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
 
-    # ── Wav2Lip 실행(인자리스트로 안전하게) ──
+    # ── Wav2Lip 실행 ──
     wav2lip_cmd = [
         python_exe,
         inference_script,
@@ -142,10 +142,9 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
             logger.error(f"[비디오 생성] stderr: {err}")
             return None
 
-        logger.info("[비디오 생성] Wav2Lip 기본 비디오 생성 완료. 웹 재생 최적화(인코딩/리사이즈) 시작...")
+        logger.info("[비디오 생성] Wav2Lip 기본 비디오 생성 완료. 웹 재생 최적화 시작...")
 
         # ── FFmpeg로 웹 재생 친화 포맷으로 변환 ──
-        # - yuv420p + aac 로 대부분 브라우저 호환성 확보
         if not FFMPEG_EXE:
             logger.warning("[비디오 생성] FFmpeg를 찾지 못해 최적화를 건너뜁니다. 원본을 그대로 사용합니다.")
             shutil.move(temp_filepath, final_filepath)
@@ -179,13 +178,13 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
 
         logger.info(f"[비디오 생성] 최종 비디오 생성 완료: {final_filepath}")
 
-        # 웹 접근 경로 반환 (main.py에서 /uploads가 UPLOADS_DIR로 마운트됨)
+        # 웹 접근 경로 반환
         return f"/uploads/Wav2Lip_mp4/{final_filename}"
 
     except Exception as e:
         logger.error(f"[비디오 생성] 비디오 생성 중 예외 발생: {e}")
 
-        # 예외 시 임시 파일 정리(가능한 범위)
+        # 예외 시 임시 파일 정리
         for p in [temp_filepath, final_filepath, wav_audio_path]:
             try:
                 if p and os.path.exists(p):
