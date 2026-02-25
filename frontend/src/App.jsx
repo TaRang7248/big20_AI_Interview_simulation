@@ -11,6 +11,7 @@ import UserHomePage_yyr from "./pages_yyr/UserHomePage_yyr";
 import InterviewPage_yyr from "./pages_yyr/InterviewPage_yyr";
 import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
 import RequireAdmin_yyr from "./pages_yyr/RequireAdmin_yyr";
+import AdminResultRoutePage_yyr from "./pages_yyr/AdminResultRoutePage_yyr";
 
 // 백엔드 주소
 const API_BASE_URL = "http://127.0.0.1:8001";
@@ -256,6 +257,7 @@ function App() {
         }
       />
 
+
       {/* ✅ 단독 결과 페이지 */}
       {/* 면접자/공용 결과 */}
       <Route path="/result/:threadId" element={<ResultRoutePage_yyr />} />
@@ -264,7 +266,7 @@ function App() {
         path="/admin/result/:threadId"
         element={
           <RequireAdmin_yyr>
-            <ResultRoutePage_yyr />
+            <AdminResultRoutePage_yyr />
           </RequireAdmin_yyr>
         }
       />

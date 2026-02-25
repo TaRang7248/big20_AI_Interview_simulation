@@ -5,6 +5,9 @@ import { useParams, Link } from "react-router-dom";
 import axios from "axios";
 import ResultPage_yyr from "./ResultPage_yyr";
 
+// ✅ mock 데이터 (API 실패 시 fallback)
+import { mockInterviewResults } from "./mockInterviewResults";
+
 const API_BASE_URL = "http://127.0.0.1:8001";
 
 export default function ResultRoutePage_yyr() {
@@ -27,14 +30,25 @@ export default function ResultRoutePage_yyr() {
 
                 if (!cancelled) setReportData(res.data || null);
             } catch (e) {
-                if (!cancelled) setErrorMsg("리포트를 불러오지 못했습니다. 백엔드/DB 상태를 확인하세요.");
+                // ✅ API 실패 시 mock 데이터 fallback
+                const mockData = mockInterviewResults?.[threadId];
+
+                if (mockData) {
+                    console.warn("API 실패 → mock 데이터 사용:", threadId);
+                    if (!cancelled) setReportData(mockData);
+                } else {
+                    if (!cancelled)
+                        setErrorMsg("리포트를 불러오지 못했습니다. (API + mock 모두 실패)");
+                }
             } finally {
                 if (!cancelled) setLoading(false);
             }
         }
 
         if (threadId) run();
-        return () => { cancelled = true; };
+        return () => {
+            cancelled = true;
+        };
     }, [threadId]);
 
     if (loading) {
@@ -70,7 +84,10 @@ export default function ResultRoutePage_yyr() {
                         <p className="text-sm text-gray-500 mt-1">thread_id: {threadId}</p>
                     </div>
 
-                    <Link to="/interview" className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-bold hover:bg-black">
+                    <Link
+                        to="/interview"
+                        className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-bold hover:bg-black"
+                    >
                         면접으로
                     </Link>
                 </div>
