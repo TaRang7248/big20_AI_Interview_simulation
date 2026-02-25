@@ -264,26 +264,50 @@ def calculate_levenshtein_similarity(text1, text2):
     """
     return Levenshtein.ratio(text1, text2)
 
-def select_best_transcript(gemini_text, whisper_text, audio_context_prompt=""):
+def select_best_transcript(gemini_text, whisper_text):
     """
-    스마트 선택 로직: Gemini와 Whisper 결과 중 최적의 전사 결과를 선택합니다.
-    '원본과의 동일성'과 '상세함'을 우선시합니다.
+    Gemini와 Whisper의 전사 결과 중 최적의 결과를 선택하는 스마트 로직입니다.
+    간투사 보존과 정보량(길이)을 우선적으로 고려합니다.
     """
-    if not gemini_text and not whisper_text: return "답변 없음"
-    if not gemini_text: return whisper_text
-    if not whisper_text: return gemini_text
-    
-    # 1. 유사도 체크
-    similarity = calculate_levenshtein_similarity(gemini_text, whisper_text)
-    logger.info(f"STT 유사도: {similarity:.2f}")
-    
-    if similarity >= 0.95:
-        # 매우 유사한 경우, 더 긴 결과(세부 사항 보존)를 선택
-        return gemini_text if len(gemini_text) >= len(whisper_text) else whisper_text
-    
-    # 유사도가 0.95 미만인 경우 Whisper 결과를 우선 선택 (간투사 인식 우수)
-    logger.info("STT 유사도가 낮아 Whisper 결과를 우선 선택합니다.")
-    return whisper_text
+    if not gemini_text and not whisper_text:
+        return "답변 없음"
+    if not gemini_text:
+        return whisper_text
+    if not whisper_text:
+        return gemini_text
+
+    g = gemini_text.strip()
+    w = whisper_text.strip()
+
+    # 둘 중 하나가 "답변 없음" 수준이면 다른 쪽 우선
+    if g == "답변 없음" and w != "답변 없음":
+        return w
+    if w == "답변 없음" and g != "답변 없음":
+        return g
+
+    # 포함관계(한쪽이 다른 쪽을 거의 포함)면 더 긴 쪽 선택
+    if g in w and len(w) >= len(g) + 5:
+        return w
+    if w in g and len(g) >= len(w) + 5:
+        return g
+
+    # 간투사/머뭇거림 보존을 우선 (면접 답변은 이게 중요)
+    fillers = ["어", "음", "그", "저", "아", "흠"]
+    g_fill = sum(g.count(x) for x in fillers)
+    w_fill = sum(w.count(x) for x in fillers)
+
+    # 너무 짧은 결과는 불리하게 (10자 미만 필터링)
+    if len(g) < 10 and len(w) >= 10:
+        return w
+    if len(w) < 10 and len(g) >= 10:
+        return g
+
+    # 간투사 더 많이 보존한 쪽 우선
+    if g_fill != w_fill:
+        return g if g_fill > w_fill else w
+
+    # 마지막: 더 긴 쪽(정보 보존) 선택
+    return g if len(g) >= len(w) else w
 
 # ---------------------------------------------------------
 # 4. 메인 함수

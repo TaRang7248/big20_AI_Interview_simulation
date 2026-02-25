@@ -26,7 +26,13 @@ const AppState = {
         recognition: null, // Web Speech API
         currentQuestionIndex: 0, // Added for progress tracking
         totalQuestions: 12,
-        videoInterval: null // Added for video analysis
+        videoInterval: null, // Added for video analysis
+        // 선택된 기기 ID 저장공간 추가
+        selectedDevices: {
+            videoInputId: null,
+            audioInputId: null,
+            audioOutputId: null
+        }
     }
 };
 
@@ -734,6 +740,13 @@ async function testDevices() {
         if (audioInput && audioInput.label) micName = audioInput.label;
         if (audioOutput && audioOutput.label) speakerName = audioOutput.label;
 
+        // 선택된 기기 ID를 AppState에 저장 (면접 시작 시 사용)
+        AppState.interview.selectedDevices.videoInputId = videoInput ? videoInput.deviceId : null;
+        AppState.interview.selectedDevices.audioInputId = audioInput ? audioInput.deviceId : null;
+        AppState.interview.selectedDevices.audioOutputId = audioOutput ? audioOutput.deviceId : null;
+
+        console.log("[System] 기기 정보 저장 완료:", AppState.interview.selectedDevices);
+
         // UI 업데이트: 카메라
         $('#cam-status').className = 'status ok';
         $('#cam-status').textContent = '정상';
@@ -970,7 +983,16 @@ function updateTimerDisplay() {
 
 async function startRecording() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true }); // Video for feed
+        // 환경 테스트에서 선택된 기기를 명시적으로 사용하도록 제약 조건 설정
+        const constraints = {
+            audio: AppState.interview.selectedDevices.audioInputId ?
+                { deviceId: { exact: AppState.interview.selectedDevices.audioInputId } } : true,
+            video: AppState.interview.selectedDevices.videoInputId ?
+                { deviceId: { exact: AppState.interview.selectedDevices.videoInputId } } : true
+        };
+
+        console.log("[Recording] 기기 제약 조건 적용:", constraints);
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
 
         // Video Feed
         const video = $('#user-video');
@@ -1317,6 +1339,13 @@ function playAudio(url, callback) {
         video.src = url;
         video.volume = 1.0;
 
+        // 오디오 출력 장치 변경 (스피커 고정)
+        if (AppState.interview.selectedDevices.audioOutputId && typeof video.setSinkId === 'function') {
+            console.log(`[playVideo] 출력 장치 설정: ${AppState.interview.selectedDevices.audioOutputId}`);
+            video.setSinkId(AppState.interview.selectedDevices.audioOutputId)
+                .catch(err => console.error("setSinkId 오류 (Video):", err));
+        }
+
         video.onended = () => {
             console.log(`[playVideo] 비디오 재생 종료: ${url}`);
             if (callback) callback();
@@ -1339,6 +1368,13 @@ function playAudio(url, callback) {
         console.log(`[playAudio] 오디오 재생: ${url}`);
         const audio = new Audio(url);
         audio.volume = 1.0;
+
+        // 오디오 출력 장치 변경 (스피커 고정)
+        if (AppState.interview.selectedDevices.audioOutputId && typeof audio.setSinkId === 'function') {
+            console.log(`[playAudio] 출력 장치 설정: ${AppState.interview.selectedDevices.audioOutputId}`);
+            audio.setSinkId(AppState.interview.selectedDevices.audioOutputId)
+                .catch(err => console.error("setSinkId 오류 (Audio):", err));
+        }
 
         audio.onended = () => {
             console.log(`[playAudio] 오디오 재생 종료: ${url}`);
