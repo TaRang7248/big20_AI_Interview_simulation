@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 export default function LoginPage_yyr() {
     const nav = useNavigate();
@@ -16,8 +16,8 @@ export default function LoginPage_yyr() {
                 <div className="flex gap-2 mb-6">
                     <button
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-bold border ${mode === "login"
-                            ? "bg-gray-900 text-white border-gray-900"
-                            : "bg-white text-gray-700 border-gray-200"
+                                ? "bg-gray-900 text-white border-gray-900"
+                                : "bg-white text-gray-700 border-gray-200"
                             }`}
                         onClick={() => setMode("login")}
                     >
@@ -26,8 +26,8 @@ export default function LoginPage_yyr() {
 
                     <button
                         className={`flex-1 px-3 py-2 rounded-lg text-sm font-bold border ${mode === "signup"
-                            ? "bg-gray-900 text-white border-gray-900"
-                            : "bg-white text-gray-700 border-gray-200"
+                                ? "bg-gray-900 text-white border-gray-900"
+                                : "bg-white text-gray-700 border-gray-200"
                             }`}
                         onClick={() => setMode("signup")}
                     >
@@ -82,14 +82,7 @@ export default function LoginPage_yyr() {
                         지금은 큰 틀(라우팅)만 잡는 단계라 인증은 붙이지 않았어요.
                     </div>
 
-                    <div className="text-xs mt-2">
-                        <Link
-                            to="/result/my_new_interview_01"
-                            className="text-blue-600 font-bold hover:underline"
-                        >
-                            (개발용) 결과 페이지 바로가기
-                        </Link>
-                    </div>
+                    {/* ❌ (개발용) 결과 페이지 바로가기 제거 */}
                 </div>
             </div>
         </div>

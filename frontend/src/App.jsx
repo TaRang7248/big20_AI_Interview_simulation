@@ -10,6 +10,7 @@ import AdminPage_yyr from "./pages_yyr/AdminPage_yyr";
 import UserHomePage_yyr from "./pages_yyr/UserHomePage_yyr";
 import InterviewPage_yyr from "./pages_yyr/InterviewPage_yyr";
 import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
+import RequireAdmin_yyr from "./pages_yyr/RequireAdmin_yyr";
 
 // 백엔드 주소
 const API_BASE_URL = "http://127.0.0.1:8001";
@@ -246,7 +247,14 @@ function App() {
     <Routes>
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="/login" element={<LoginPage_yyr />} />
-      <Route path="/admin" element={<AdminPage_yyr />} />
+      <Route
+        path="/admin"
+        element={
+          <RequireAdmin_yyr>
+            <AdminPage_yyr />
+          </RequireAdmin_yyr>
+        }
+      />
 
       {/* ✅ B: 단독 결과 페이지 */}
       <Route path="/result/:threadId" element={<ResultRoutePage_yyr />} />
