@@ -441,25 +441,84 @@ function InterviewPageInner() {
     }
   };
 
-  // ========== 질문 요청 ==========
+  // ========== 질문 요청 (SSE 스트리밍 우선, 실패 시 기존 API 폴백) ==========
   const getNextQuestion = async (sid: string, message: string) => {
     setStatus("processing");
     try {
-      const res = await interviewApi.chat({ session_id: sid, message, mode: "interview" });
-      const q = res.response;
-      setCurrentQuestion(q);
+      // ── SSE 스트리밍 방식: 토큰이 도착할 때마다 UI에 실시간 표시 ──
+      // ChatGPT처럼 AI 응답이 글자 단위로 나타나 체감 대기 시간을 대폭 줄임
+      let streamedText = "";  // 스트리밍된 토큰 누적 변수
+
+      // 스트리밍 시작 전, 빈 AI 메시지 슬롯을 미리 추가 (토큰이 들어올 때마다 업데이트)
+      setMessages(prev => [...prev, { role: "ai", text: "" }]);
+
+      const res = await interviewApi.chatStream(
+        { session_id: sid, message, mode: "interview" },
+        // onToken 콜백: 각 토큰이 도착할 때마다 호출
+        (token: string) => {
+          streamedText += token;
+          // messages 배열의 마지막 항목(AI 메시지)을 누적된 텍스트로 업데이트
+          setMessages(prev => {
+            const updated = [...prev];
+            updated[updated.length - 1] = { role: "ai", text: streamedText };
+            return updated;
+          });
+        },
+        // onStatus 콜백: 처리 단계 표시 (선택적)
+        (phase: string) => {
+          if (phase === "rag_search") setStatus("processing");
+          else if (phase === "llm_generating") setStatus("processing");
+        },
+      );
+
+      // 스트리밍 완료 후: 최종 응답으로 상태 업데이트
+      const finalQuestion = res.response || streamedText;
+      setCurrentQuestion(finalQuestion);
       setQuestionNum(res.question_number || questionNum + 1);
-      setMessages(prev => [...prev, { role: "ai", text: q }]);
-      await speakQuestion(q);
+      // 최종 텍스트로 마지막 메시지 확정 (strip_think_tokens 처리된 결과)
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1] = { role: "ai", text: finalQuestion };
+        return updated;
+      });
+      await speakQuestion(finalQuestion);
       setStatus("listening");
 
       // 개입 체크 시작
       startInterventionCheck(sid);
-    } catch (err) {
-      // 에러 발생 시에도 "listening" 상태로 복귀 → 사용자가 재시도 가능
-      console.error("다음 질문 요청 실패:", err);
-      setMessages(prev => [...prev, { role: "ai", text: "⚠️ 일시적 오류가 발생했습니다. 잠시 후 다시 답변해 주세요." }]);
-      setStatus("listening");
+    } catch (streamErr) {
+      // ── 폴백: 스트리밍 실패 시 기존 비스트리밍 API 사용 ──
+      console.warn("스트리밍 실패, 기존 API로 폴백:", streamErr);
+      try {
+        // 스트리밍 실패 시 추가된 빈 메시지 제거
+        setMessages(prev => {
+          if (prev.length > 0 && prev[prev.length - 1].role === "ai" && prev[prev.length - 1].text === "") {
+            return prev.slice(0, -1);
+          }
+          return prev;
+        });
+        const res = await interviewApi.chat({ session_id: sid, message, mode: "interview" });
+        const q = res.response;
+        setCurrentQuestion(q);
+        setQuestionNum(res.question_number || questionNum + 1);
+        setMessages(prev => [...prev, { role: "ai", text: q }]);
+        await speakQuestion(q);
+        setStatus("listening");
+        startInterventionCheck(sid);
+      } catch (fallbackErr) {
+        console.error("다음 질문 요청 실패:", fallbackErr);
+        setMessages(prev => {
+          // 빈 메시지가 남아있으면 오류 메시지로 교체
+          const updated = [...prev];
+          if (updated.length > 0 && updated[updated.length - 1].role === "ai" && !updated[updated.length - 1].text) {
+            updated[updated.length - 1] = { role: "ai", text: "⚠️ 일시적 오류가 발생했습니다. 잠시 후 다시 답변해 주세요." };
+          } else {
+            updated.push({ role: "ai", text: "⚠️ 일시적 오류가 발생했습니다. 잠시 후 다시 답변해 주세요." });
+          }
+          return updated;
+        });
+        setStatus("listening");
+      }
     }
   };
 
