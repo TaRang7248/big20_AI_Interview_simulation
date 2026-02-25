@@ -44,11 +44,11 @@ if __name__ == "__main__":
     print("=" * 60)
 
     # 백그라운드 스레드에서 브라우저 자동 실행 대기
-    # 서버 실행(uvicorn)이 프로그램을 점유하므로 스레드 처리가 필요합니다.
     browser_thread = threading.Thread(target=wait_and_open_browser, daemon=True)
     browser_thread.start()
 
     # FastAPI 앱 실행 (Uvicorn 서버)
+    # server.py는 서버 실행 및 웹 브라우저 자동 실행 기능만 유지합니다.
     try:
         uvicorn.run(
             "app.main:app",
@@ -58,5 +58,5 @@ if __name__ == "__main__":
             log_level="info",
         )
     except Exception as e:
-        # 실행 중 발생한 오류에 대한 한국어 메시지 출력
+        # 실행 중 발생한 오류 출력
         print(f"[오류] 서버 실행 중 문제가 발생했습니다: {e}")
