@@ -333,13 +333,52 @@ async def run_llm_async(llm, messages):
 
 
 async def run_rag_async(retriever, query):
-    """RAG retriever invoke를 비동기로 실행 (nomic-embed-text 최적화: search_query 접두사 적용)"""
+    """RAG retriever invoke를 비동기로 실행 (★ Redis 캐싱 + nomic-embed-text 최적화)
+
+    1) Redis 캐시 확인 → 히트 시 Ollama 임베딩 호출 생략 (GPU 부하 감소)
+    2) 캐시 미스 → retriever.invoke() 실행 후 결과를 Redis에 캐싱
+    3) nomic-embed-text 최적화: search_query 접두사 적용
+    """
+    import hashlib
+    import pickle
+
+    # ── 1. Redis 캐시 확인 ──
+    cache_key = None
+    try:
+        r = get_redis() if REDIS_AVAILABLE else None
+        if r:
+            query_hash = hashlib.sha256(query.encode("utf-8")).hexdigest()[:16]
+            cache_key = f"rag_cache:retriever:{query_hash}"
+            cached = r.get(cache_key)
+            if cached:
+                docs = pickle.loads(cached)
+                print(
+                    f"🟢 [RAG Cache] retriever 캐시 히트 — Ollama 임베딩 생략 ({len(docs)}개 문서)"
+                )
+                return docs
+    except Exception as e:
+        print(f"⚠️ [RAG Cache] 캐시 읽기 실패 (무시): {e}")
+
+    # ── 2. 캐시 미스 → Ollama 임베딩 + pgvector 검색 ──
     prefixed_query = f"search_query: {query}"
     docs = await run_in_executor(RAG_EXECUTOR, retriever.invoke, prefixed_query)
     # search_document: 접두사 제거
     for doc in docs:
         if doc.page_content.startswith("search_document: "):
             doc.page_content = doc.page_content[len("search_document: ") :]
+
+    # ── 3. 결과를 Redis에 캐싱 (TTL: 30분) ──
+    if docs and cache_key:
+        try:
+            r = get_redis() if REDIS_AVAILABLE else None
+            if r:
+                r.setex(cache_key, 1800, pickle.dumps(docs))
+                print(
+                    f"🟡 [RAG Cache] retriever 캐시 저장 ({len(docs)}개 문서, TTL=1800초)"
+                )
+        except Exception as e:
+            print(f"⚠️ [RAG Cache] 캐시 쓰기 실패 (무시): {e}")
+
     return docs
 
 
@@ -1754,25 +1793,25 @@ class AIInterviewer:
         session_retriever = session.get("retriever") or self.retriever
 
         async def _fetch_resume_rag():
-            """이력서 RAG 검색 (타임아웃 10초)"""
+            """이력서 RAG 검색 (타임아웃 20초)"""
             if not (session_retriever and user_answer):
                 return ""
             try:
                 docs = await asyncio.wait_for(
                     run_rag_async(session_retriever, user_answer),
-                    timeout=10,
+                    timeout=20,
                 )
                 if docs:
                     print(f"📚 [RAG] {len(docs)}개 문서에서 컨텍스트 추출 (비동기)")
                     return "\n".join([d.page_content for d in docs[:3]])
             except asyncio.TimeoutError:
-                print("⏰ [RAG] 이력서 검색 타임아웃 (10초) — 컨텍스트 없이 진행")
+                print("⏰ [RAG] 이력서 검색 타임아웃 (20초) — 컨텍스트 없이 진행")
             except Exception as e:
                 print(f"⚠️ RAG 검색 오류: {e}")
             return ""
 
         async def _fetch_qa_rag():
-            """Q&A 참조 RAG 검색 (타임아웃 10초)"""
+            """Q&A 참조 RAG 검색 (타임아웃 20초)"""
             if not (RAG_AVAILABLE and user_answer and getattr(self, "qa_rag", None)):
                 return ""
             try:
@@ -1780,13 +1819,13 @@ class AIInterviewer:
                     run_in_executor(
                         RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2
                     ),
-                    timeout=10,
+                    timeout=20,
                 )
                 if qa_docs:
                     print(f"📖 [Q&A RAG] {len(qa_docs)}개 참조 문서에서 모범 답변 추출")
                     return "\n".join([d.page_content for d in qa_docs[:2]])
             except asyncio.TimeoutError:
-                print("⏰ [Q&A RAG] 참조 검색 타임아웃 (10초) — 참조 없이 진행")
+                print("⏰ [Q&A RAG] 참조 검색 타임아웃 (20초) — 참조 없이 진행")
             except Exception as e:
                 print(f"⚠️ Q&A 참조 데이터 검색 오류 (무시): {e}")
             return ""
@@ -2141,32 +2180,32 @@ class AIInterviewer:
             )
 
             # ========== 3. RAG 컨텍스트 병렬 조회 (이력서 + Q&A) ==========
-            # ⚡ 성능 최적화: 두 RAG 검색을 asyncio.gather로 병렬 실행
-            #    순차 실행 대비 대기 시간 ~50% 감소, 각 RAG에 10초 타임아웃 설정
+            # ⚡ GPU 경합 방지: RAG 임베딩(Ollama)을 LLM 호출(step 7) 전에 먼저 완료
+            #    두 RAG 간 병렬 실행은 유지 (동일 임베딩 모델 사용), 각 RAG에 20초 타임아웃
             resume_context = ""
             qa_reference_context = ""
             session_retriever = session.get("retriever") or self.retriever
 
             async def _fetch_resume_rag():
-                """이력서 RAG 검색 (타임아웃 10초)"""
+                """이력서 RAG 검색 (타임아웃 20초)"""
                 if not (session_retriever and user_answer):
                     return ""
                 try:
                     docs = await asyncio.wait_for(
                         run_rag_async(session_retriever, user_answer),
-                        timeout=10,
+                        timeout=20,
                     )
                     if docs:
                         print(f"📚 [RAG] {len(docs)}개 문서에서 컨텍스트 추출 (비동기)")
                         return "\n".join([d.page_content for d in docs[:3]])
                 except asyncio.TimeoutError:
-                    print("⏰ [RAG] 이력서 검색 타임아웃 (10초) — 컨텍스트 없이 진행")
+                    print("⏰ [RAG] 이력서 검색 타임아웃 (20초) — 컨텍스트 없이 진행")
                 except Exception as e:
                     print(f"⚠️ RAG 검색 오류: {e}")
                 return ""
 
             async def _fetch_qa_rag():
-                """Q&A 참조 RAG 검색 (타임아웃 10초)"""
+                """Q&A 참조 RAG 검색 (타임아웃 20초)"""
                 if not (
                     RAG_AVAILABLE and user_answer and getattr(self, "qa_rag", None)
                 ):
@@ -2176,7 +2215,7 @@ class AIInterviewer:
                         run_in_executor(
                             RAG_EXECUTOR, self.qa_rag.similarity_search, user_answer, 2
                         ),
-                        timeout=10,
+                        timeout=20,
                     )
                     if qa_docs:
                         print(
@@ -2184,12 +2223,14 @@ class AIInterviewer:
                         )
                         return "\n".join([d.page_content for d in qa_docs[:2]])
                 except asyncio.TimeoutError:
-                    print("⏰ [Q&A RAG] 참조 검색 타임아웃 (10초) — 참조 없이 진행")
+                    print("⏰ [Q&A RAG] 참조 검색 타임아웃 (20초) — 참조 없이 진행")
                 except Exception as e:
                     print(f"⚠️ Q&A 참조 데이터 검색 오류 (무시): {e}")
                 return ""
 
-            # 두 RAG를 동시에 실행 — GPU/DB 부하 분산 및 대기 시간 최소화
+            # ⚡ RAG를 LLM 호출 전에 실행 — GPU 경합 방지
+            # 이력서 RAG + Q&A RAG는 둘 다 임베딩(Ollama)을 사용하므로 동시에 실행해도
+            # Ollama 내부에서 순차 처리됨. 두 RAG 간에는 GPU 경합이 미미하므로 병렬 유지.
             resume_context, qa_reference_context = await asyncio.gather(
                 _fetch_resume_rag(), _fetch_qa_rag()
             )
@@ -5395,6 +5436,402 @@ async def chat_with_intervention(
         "was_interrupted": request.was_interrupted,
         "next_question_keywords": question_keywords,
     }
+
+
+# ========== Chat Streaming API (SSE) ==========
+# LLM 토큰을 Server-Sent Events로 실시간 전송하여 체감 지연을 감소시킵니다.
+# ChatGPT와 유사하게 글자가 하나씩 나타나는 UX를 제공합니다.
+# 기존 POST /api/chat 엔드포인트는 폴백용으로 변경 없이 유지합니다.
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(
+    request: ChatRequest,
+    req: Request,
+    current_user: Dict = Depends(get_current_user),
+):
+    """SSE 기반 LLM 스트리밍 채팅 엔드포인트
+
+    기존 /api/chat와 동일한 전처리(답변 저장, RAG 검색, 개입 관리)를 수행하되,
+    LLM 질문 생성 단계에서 토큰을 실시간으로 스트리밍합니다.
+
+    SSE 이벤트 형식:
+      event: status  — 처리 단계 알림 (rag_search, llm_generating 등)
+      event: token   — LLM이 생성한 개별 토큰
+      event: done    — 스트리밍 완료, 최종 응답 + 메타데이터
+      event: error   — 오류 발생 시
+    """
+    # ── 세션 유효성 검증 ──
+    session = state.get_session(request.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다.")
+
+    # 사용자 입력 텍스트 정제 (STT 중복 누적 완화)
+    sanitized_message = sanitize_user_input(request.message)
+
+    # ── 지연 시간 측정용 request_id (미들웨어에서 부여) ──
+    rid = getattr(req.state, "request_id", None)
+
+    # ── 사용자 턴 종료 처리 (개입 시스템) ──
+    intervention_manager.end_user_turn(request.session_id)
+
+    # ── 발화 분석 턴 종료 ──
+    if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+        try:
+            speech_service.end_turn(request.session_id, sanitized_message)
+        except Exception as e:
+            print(f"[SpeechAnalysis] 턴 종료 오류: {e}")
+
+    # ── 시선 추적 턴 종료 ──
+    if GAZE_TRACKING_AVAILABLE and gaze_service:
+        try:
+            gaze_service.end_turn(request.session_id)
+        except Exception as e:
+            print(f"[GazeTracking] 턴 종료 오류: {e}")
+
+    async def _sse_generator():
+        """SSE 이벤트를 생성하는 비동기 제너레이터
+
+        1단계: 전처리 — 답변 저장, RAG 검색, 프롬프트 조립
+        2단계: LLM 스트리밍 — ChatOllama.astream()으로 토큰 실시간 전송
+        3단계: 후처리 — 대화 기록 저장, 개입 시스템 시작, 이벤트 발행
+        """
+        import json as _json
+
+        full_response = ""  # 스트리밍된 토큰을 누적할 변수
+
+        try:
+            session_id = request.session_id
+            session_data = state.get_session(session_id)
+            if not session_data:
+                yield f"event: error\ndata: {_json.dumps({'error': '세션을 찾을 수 없습니다.'}, ensure_ascii=False)}\n\n"
+                return
+
+            # ── 1단계: 전처리 (답변 저장 + RAG 검색 + 프롬프트 조립) ──
+            yield f"event: status\ndata: {_json.dumps({'phase': 'processing'}, ensure_ascii=False)}\n\n"
+
+            chat_history = session_data.get("chat_history", [])
+            question_count = session_data.get("question_count", 1)
+
+            # [START] 특수 메시지 처리 — 자기소개 (스트리밍이 아닌 즉시 반환)
+            if sanitized_message == "[START]":
+                greeting = interviewer.get_initial_greeting()
+                chat_history.append({"role": "assistant", "content": greeting})
+                state.update_session(
+                    session_id,
+                    {"chat_history": chat_history, "question_count": 1},
+                )
+                yield f"event: done\ndata: {_json.dumps({'response': greeting, 'question_number': 1}, ensure_ascii=False)}\n\n"
+                return
+
+            # 최대 질문 수 도달 시 면접 종료
+            if question_count >= interviewer.MAX_QUESTIONS:
+                end_msg = (
+                    "면접이 종료되었습니다. 수고하셨습니다. 결과 보고서를 확인해주세요."
+                )
+                asyncio.create_task(
+                    interviewer.start_interview_completion_workflow(session_id)
+                )
+                yield f"event: done\ndata: {_json.dumps({'response': end_msg, 'question_number': question_count}, ensure_ascii=False)}\n\n"
+                return
+
+            # LLM 초기화 확인
+            if not interviewer.question_llm:
+                yield f"event: error\ndata: {_json.dumps({'error': 'LLM 서비스가 초기화되지 않았습니다.'}, ensure_ascii=False)}\n\n"
+                return
+
+            # ── 사용자 답변 저장 (이중 저장 방지) ──
+            already_saved = (
+                chat_history
+                and chat_history[-1].get("role") == "user"
+                and chat_history[-1].get("content") == sanitized_message
+            )
+            if not already_saved:
+                chat_history.append({"role": "user", "content": sanitized_message})
+                state.update_session(session_id, {"chat_history": chat_history})
+
+            # ── Celery 백그라운드 평가 (비동기, 논블로킹) ──
+            previous_question = None
+            for msg in reversed(chat_history[:-1]):
+                if msg["role"] == "assistant":
+                    previous_question = msg["content"]
+                    break
+
+            if CELERY_AVAILABLE and previous_question:
+                try:
+                    task = evaluate_answer_task.delay(
+                        session_id, previous_question, sanitized_message, ""
+                    )
+                    pending_tasks = session_data.get("pending_eval_tasks", [])
+                    pending_tasks.append(
+                        {
+                            "task_id": task.id,
+                            "question": previous_question,
+                            "answer": sanitized_message,
+                            "submitted_at": time.time(),
+                        }
+                    )
+                    state.update_session(
+                        session_id, {"pending_eval_tasks": pending_tasks}
+                    )
+                    print(f"🚀 [Celery] 평가 태스크 제출됨: {task.id[:8]}...")
+                except Exception as e:
+                    print(f"⚠️ Celery 태스크 제출 실패: {e}")
+
+            # ── RAG 컨텍스트 병렬 조회 (이력서 + Q&A) ──
+            yield f"event: status\ndata: {_json.dumps({'phase': 'rag_search'}, ensure_ascii=False)}\n\n"
+
+            resume_context = ""
+            qa_context = ""
+            session_retriever = session_data.get("retriever") or interviewer.retriever
+
+            # ⚡ GPU 경합 방지: RAG 임베딩(Ollama)을 LLM 호출 전에 먼저 실행
+            async def _fetch_resume():
+                if not (session_retriever and sanitized_message):
+                    return ""
+                try:
+                    docs = await asyncio.wait_for(
+                        run_rag_async(session_retriever, sanitized_message),
+                        timeout=20,
+                    )
+                    if docs:
+                        return "\n".join([d.page_content for d in docs[:3]])
+                except asyncio.TimeoutError:
+                    print("⏰ [RAG Stream] 이력서 검색 타임아웃 (20초)")
+                except Exception as e:
+                    print(f"⚠️ [RAG Stream] 이력서 검색 오류: {e}")
+                return ""
+
+            async def _fetch_qa():
+                if not (
+                    RAG_AVAILABLE
+                    and sanitized_message
+                    and getattr(interviewer, "qa_rag", None)
+                ):
+                    return ""
+                try:
+                    qa_docs = await asyncio.wait_for(
+                        run_in_executor(
+                            RAG_EXECUTOR,
+                            interviewer.qa_rag.similarity_search,
+                            sanitized_message,
+                            2,
+                        ),
+                        timeout=20,
+                    )
+                    if qa_docs:
+                        return "\n".join([d.page_content for d in qa_docs[:2]])
+                except asyncio.TimeoutError:
+                    print("⏰ [RAG Stream] Q&A 검색 타임아웃 (20초)")
+                except Exception as e:
+                    print(f"⚠️ [RAG Stream] Q&A 검색 오류: {e}")
+                return ""
+
+            resume_context, qa_context = await asyncio.gather(
+                _fetch_resume(), _fetch_qa()
+            )
+
+            # ── 꼬리질문 판단 ──
+            needs_follow_up, follow_up_reason = interviewer.should_follow_up(
+                session_id, sanitized_message
+            )
+            current_topic = session_data.get("current_topic", "general")
+            topic_count = session_data.get("topic_question_count", 0)
+
+            # ── LLM 프롬프트 조립 (generate_llm_question과 동일한 로직) ──
+            messages = [SystemMessage(content=interviewer.INTERVIEWER_PROMPT)]
+
+            # 채용 공고 컨텍스트
+            job_posting = session_data.get("job_posting")
+            if job_posting:
+                jp_ctx = (
+                    f"\n--- [채용 공고 정보] 이 면접의 대상 공고 ---\n"
+                    f"회사명: {job_posting.get('company', 'N/A')}\n"
+                    f"공고 제목: {job_posting.get('title', 'N/A')}\n"
+                    f"근무지: {job_posting.get('location', 'N/A')}\n"
+                    f"직무 분야: {job_posting.get('job_category', 'N/A')}\n"
+                    f"경력 수준: {job_posting.get('experience_level', 'N/A')}\n"
+                    f"급여: {job_posting.get('salary_info', 'N/A')}\n"
+                    f"\n[공고 상세 내용]\n{job_posting.get('description', '')}\n"
+                    f"------------------------------------------\n"
+                    f"☝️ 위 채용 공고의 요구사항, 자격요건, 우대사항, 직무 설명을 활용하여 "
+                    f"맞춤형 면접 질문을 생성하세요."
+                )
+                messages.append(SystemMessage(content=jp_ctx))
+
+            # chat_history → LangChain Message 변환 (최근 3턴)
+            MAX_HIST = 6
+            history_msgs = interviewer.chat_history_to_messages(
+                chat_history, max_messages=MAX_HIST
+            )
+            messages.extend(history_msgs)
+
+            # RAG 컨텍스트 추가
+            if resume_context:
+                messages.append(
+                    SystemMessage(
+                        content=f"\n--- [RAG System] 참고용 이력서 관련 내용 ---\n{resume_context}\n------------------------------------------"
+                    )
+                )
+            if qa_context:
+                messages.append(
+                    SystemMessage(
+                        content=(
+                            f"\n--- [RAG System] 면접 참고 자료 (모범 답변 DB) ---\n{qa_context}\n"
+                            f"이 참고 자료를 바탕으로 지원자의 답변 수준을 판단하고, "
+                            f"더 깊은 꼬리질문을 만들어주세요.\n"
+                            f"------------------------------------------"
+                        )
+                    )
+                )
+
+            # 질문 생성 프롬프트 (꼬리질문 정보 포함)
+            follow_up_instruction = ""
+            if needs_follow_up and topic_count < 2:
+                follow_up_instruction = (
+                    f"\n⚠️ 지원자의 답변이 부실합니다. ({follow_up_reason})\n"
+                    f"꼬리질문을 해주세요. 현재 주제({current_topic})에서 "
+                    f"{topic_count}번째 질문입니다.\n"
+                    f"더 구체적인 예시, 수치, 결과를 요청하세요."
+                )
+            elif topic_count >= 2:
+                follow_up_instruction = (
+                    "\n✅ 이 주제에서 충분히 질문했습니다.\n"
+                    '"알겠습니다. 다음은..." 이라며 새로운 주제로 전환하세요.'
+                )
+
+            q_prompt = build_question_prompt(
+                question_count=question_count,
+                max_questions=interviewer.MAX_QUESTIONS,
+                current_topic=current_topic,
+                topic_count=topic_count,
+                follow_up_instruction=follow_up_instruction,
+            )
+            messages.append(HumanMessage(content=q_prompt))
+
+            # ── 2단계: LLM 스트리밍 (ChatOllama.astream 사용) ──
+            yield f"event: status\ndata: {_json.dumps({'phase': 'llm_generating'}, ensure_ascii=False)}\n\n"
+
+            if rid:
+                latency_monitor.start_phase(rid, "llm_inference")
+
+            # ChatOllama.astream()은 토큰 단위로 AIMessageChunk를 생성합니다.
+            # 각 chunk의 .content 속성에 토큰 텍스트가 담겨있습니다.
+            try:
+                async for chunk in interviewer.question_llm.astream(messages):
+                    token_text = chunk.content
+                    if token_text:
+                        full_response += token_text
+                        # 각 토큰을 SSE 이벤트로 즉시 전송 → 프론트엔드에 실시간 표시
+                        yield f"event: token\ndata: {_json.dumps({'token': token_text}, ensure_ascii=False)}\n\n"
+            except Exception as llm_err:
+                print(f"❌ [LLM Stream] 스트리밍 오류: {llm_err}")
+                if rid:
+                    latency_monitor.end_phase(rid, "llm_inference")
+                yield f"event: error\ndata: {_json.dumps({'error': f'LLM 스트리밍 오류: {llm_err}'}, ensure_ascii=False)}\n\n"
+                return
+
+            if rid:
+                latency_monitor.end_phase(rid, "llm_inference")
+
+            # ── 3단계: 후처리 (think 토큰 제거, 복수 질문 방어, 대화 기록 저장) ──
+            # <think>…</think> 블록이 포함된 경우 제거
+            final_question = strip_think_tokens(full_response)
+            # LLM이 여러 질문을 나열한 경우 첫 번째만 추출
+            final_question = extract_single_question(final_question)
+
+            # 빈 응답 방어 — 스트리밍 결과가 빈 경우 폴백
+            if not final_question:
+                print("⚠️ [LLM Stream] 빈 응답 → 비스트리밍 재시도")
+                try:
+                    retry_resp = await run_llm_async(interviewer.question_llm, messages)
+                    final_question = strip_think_tokens(retry_resp.content)
+                    final_question = extract_single_question(final_question)
+                except Exception:
+                    pass
+                if not final_question:
+                    final_question = "지금까지의 경험 중 가장 도전적이었던 프로젝트에 대해 말씀해 주시겠어요?"
+
+            # ── 대화 기록 및 주제 추적 업데이트 ──
+            chat_history.append({"role": "assistant", "content": final_question})
+            interviewer.update_topic_tracking(
+                session_id, sanitized_message, needs_follow_up
+            )
+            state.update_session(
+                session_id,
+                {
+                    "chat_history": chat_history,
+                    "question_count": question_count + 1,
+                },
+            )
+
+            # ── 개입 시스템: 다음 질문을 위한 사용자 턴 시작 ──
+            if not final_question.startswith("면접이 종료"):
+                keywords = intervention_manager.extract_question_keywords(
+                    final_question
+                )
+                intervention_manager.start_user_turn(session_id, keywords)
+
+                # 발화 분석 턴 시작
+                if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+                    try:
+                        turn_idx = session_data.get("current_question_idx", 0)
+                        speech_service.start_turn(session_id, turn_idx)
+                    except Exception:
+                        pass
+
+                # 시선 추적 턴 시작
+                if GAZE_TRACKING_AVAILABLE and gaze_service:
+                    try:
+                        turn_idx = session_data.get("current_question_idx", 0)
+                        gaze_service.start_turn(session_id, turn_idx)
+                    except Exception:
+                        pass
+
+            # ── 이벤트 발행 ──
+            if EVENT_BUS_AVAILABLE and event_bus:
+                await event_bus.publish(
+                    AppEventType.ANSWER_SUBMITTED,
+                    session_id=session_id,
+                    data={
+                        "answer": sanitized_message[:200],
+                        "question": final_question[:200],
+                    },
+                    source="chat_stream_api",
+                )
+                await event_bus.publish(
+                    AppEventType.QUESTION_GENERATED,
+                    session_id=session_id,
+                    data={
+                        "question": final_question[:200],
+                        "has_audio": False,
+                    },
+                    source="ai_interviewer_stream",
+                )
+
+            # ── 최종 완료 이벤트 (프론트엔드에서 전체 텍스트 + 질문 번호 수신) ──
+            done_data = {
+                "response": final_question,
+                "question_number": question_count + 1,
+            }
+            yield f"event: done\ndata: {_json.dumps(done_data, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            print(f"❌ [SSE Stream] 예외 발생: {e}")
+            yield f"event: error\ndata: {_json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+    # StreamingResponse로 SSE 스트림 반환
+    # media_type="text/event-stream" → 브라우저가 SSE로 인식
+    # Cache-Control: no-cache → 프록시/브라우저 캐싱 방지
+    return StreamingResponse(
+        _sse_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Nginx 프록시 버퍼링 비활성화
+        },
+    )
 
 
 # ========== 평가 통계 헬퍼 ==========

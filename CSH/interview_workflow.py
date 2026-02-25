@@ -356,26 +356,22 @@ class InterviewNodes:
                 pass
 
         # ── RAG 사전 조회 (질문 생성 노드에서 사용할 컨텍스트) ──
-        # ⚡ 성능 최적화: 평가/감정과 RAG를 동시에 병렬 실행하여
-        #    RAG 검색 시간(~2초)이 평가 시간(~3초)과 겹치도록 함
+        # ⚡ GPU 경합 방지: RAG 임베딩(nomic-embed-text)이 Ollama를 호출하므로
+        #    LLM과 동시에 실행하면 GPU 직렬 큐잉으로 타임아웃 발생.
+        #    RAG를 먼저 완료한 뒤 평가(Celery/LLM)를 실행하여 GPU 경합을 회피합니다.
         #    generate_question 시점에는 이미 State에 RAG 결과가 준비되어 LLM 호출만 수행
         rag_resume_ctx = ""
         rag_qa_ctx = ""
 
-        async def _fetch_rag():
-            """RAG 컨텍스트 사전 조회 — 질문 생성 노드에서 State로 전달"""
-            nonlocal rag_resume_ctx, rag_qa_ctx
-            try:
-                rag_resume_ctx, rag_qa_ctx = await self._interviewer.fetch_rag_contexts(
-                    session_id, user_input
-                )
-            except Exception as e:
-                print(f"⚠️ [Workflow] RAG 사전 조회 실패 (무시): {e}")
+        try:
+            rag_resume_ctx, rag_qa_ctx = await self._interviewer.fetch_rag_contexts(
+                session_id, user_input
+            )
+        except Exception as e:
+            print(f"⚠️ [Workflow] RAG 사전 조회 실패 (무시): {e}")
 
-        # 병렬 실행 (평가 + 감정 + Prosody + RAG)
-        await asyncio.gather(
-            _run_evaluation(), _run_emotion(), _run_prosody(), _fetch_rag()
-        )
+        # 병렬 실행 (평가 + 감정 + Prosody) — RAG는 위에서 이미 완료됨
+        await asyncio.gather(_run_evaluation(), _run_emotion(), _run_prosody())
 
         # ── 감정 기반 적응 모드 결정 (★ 멀티모달 융합: Prosody + DeepFace 동시) ──
         emotion_adaptive_mode = ws.get("emotion_adaptive_mode", "normal")
