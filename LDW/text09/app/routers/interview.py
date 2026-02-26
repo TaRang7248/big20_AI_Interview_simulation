@@ -16,7 +16,7 @@ from ..services.tts_service import generate_tts_audio
 from ..services.analysis_service import analyze_interview_result
 
 router = APIRouter(prefix="/api", tags=["interview"])
-# Note: Using "/api" prefix because we mix /api/interview and /api/upload and /api/interview-results
+# 참고: /api/interview, /api/upload, /api/interview-results를 혼합하여 사용하므로 "/api" 접두사를 사용합니다.
 
 @router.post("/interview/start")
 async def start_interview(background_tasks: BackgroundTasks, data: StartInterviewRequest):
@@ -144,7 +144,7 @@ async def submit_answer(
         row = c.fetchone()
         
         if not row:
-             logger.error("No active question found.")
+             logger.error("진행 중인 질문을 찾을 수 없습니다.")
              if conn: conn.close()
              return {"success": False, "message": "진행 중인 면접을 찾을 수 없습니다."}
              
@@ -292,7 +292,7 @@ async def submit_answer(
     except Exception as e:
         logger.error(f"Answer Submission Error: {e}")
         if conn: conn.close()
-        # Return a valid JSON even on error so frontend loading stops
+        # 프론트엔드 로딩이 멈추도록 오류 발생 시에도 유효한 JSON 반환
         return {
             "success": False, 
             "message": f"시스템 오류가 발생했습니다. (Error: {str(e)})",

@@ -40,7 +40,7 @@ def append_video_log(interview_number: str, analysis_result: dict):
                 json.dump([analysis_result], f, ensure_ascii=False, indent=2)
                 
     except Exception as e:
-        logger.error(f"Failed to append video log: {e}")
+        logger.error(f"비디오 로그 추가 실패: {e}")
 
 @router.post("/analyze")
 async def analyze_frame(
@@ -63,5 +63,5 @@ async def analyze_frame(
         return {"success": True, "analysis": result}
         
     except Exception as e:
-        logger.error(f"Video analysis endpoint error: {e}")
+        logger.error(f"비디오 분석 엔드포인트 오류: {e}")
         return {"success": False, "error": str(e)}

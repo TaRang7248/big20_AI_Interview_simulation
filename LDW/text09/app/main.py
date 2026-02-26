@@ -35,5 +35,5 @@ app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
-logger.info(f"Application initialized. BASE_DIR={BASE_DIR}")
-logger.info(f"Static mounts: /uploads -> {UPLOADS_DIR}, /data -> {DATA_DIR}, / -> {STATIC_DIR}")
+logger.info(f"애플리케이션 초기화 완료. BASE_DIR={BASE_DIR}")
+logger.info(f"정적 파일 마운트: /uploads -> {UPLOADS_DIR}, /data -> {DATA_DIR}, / -> {STATIC_DIR}")
