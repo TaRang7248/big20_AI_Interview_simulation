@@ -1253,7 +1253,7 @@ class InterviewInterventionManager:
     MAX_ANSWER_LENGTH = 800  # 최대 답변 길이 (글자 수)
     SOFT_WARNING_TIME = 90  # 부드러운 경고 시간 (1분 30초)
     SOFT_WARNING_LENGTH = 600  # 부드러운 경고 길이
-    SILENCE_THRESHOLD_MS = 2000  # 침묵 감지 임계값 (2초)
+    SILENCE_THRESHOLD_MS = 5000  # 침묵 감지 임계값 (5초)
     TOPIC_RELEVANCE_THRESHOLD = 0.3  # 주제 관련성 임계값
 
     # 개입 메시지 템플릿
@@ -1472,7 +1472,7 @@ class InterviewInterventionManager:
         #   - update_vad_signal()에서 is_speech=True 수신 시 False로 리셋
         if (
             intervention is None
-            and state["silence_duration_ms"] > 5000
+            and state["silence_duration_ms"] > 8000
             and not state.get("silence_intervention_given", False)
         ):  # 5초 이상 침묵 & 아직 개입하지 않은 경우
             intervention = {
