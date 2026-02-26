@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware  # <--- 이거 추가!
 from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
+from fastapi.staticfiles import StaticFiles
 
 # 프로젝트 모듈 임포트
 from YYR.agents.interview_graph import app as interview_graph
@@ -35,6 +36,11 @@ app = FastAPI(
     description="LangGraph + RAG + DB + Voice + Report (Full Version)",
     version="1.0.0"
 )
+# 정적 파일(생성된 mp3) 저장 폴더 준비
+os.makedirs("generated_audio", exist_ok=True)
+
+# /generated_audio/xxx.mp3 로 접근 가능하게 마운트
+app.mount("/generated_audio", StaticFiles(directory="generated_audio"), name="generated_audio")
 
 # CORS 미들웨어 설정 (app 생성 바로 아래에 추가)
 app.add_middleware(
@@ -175,8 +181,18 @@ async def chat_voice_audio_endpoint(
         output_filename = f"response_{uuid.uuid4()}.mp3"
         audio_path = await generate_audio(ai_text, output_file=output_filename)
 
+        # 🔴 mp3를 정적 폴더로 복사
+        target_path = os.path.join("generated_audio", output_filename)
+        shutil.copy(audio_path, target_path)
+
         # 4. 파일 반환
-        return FileResponse(audio_path, media_type="audio/mpeg", filename="ai_response.mp3")
+        return {
+            "status": "success",
+            "thread_id": thread_id,
+            "user_text": user_text,
+            "ai_text": ai_text,
+            "audio_url": f"/generated_audio/{output_filename}",
+            }
 
     except Exception as e:
         traceback.print_exc()

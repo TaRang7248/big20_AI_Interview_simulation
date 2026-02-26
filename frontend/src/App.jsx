@@ -161,23 +161,37 @@ function App() {
       formData.append("file", audioBlob, "user_voice.webm");
       formData.append("current_emotion", visionResult);
 
+      // ✅ 1) 이제 blob 말고 JSON을 받는다
       const response = await axios.post(`${API_BASE_URL}/chat/voice/audio`, formData, {
         params: { thread_id: sessionId },
-        responseType: "blob",
+        // ❌ responseType: "blob",  <-- 삭제!
       });
 
-      const aiAudioBlob = response.data;
-      const audioUrl = URL.createObjectURL(aiAudioBlob);
+      // ✅ 2) 백엔드에서 내려준 JSON
+      const data = response.data;
+      // 기대 형태: { status, thread_id, user_text, ai_text, audio_url }
 
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.src = audioUrl;
+      // ✅ 3) chatLog에 실제 텍스트를 넣는다 (전송중 메시지 교체)
+      setChatLog((prev) => {
+        const next = [...prev];
+        // 마지막이 "🎤 (음성 전송 중...)"이면 제거
+        if (next.length > 0 && next[next.length - 1].text.includes("음성 전송 중")) {
+          next.pop();
+        }
+        next.push({ sender: "user", text: data.user_text || "(STT 결과 없음)" });
+        next.push({ sender: "ai", text: data.ai_text || "(AI 응답 없음)" });
+        return next;
+      });
+
+      // ✅ 4) 오디오 재생: audio_url로 접근 (정적 마운트된 mp3)
+      if (data.audio_url && audioPlayerRef.current) {
+        audioPlayerRef.current.src = `${API_BASE_URL}${data.audio_url}`;
         await audioPlayerRef.current.play();
       }
 
-      setChatLog((prev) => [...prev, { sender: "ai", text: "🔊 (AI가 답변 중입니다...)" }]);
     } catch (error) {
       console.error("음성 대화 에러:", error);
-      alert("AI 서버 연결 실패! 백엔드 로그를 확인하세요.");
+      alert("음성 처리 실패! 콘솔/네트워크 응답을 확인하세요.");
     } finally {
       setIsProcessing(false);
     }
