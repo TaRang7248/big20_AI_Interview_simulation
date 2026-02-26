@@ -257,6 +257,14 @@ function App() {
           </RequireAdmin_yyr>
         }
       />
+      <Route
+        path="/admin/jobs"
+        element={
+          <RequireAdmin_yyr>
+            <AdminJobsPage_yyr />
+          </RequireAdmin_yyr>
+        }
+      />
 
 
       {/* ✅ 단독 결과 페이지 */}
@@ -268,14 +276,6 @@ function App() {
         element={
           <RequireAdmin_yyr>
             <AdminResultRoutePage_yyr />
-          </RequireAdmin_yyr>
-        }
-      />
-      <Route
-        path="/admin/jobs"
-        element={
-          <RequireAdmin_yyr>
-            <AdminJobsPage_yyr />
           </RequireAdmin_yyr>
         }
       />
