@@ -63,7 +63,10 @@ function InterviewPageInner() {
   const [totalQuestions, setTotalQuestions] = useState(10);
   const [sttText, setSttText] = useState("");
   const [manualInput, setManualInput] = useState("");  // STT 실패 시 수동 텍스트 입력 (폴백)
-  const [sttAvailable, setSttAvailable] = useState(true); // Web Speech API 사용 가능 여부
+  const [sttAvailable, setSttAvailable] = useState(true); // 전체 STT 사용 가능 여부 (서버 STT 또는 브라우저 STT)
+  const [serverSttAvailable, setServerSttAvailable] = useState(false); // 서버(WebSocket/Deepgram) STT 가능 여부
+  const [browserSttEnabled, setBrowserSttEnabled] = useState(true); // 브라우저 SpeechRecognition 활성화 여부
+  const STT_RUNTIME_DEBUG = process.env.NEXT_PUBLIC_STT_DEBUG === "1";
   const [micEnabled, setMicEnabled] = useState(true);
   const [camEnabled, setCamEnabled] = useState(true);
   const [interviewStarted, setInterviewStarted] = useState(false);
@@ -104,11 +107,17 @@ function InterviewPageInner() {
   const interviewStartedRef = useRef(false);
   const micEnabledRef = useRef(true);
   const sessionIdRef = useRef("");
+  const serverSttAvailableRef = useRef(false);
+  const browserSttEnabledRef = useRef(true);
+  const lastServerFinalRef = useRef("");
+  const lastBrowserFinalRef = useRef("");
 
   // state 변경 시 ref도 동기화 — 콜백에서 항상 최신 값 참조 가능
   useEffect(() => { interviewStartedRef.current = interviewStarted; }, [interviewStarted]);
   useEffect(() => { micEnabledRef.current = micEnabled; }, [micEnabled]);
   useEffect(() => { sessionIdRef.current = sessionId; }, [sessionId]);
+  useEffect(() => { serverSttAvailableRef.current = serverSttAvailable; }, [serverSttAvailable]);
+  useEffect(() => { browserSttEnabledRef.current = browserSttEnabled; }, [browserSttEnabled]);
 
   // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   // 면접 진행 중(interviewStartedRef)에는 토큰 만료로 인한 리다이렉트 방지
@@ -384,7 +393,49 @@ function InterviewPageInner() {
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
+            // 서버가 초기 연결 시 stt_available을 전달하면 STT 소스를 단일화
+            // - 서버 STT 가능: 브라우저 SpeechRecognition 비활성화
+            // - 서버 STT 불가: 브라우저 SpeechRecognition 활성화(폴백)
+            if (data.type === "connected") {
+              const serverSttOn = Boolean(data.stt_available);
+              setServerSttAvailable(serverSttOn);
+              if (STT_RUNTIME_DEBUG) {
+                console.log(
+                  `[STT-CHECK][source-select] session=${targetSid.slice(0, 8)} server_stt=${serverSttOn ? "on" : "off"}`,
+                );
+              }
+              if (serverSttOn) {
+                setBrowserSttEnabled(false);
+                setSttAvailable(true);
+                try {
+                  recognitionRef.current?.stop();
+                } catch {
+                  // ignore
+                }
+              } else {
+                setBrowserSttEnabled(true);
+                if (!recognitionRef.current) {
+                  initSpeechRecognition();
+                } else {
+                  try {
+                    recognitionRef.current.start();
+                  } catch {
+                    // 이미 시작된 상태일 수 있으므로 무시
+                  }
+                }
+              }
+              return;
+            }
             if (data.type === "stt_result" && data.is_final) {
+              const transcript = String(data.transcript || "").trim();
+              if (STT_RUNTIME_DEBUG && transcript) {
+                const normalized = transcript.toLowerCase().replace(/\s+/g, " ");
+                const isDuplicateCandidate = normalized === lastServerFinalRef.current;
+                console.log(
+                  `[STT-CHECK][append][server] session=${targetSid.slice(0, 8)} dup=${isDuplicateCandidate ? "Y" : "N"} text="${transcript.slice(0, 60)}"`,
+                );
+                lastServerFinalRef.current = normalized;
+              }
               setSttText(prev => prev + " " + data.transcript);
             }
             if (data.type === "event" && pushEventRef.current) {
@@ -427,7 +478,6 @@ function InterviewPageInner() {
       const ws = connectWebSocket(sid);
       wsRef.current = ws;
 
-      initSpeechRecognition();
       setPhase("interview");
       setInterviewStarted(true);
       setActiveSession(true); // 면접 시작 → Auth 유휴 타임아웃 비활성화
@@ -493,11 +543,16 @@ function InterviewPageInner() {
 
   // ========== 음성 인식 (Web Speech API) ==========
   const initSpeechRecognition = () => {
+    // 서버 STT가 활성화된 세션에서는 브라우저 STT를 시작하지 않음 (소스 단일화)
+    if (!browserSttEnabledRef.current) {
+      return;
+    }
+
     const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
     if (!SR) {
       // Web Speech API 미지원 브라우저 — 텍스트 입력 모드로 전환
       console.warn("[SpeechRecognition] Web Speech API를 지원하지 않는 브라우저입니다. 텍스트 입력 모드로 전환합니다.");
-      setSttAvailable(false);
+      setSttAvailable(serverSttAvailableRef.current);
       return;
     }
     const recognition = new SR();
@@ -516,7 +571,18 @@ function InterviewPageInner() {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) final += e.results[i][0].transcript;
       }
-      if (final) setSttText(prev => prev + " " + final);
+      if (final) {
+        const finalTrimmed = final.trim();
+        if (STT_RUNTIME_DEBUG && finalTrimmed) {
+          const normalized = finalTrimmed.toLowerCase().replace(/\s+/g, " ");
+          const isDuplicateCandidate = normalized === lastBrowserFinalRef.current;
+          console.log(
+            `[STT-CHECK][append][browser] session=${sessionIdRef.current.slice(0, 8)} dup=${isDuplicateCandidate ? "Y" : "N"} text="${finalTrimmed.slice(0, 60)}"`,
+          );
+          lastBrowserFinalRef.current = normalized;
+        }
+        setSttText(prev => prev + " " + final);
+      }
     };
 
     // 음성 인식 에러 핸들러 — 에러 발생 시에도 시스템이 안정적으로 유지되도록 처리
@@ -531,7 +597,7 @@ function InterviewPageInner() {
       // not-allowed(권한 거부) 또는 network(네트워크 불가) → 즉시 텍스트 모드 전환
       if (errorType === "not-allowed" || errorType === "service-not-allowed") {
         console.warn("[SpeechRecognition] 마이크 권한이 거부되었습니다. 텍스트 입력 모드로 전환합니다.");
-        setSttAvailable(false);
+        setSttAvailable(serverSttAvailableRef.current);
         return;
       }
 
@@ -542,7 +608,7 @@ function InterviewPageInner() {
       consecutiveErrors++;
       if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
         console.warn(`[SpeechRecognition] 연속 ${MAX_CONSECUTIVE_ERRORS}회 에러 발생. 텍스트 입력 모드로 전환합니다.`);
-        setSttAvailable(false);
+        setSttAvailable(serverSttAvailableRef.current);
       }
     }) as ((ev: Event) => void);
 
@@ -550,7 +616,11 @@ function InterviewPageInner() {
     // Chrome에서 continuous 모드라도 네트워크 타임아웃 등으로 인식이 끊길 수 있음
     recognition.onend = () => {
       // Ref에서 최신 interviewStarted/micEnabled 값을 읽어 재시작 여부 결정
-      if (interviewStartedRef.current && micEnabledRef.current) {
+      if (
+        interviewStartedRef.current
+        && micEnabledRef.current
+        && browserSttEnabledRef.current
+      ) {
         // 디바운스: 빠른 재시작 루프 방지 (300ms 대기 후 재시작)
         setTimeout(() => {
           try {
@@ -566,9 +636,10 @@ function InterviewPageInner() {
     recognitionRef.current = recognition;
     try {
       recognition.start();
+      setSttAvailable(true);
     } catch (e) {
       console.warn("[SpeechRecognition] 초기 시작 실패:", e);
-      setSttAvailable(false);
+      setSttAvailable(serverSttAvailableRef.current);
     }
   };
 
