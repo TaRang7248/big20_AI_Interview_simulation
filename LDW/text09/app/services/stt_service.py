@@ -128,9 +128,11 @@ def transcribe_with_google_web_speech(audio_path):
         text = recognizer.recognize_google(audio_data, language="ko-KR")
         return text.strip()
     except sr_lib.UnknownValueError:
-        logger.info("Google Web Speech: 음성을 인식할 수 없음")
-        return None
+        # 음성이 인식되지 않는 경우 '답변 없음' 반환
+        logger.info("Google Web Speech: 음성을 인식할 수 없음 (답변 없음 처리)")
+        return "답변 없음"
     except sr_lib.RequestError as e:
+        # 서비스 연결 오류 등이 발생한 경우 None 반환하여 Whisper로 전환 유도
         logger.error(f"Google Web Speech: 서비스 요청 오류; {e}")
         return None
     except Exception as e:
@@ -209,12 +211,13 @@ def transcribe_audio(original_audio_path):
     # 2. 특징 분석
     analysis = analyze_audio_features(processed_path, y, sr)
     
-    # 3. STT 실행 (Google 우선 → Whisper 보조)
+    # 3. STT 실행 (Google 우선 → 오류 시 Whisper 보조)
     stt_method = "google"
     final_text = transcribe_with_google_web_speech(processed_path)
     
-    if not final_text or len(final_text.strip()) == 0:
-        logger.info("Google STT 결과 없음. 보조 엔진(Whisper)으로 전환합니다.")
+    # Google Web Speech에서 접속 오류(None)가 발생한 경우에만 Whisper로 전환
+    if final_text is None:
+        logger.warning("Google STT 서비스 오류. 보조 엔진(Whisper)으로 전환합니다.")
         stt_method = "whisper"
         final_text = transcribe_with_whisper(processed_path)
     
