@@ -218,6 +218,7 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 ---
 
 ## 8. 최근 추가/변경된 기능
+- **LangChain 기반 질문 메모리(History) 도입 (2026-02-26)**: 단순 텍스트 프롬프트 매개변수를 넘어서, LangChain의 `SystemMessage`, `AIMessage`, `HumanMessage` 구조를 활용하여 면접관과 지원자 사이의 대화 문맥을 AI가 완벽하게 기억하고 자연스럽게 이어가는 꼬리 질문(Follow-up Question)을 생성하도록 LLM 파이프라인(`llm_service.py`)을 획기적으로 개선했습니다.
 - **STT/LLM 모델 통합**: OpenAI Whisper 및 GPT-4o를 **Google Gemini 2.0 Flash**로 전면 교체하여 비용 효율성과 처리 속도를 개선했습니다.
 - **음성 인식(STT) 엔진 교체**: 기존 Gemini Multimodal 기반 STT를 **Google Web Speech API**로 교체하여 한국어 인식의 범용성과 안정성을 높였습니다.
 - **질문 생성 로직 개선**: Gemini 2.0 Flash의 JSON 출력 안정성을 확보하기 위해 마크다운 정리 로직(`clean_json_string`)과 재시도 메커니즘을 추가했습니다.
