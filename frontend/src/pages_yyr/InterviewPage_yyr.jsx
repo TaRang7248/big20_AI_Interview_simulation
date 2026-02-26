@@ -245,7 +245,7 @@ export default function InterviewPage_yyr({
                         <div className="px-6 py-5 border-t border-white/60">
                             {interviewPhase === "live" ? (
                                 <>
-                                    <AudioRecorder onAudioSubmit={onAudioSubmit} isProcessing={isProcessing} />
+                                    <AudioRecorder onTextSubmit={onAudioSubmit} isProcessing={isProcessing} />
                                     <audio ref={audioPlayerRef} hidden />
                                 </>
                             ) : (
