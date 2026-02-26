@@ -329,7 +329,9 @@ function initAuth() {
             if (result.success) {
                 loginUser(result.user);
             } else {
-                showToast(result.message, 'error');
+                // 서버에서 반환한 detail 메시지 또는 기본 메시지 표시
+                const errorMsg = result.detail || result.message || '아이디 또는 비밀번호가 일치하지 않습니다.';
+                showToast(errorMsg, 'error');
             }
         } catch (error) {
             console.error('Login Error:', error);
