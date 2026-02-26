@@ -131,6 +131,11 @@ STT_QUALITY_LOG_ENABLED = os.getenv("STT_QUALITY_LOG_ENABLED", "1") == "1"
 STT_QUALITY_LOG_EVERY_FINAL = int(os.getenv("STT_QUALITY_LOG_EVERY_FINAL", "5"))
 STT_QUALITY_LOG_EVERY_UTTERANCE = int(os.getenv("STT_QUALITY_LOG_EVERY_UTTERANCE", "3"))
 
+# LLM 한국어 출력 강제 정책 (운영 가드)
+LLM_KOREAN_GUARD_ENABLED = os.getenv("LLM_KOREAN_GUARD_ENABLED", "1") == "1"
+LLM_KOREAN_MIN_RATIO = float(os.getenv("LLM_KOREAN_MIN_RATIO", "0.6"))
+LLM_KOREAN_MAX_RETRIES = int(os.getenv("LLM_KOREAN_MAX_RETRIES", "2"))
+
 # STT 띄어쓰기 보정 모드
 # - off : 보정 미적용 (원문 유지)
 # - safe: 짧은 발화/저신뢰/코드성 토큰에 보수적으로 대응 후 보정
@@ -668,6 +673,52 @@ def extract_single_question(text: str) -> str:
             return paragraphs[0]
 
     return text
+
+
+def _korean_ratio_stats(text: str) -> Dict[str, float]:
+    """텍스트 내 한글 비율(한글 vs 영문 알파벳)을 계산합니다."""
+    if not text:
+        return {
+            "korean_count": 0.0,
+            "english_count": 0.0,
+            "ratio": 1.0,
+        }
+
+    korean_count = len(_re.findall(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", text))
+    english_count = len(_re.findall(r"[A-Za-z]", text))
+    total = korean_count + english_count
+    ratio = (korean_count / total) if total > 0 else 1.0
+    return {
+        "korean_count": float(korean_count),
+        "english_count": float(english_count),
+        "ratio": float(ratio),
+    }
+
+
+def _is_korean_output_acceptable(text: str) -> tuple[bool, Dict[str, float]]:
+    """
+    한국어 출력 정책 통과 여부를 반환합니다.
+
+    정책:
+    - 영어 알파벳이 포함될 경우 한글 비율이 임계치 이상이어야 함
+    - 영어만 있고 한글이 없는 경우 실패
+    """
+    stats = _korean_ratio_stats(text)
+    korean_count = stats["korean_count"]
+    english_count = stats["english_count"]
+    ratio = stats["ratio"]
+
+    if english_count > 0 and korean_count <= 0:
+        return False, stats
+    if english_count > 0 and ratio < LLM_KOREAN_MIN_RATIO:
+        return False, stats
+    return True, stats
+
+
+def _postprocess_question_output(text: str) -> str:
+    """질문 출력 후처리: think 토큰 제거 + 단일 질문 추출"""
+    cleaned = strip_think_tokens(text)
+    return extract_single_question(cleaned)
 
 
 async def run_llm_async(llm, messages):
@@ -2362,21 +2413,53 @@ class AIInterviewer:
         )
         messages.append(HumanMessage(content=question_prompt))
 
-        # ========== 7. LLM 호출 + strip_think_tokens + 단일 질문 추출 + 빈 응답 재시도 ==========
+        # ========== 7. LLM 호출 + 언어 정책 강제 가드(한국어 비율 검사) ==========
         response = await run_llm_async(self.question_llm, messages)
-        next_question = strip_think_tokens(response.content)
-        # LLM이 한 번에 여러 질문을 나열한 경우, 첫 번째 질문만 추출
-        next_question = extract_single_question(next_question)
+        next_question = _postprocess_question_output(response.content)
+
+        guard_retry_count = 0
+        while guard_retry_count < max(0, LLM_KOREAN_MAX_RETRIES):
+            needs_retry = not next_question
+            reason = "empty"
+            ratio_stats = {"ratio": 1.0, "korean_count": 0.0, "english_count": 0.0}
+
+            if next_question and LLM_KOREAN_GUARD_ENABLED:
+                acceptable, ratio_stats = _is_korean_output_acceptable(next_question)
+                if not acceptable:
+                    needs_retry = True
+                    reason = "language_policy"
+
+            if not needs_retry:
+                break
+
+            print(
+                f"⚠️ [LLM Guard] 재생성 시도 {guard_retry_count + 1}/{LLM_KOREAN_MAX_RETRIES} "
+                f"(reason={reason}, ratio={ratio_stats.get('ratio', 1.0):.3f})"
+            )
+
+            retry_messages = messages + [
+                HumanMessage(
+                    content=(
+                        "⚠️ 출력 규칙 재강조: 반드시 한국어로 질문 1개만 작성하세요. "
+                        "영어 문장으로 답변하지 마세요. 기술 용어만 영어 병기 가능합니다."
+                    )
+                )
+            ]
+            retry_response = await run_llm_async(self.question_llm, retry_messages)
+            next_question = _postprocess_question_output(retry_response.content)
+            guard_retry_count += 1
 
         if not next_question:
-            print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
-            retry_response = await run_llm_async(self.question_llm, messages)
-            next_question = strip_think_tokens(retry_response.content)
-            next_question = extract_single_question(next_question)
-            if not next_question:
-                raise RuntimeError(
-                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+            raise RuntimeError("LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 지속)")
+
+        if LLM_KOREAN_GUARD_ENABLED:
+            acceptable, ratio_stats = _is_korean_output_acceptable(next_question)
+            if not acceptable:
+                print(
+                    f"⚠️ [LLM Guard] 한국어 정책 미충족 지속 (ratio={ratio_stats['ratio']:.3f}) "
+                    "→ 한국어 폴백 질문 사용"
                 )
+                next_question = "지금 말씀하신 내용을 바탕으로, 가장 핵심적인 성과를 한국어로 구체적으로 설명해 주시겠어요?"
 
         return next_question
 
@@ -2738,28 +2821,61 @@ class AIInterviewer:
 
             messages.append(HumanMessage(content=question_prompt))
 
-            # ========== 7. LLM 호출 - 비동기 ==========
-            # ThreadPoolExecutor로 블로킹 LLM 호출을 비동기로 실행
+            # ========== 7. LLM 호출 + 언어 정책 강제 가드(한국어 비율 검사) ==========
             response = await run_llm_async(self.question_llm, messages)
-            # ── qwen3 <think> 토큰 제거 ──
-            # think=False 설정에도 일부 버전에서 <think>블록</think>이 포함될 수 있음
-            # 제거하지 않으면 LLM 내부 추론이 면접관 발화로 노출됨 ("엉뚱한 답변" 원인)
-            next_question = strip_think_tokens(response.content)
-            # ── 복수 질문 방어: LLM이 여러 질문을 나열한 경우 첫 번째만 추출 ──
-            next_question = extract_single_question(next_question)
+            next_question = _postprocess_question_output(response.content)
 
-            # ── 빈 응답 방어 ──
-            # <thought>/<think> 블록만 있고 실제 질문이 없는 경우 LLM 재호출
-            if not next_question:
-                print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
-                # 재호출 시 temperature를 약간 높여 다른 출력 유도
-                retry_response = await run_llm_async(self.question_llm, messages)
-                next_question = strip_think_tokens(retry_response.content)
-                next_question = extract_single_question(next_question)
-                if not next_question:
-                    raise RuntimeError(
-                        "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+            guard_retry_count = 0
+            while guard_retry_count < max(0, LLM_KOREAN_MAX_RETRIES):
+                needs_retry = not next_question
+                reason = "empty"
+                ratio_stats = {
+                    "ratio": 1.0,
+                    "korean_count": 0.0,
+                    "english_count": 0.0,
+                }
+
+                if next_question and LLM_KOREAN_GUARD_ENABLED:
+                    acceptable, ratio_stats = _is_korean_output_acceptable(
+                        next_question
                     )
+                    if not acceptable:
+                        needs_retry = True
+                        reason = "language_policy"
+
+                if not needs_retry:
+                    break
+
+                print(
+                    f"⚠️ [LLM Guard] 재생성 시도 {guard_retry_count + 1}/{LLM_KOREAN_MAX_RETRIES} "
+                    f"(reason={reason}, ratio={ratio_stats.get('ratio', 1.0):.3f})"
+                )
+
+                retry_messages = messages + [
+                    HumanMessage(
+                        content=(
+                            "⚠️ 출력 규칙 재강조: 반드시 한국어로 질문 1개만 작성하세요. "
+                            "영어 문장으로 답변하지 마세요. 기술 용어만 영어 병기 가능합니다."
+                        )
+                    )
+                ]
+                retry_response = await run_llm_async(self.question_llm, retry_messages)
+                next_question = _postprocess_question_output(retry_response.content)
+                guard_retry_count += 1
+
+            if not next_question:
+                raise RuntimeError(
+                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 지속)"
+                )
+
+            if LLM_KOREAN_GUARD_ENABLED:
+                acceptable, ratio_stats = _is_korean_output_acceptable(next_question)
+                if not acceptable:
+                    print(
+                        f"⚠️ [LLM Guard] 한국어 정책 미충족 지속 (ratio={ratio_stats['ratio']:.3f}) "
+                        "→ 한국어 폴백 질문 사용"
+                    )
+                    next_question = "지금 말씀하신 내용을 바탕으로, 가장 핵심적인 성과를 한국어로 구체적으로 설명해 주시겠어요?"
 
             # ========== 8. 주제 추적 업데이트 ==========
             self.update_topic_tracking(session_id, user_answer, needs_follow_up)
@@ -6186,23 +6302,62 @@ async def chat_stream(
             if rid:
                 latency_monitor.end_phase(rid, "llm_inference")
 
-            # ── 3단계: 후처리 (think 토큰 제거, 복수 질문 방어, 대화 기록 저장) ──
-            # <think>…</think> 블록이 포함된 경우 제거
-            final_question = strip_think_tokens(full_response)
-            # LLM이 여러 질문을 나열한 경우 첫 번째만 추출
-            final_question = extract_single_question(final_question)
+            # ── 3단계: 후처리 + 언어 정책 강제 가드 (한국어 비율 검사) ──
+            final_question = _postprocess_question_output(full_response)
 
-            # 빈 응답 방어 — 스트리밍 결과가 빈 경우 폴백
-            if not final_question:
-                print("⚠️ [LLM Stream] 빈 응답 → 비스트리밍 재시도")
+            guard_retry_count = 0
+            while guard_retry_count < max(0, LLM_KOREAN_MAX_RETRIES):
+                needs_retry = not final_question
+                reason = "empty"
+                ratio_stats = {
+                    "ratio": 1.0,
+                    "korean_count": 0.0,
+                    "english_count": 0.0,
+                }
+
+                if final_question and LLM_KOREAN_GUARD_ENABLED:
+                    acceptable, ratio_stats = _is_korean_output_acceptable(
+                        final_question
+                    )
+                    if not acceptable:
+                        needs_retry = True
+                        reason = "language_policy"
+
+                if not needs_retry:
+                    break
+
+                print(
+                    f"⚠️ [LLM Stream Guard] 재생성 시도 {guard_retry_count + 1}/{LLM_KOREAN_MAX_RETRIES} "
+                    f"(reason={reason}, ratio={ratio_stats.get('ratio', 1.0):.3f})"
+                )
                 try:
-                    retry_resp = await run_llm_async(interviewer.question_llm, messages)
-                    final_question = strip_think_tokens(retry_resp.content)
-                    final_question = extract_single_question(final_question)
+                    retry_messages = messages + [
+                        HumanMessage(
+                            content=(
+                                "⚠️ 출력 규칙 재강조: 반드시 한국어로 질문 1개만 작성하세요. "
+                                "영어 문장으로 답변하지 마세요. 기술 용어만 영어 병기 가능합니다."
+                            )
+                        )
+                    ]
+                    retry_resp = await run_llm_async(
+                        interviewer.question_llm, retry_messages
+                    )
+                    final_question = _postprocess_question_output(retry_resp.content)
                 except Exception:
-                    pass
-                if not final_question:
-                    final_question = "지금까지의 경험 중 가장 도전적이었던 프로젝트에 대해 말씀해 주시겠어요?"
+                    final_question = ""
+                guard_retry_count += 1
+
+            if not final_question:
+                final_question = "지금까지의 경험 중 가장 도전적이었던 프로젝트에 대해 한국어로 말씀해 주시겠어요?"
+
+            if LLM_KOREAN_GUARD_ENABLED:
+                acceptable, ratio_stats = _is_korean_output_acceptable(final_question)
+                if not acceptable:
+                    print(
+                        f"⚠️ [LLM Stream Guard] 한국어 정책 미충족 지속 (ratio={ratio_stats['ratio']:.3f}) "
+                        "→ 한국어 폴백 질문 사용"
+                    )
+                    final_question = "지금 말씀하신 내용을 바탕으로, 가장 핵심적인 성과를 한국어로 구체적으로 설명해 주시겠어요?"
 
             # ── 대화 기록 및 주제 추적 업데이트 ──
             chat_history.append({"role": "assistant", "content": final_question})
@@ -7844,6 +7999,7 @@ async def get_status(current_user: Optional[Dict] = Depends(get_current_user_opt
             "stt_whisper_fallback": WHISPER_AVAILABLE,
             "stt_spacing_correction": SPACING_CORRECTION_AVAILABLE,
             "stt_spacing_mode": STT_SPACING_MODE,
+            "llm_korean_guard": LLM_KOREAN_GUARD_ENABLED,
             "rag": RAG_AVAILABLE,
             "emotion": EMOTION_AVAILABLE,
             "redis": REDIS_AVAILABLE,
@@ -7898,6 +8054,11 @@ async def get_stt_status(
         "quality_snapshot": {
             sid[:8]: _snapshot_stt_quality_metrics(sid)
             for sid in list(_stt_quality_by_session.keys())[:5]
+        },
+        "llm_korean_guard": {
+            "enabled": LLM_KOREAN_GUARD_ENABLED,
+            "min_ratio": LLM_KOREAN_MIN_RATIO,
+            "max_retries": LLM_KOREAN_MAX_RETRIES,
         },
     }
     if WHISPER_AVAILABLE and whisper_service:
