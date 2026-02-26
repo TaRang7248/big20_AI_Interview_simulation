@@ -5,14 +5,9 @@ import logging
 import numpy as np
 import librosa
 import soundfile as sf
-import noisereduce as nr
-import parselmouth
-import Levenshtein
 import torch
 import whisper
 import speech_recognition as sr_lib
-from openai import OpenAI
-from parselmouth.praat import call
 from ..config import logger, OPENAI_API_KEY, BASE_DIR
 
 # ---------------------------------------------------------
@@ -63,22 +58,19 @@ def preprocess_audio(input_path):
         return input_path, None, None
 
 # ---------------------------------------------------------
-# 2. 오디오 분석 (Librosa & Parselmouth)
+# 2. 오디오 분석 (Librosa)
 # ---------------------------------------------------------
 def analyze_audio_features(audio_path, y, sr):
     """
     오디오 분석 항목:
     - 무음 지속 시간
     - RMS 에너지 (신뢰도/볼륨 안정성)
-    - 피치/F0 (Jitter, Shimmer 사용)
-    - 발화 속도 (추정 음절 / 시간)
+    - 긴장도 및 신뢰도 점수 계산
     """
     analysis_result = {
         "silence_duration": 0.0,
         "rms_mean": 0.0,
         "rms_std": 0.0,
-        "pitch_jitter": 0.0,
-        "pitch_shimmer": 0.0,
         "speech_rate": 0.0,
         "confidence_score": 0.0, 
         "is_nervous": False
@@ -105,24 +97,13 @@ def analyze_audio_features(audio_path, y, sr):
         analysis_result["rms_mean"] = float(np.mean(rms_vals))
         analysis_result["rms_std"] = float(np.std(rms_vals))
 
-        # Jitter & Shimmer (Parselmouth)
-        sound = parselmouth.Sound(audio_path)
-        point_process = call(sound, "To PointProcess (periodic, cc)", 75, 500)
-        
-        jitter = call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
-        analysis_result["pitch_jitter"] = round(jitter * 100, 4) if jitter == jitter else 0.0
-        
-        shimmer = call([sound, point_process], "Get shimmer (local)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
-        analysis_result["pitch_shimmer"] = round(shimmer * 100, 4) if shimmer == shimmer else 0.0
-
-        # 긴장도 판단
+        # 긴장도 판단 (무음 비율 및 볼륨 안정성 기반)
         nervous_score = 0
-        if analysis_result["pitch_jitter"] > 1.5: nervous_score += 1
-        if analysis_result["pitch_shimmer"] > 4.0: nervous_score += 1
         if duration > 0 and analysis_result["silence_duration"] / duration > 0.4: nervous_score += 1
+        if analysis_result["rms_std"] > 0.05: nervous_score += 1
         
         analysis_result["is_nervous"] = nervous_score >= 1
-        confidence = 80 - (analysis_result["silence_duration"] * 2) - (analysis_result["pitch_jitter"] * 5)
+        confidence = 100 - (analysis_result["silence_duration"] * 5)
         analysis_result["confidence_score"] = round(max(0, min(100, confidence)), 1)
         
     except Exception as e:
@@ -143,7 +124,7 @@ def transcribe_with_google_web_speech(audio_path):
         with sr_lib.AudioFile(audio_path) as source:
             audio_data = recognizer.record(source)
         
-        logger.info(f"Google Web Speech 전사 시작: {audio_path}")
+        logger.info(f"Google Web Speech 전사 시도: {audio_path}")
         text = recognizer.recognize_google(audio_data, language="ko-KR")
         return text.strip()
     except sr_lib.UnknownValueError:
@@ -162,7 +143,7 @@ _WHISPER_MODEL_CACHE = None
 def get_whisper_model():
     global _WHISPER_MODEL_CACHE
     if _WHISPER_MODEL_CACHE is None:
-        model_name = "large-v3-turbo"
+        model_name = "turbo"
         logger.info(f"Whisper 로컬 모델({model_name}) 로딩 중...")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         _WHISPER_MODEL_CACHE = whisper.load_model(model_name, device=device)
@@ -171,17 +152,17 @@ def get_whisper_model():
 
 def transcribe_with_whisper(audio_path):
     """
-    로컬 OpenAI Whisper 모델을 사용하여 음성 전사를 수행합니다.
+    로컬 OpenAI Whisper 모델을 사용하여 음성 전사를 수행합니다. (보조 엔진)
     """
     try:
         model = get_whisper_model()
-        logger.info(f"Whisper 로컬 모델 전사 시작: {audio_path}")
+        logger.info(f"Whisper 로컬 모델 전사 시작 (보조): {audio_path}")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         result = model.transcribe(
             audio_path, 
             language="ko", 
             temperature=0.0,
-            initial_prompt="이것은 한국어 면접 답변입니다. 간투사(어, 음)를 포함하여 있는 그대로 전사하세요.",
+            initial_prompt="이것은 한국어 면접 답변입니다.",
             fp16=(device == "cuda")
         )
         text = result["text"].strip()
@@ -196,40 +177,14 @@ def transcribe_with_whisper(audio_path):
         logger.error(f"Whisper 로컬 STT 오류: {e}")
         return None
 
-def calculate_levenshtein_similarity(text1, text2):
-    return Levenshtein.ratio(text1, text2)
-
-def select_best_transcript(google_text, whisper_text):
-    """
-    Google Web Speech와 Whisper 결과 중 최적의 결과를 선택합니다.
-    """
-    if not google_text and not whisper_text:
-        return "답변 없음"
-    if not google_text:
-        return whisper_text
-    if not whisper_text:
-        return google_text
-
-    g = google_text.strip()
-    w = whisper_text.strip()
-
-    if g == "답변 없음" and w != "답변 없음": return w
-    if w == "답변 없음" and g != "답변 없음": return g
-
-    # 더 풍부한 정보(긴 문장) 또는 간투사 보존 여부로 판단
-    if len(g) >= len(w) + 10: return g
-    if len(w) >= len(g) + 10: return w
-
-    # 기본적으로 Whisper가 로컬에서 더 세밀한 전사를 하는 경향이 있으므로 유사도가 높으면 Whisper 우선 고려 가능
-    # 여기서는 단순 길이 및 존재 여부로 유지
-    return w if len(w) >= len(g) else g
-
 # ---------------------------------------------------------
 # 4. 메인 파이프라인
 # ---------------------------------------------------------
 def transcribe_audio(original_audio_path):
     """
     메인 STT 파이프라인
+    1. Google Web Speech (주력) 실행
+    2. 실패 시 Whisper (보조) 실행
     """
     if not os.path.exists(original_audio_path):
         return {"text": "파일 없음", "analysis": {}}
@@ -254,16 +209,17 @@ def transcribe_audio(original_audio_path):
     # 2. 특징 분석
     analysis = analyze_audio_features(processed_path, y, sr)
     
-    # 3. STT 병렬 실행
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        future_google = executor.submit(transcribe_with_google_web_speech, processed_path)
-        future_whisper = executor.submit(transcribe_with_whisper, processed_path)
-        
-        google_res = future_google.result()
-        whisper_res = future_whisper.result()
-        
-    final_text = select_best_transcript(google_res, whisper_res)
+    # 3. STT 실행 (Google 우선 → Whisper 보조)
+    stt_method = "google"
+    final_text = transcribe_with_google_web_speech(processed_path)
+    
+    if not final_text or len(final_text.strip()) == 0:
+        logger.info("Google STT 결과 없음. 보조 엔진(Whisper)으로 전환합니다.")
+        stt_method = "whisper"
+        final_text = transcribe_with_whisper(processed_path)
+    
+    if not final_text:
+        final_text = "답변 없음"
     
     # 4. 속도 계산
     syllable_count = len(final_text.replace(" ", ""))
@@ -279,7 +235,7 @@ def transcribe_audio(original_audio_path):
         "text": final_text,
         "analysis": analysis,
         "debug_info": {
-            "google_web_speech": google_res,
-            "whisper": whisper_res
+            "stt_engine_used": stt_method,
+            "processed_path": processed_path
         }
     }
