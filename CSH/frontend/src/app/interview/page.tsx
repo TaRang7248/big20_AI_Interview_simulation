@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import Header from "@/components/common/Header";
 import EventToastContainer from "@/components/common/EventToast";
 import InterviewReportCharts, { ReportData } from "@/components/report/InterviewReportCharts";
-import { sessionApi, interviewApi, ttsApi, interventionApi, resumeApi } from "@/lib/api";
+import { sessionApi, interviewApi, ttsApi, interventionApi, resumeApi, webrtcApi } from "@/lib/api";
 import { useToast } from "@/contexts/ToastContext";
 import { Mic, MicOff, Camera, CameraOff, PhoneOff, SkipForward, Volume2, Loader2, FileText, Download, LayoutDashboard, AlertTriangle, Upload } from "lucide-react";
 
@@ -85,6 +85,7 @@ function InterviewPageInner() {
   const interviewVideoRef = useRef<HTMLVideoElement>(null);  // interview 화면 사용자 영상용
   const streamRef = useRef<MediaStream | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const interventionTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -97,6 +98,9 @@ function InterviewPageInner() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const vadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const vadSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const sttProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const sttMuteGainRef = useRef<GainNode | null>(null);
+  const sttPendingFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // WebSocket 재연결 시도 횟수 — connectWebSocket 재귀 호출 시에도 누적되어
   // 무한 재연결 루프를 방지 (이전: 매 호출마다 0으로 초기화되는 지역 변수 사용)
@@ -109,6 +113,7 @@ function InterviewPageInner() {
   const sessionIdRef = useRef("");
   const serverSttAvailableRef = useRef(false);
   const browserSttEnabledRef = useRef(true);
+  const sttSourceModeRef = useRef<"browser" | "server_pending" | "server">("browser");
   const lastServerFinalRef = useRef("");
   const lastBrowserFinalRef = useRef("");
 
@@ -185,6 +190,8 @@ function InterviewPageInner() {
       setActiveSession(false); // 페이지 이탈 시 Auth 유휴 타임아웃 복원
       streamRef.current?.getTracks().forEach(t => t.stop());
       wsRef.current?.close();
+      try { pcRef.current?.close(); } catch { /* ignore */ }
+      pcRef.current = null;
       recognitionRef.current?.stop();
       if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
       stopVAD(); // VAD 리소스 정리
@@ -208,6 +215,35 @@ function InterviewPageInner() {
    */
   const startVAD = (stream: MediaStream) => {
     try {
+      const toPcm16k = (input: Float32Array, srcRate: number): Int16Array => {
+        if (input.length === 0) return new Int16Array(0);
+
+        if (srcRate === 16000) {
+          const direct = new Int16Array(input.length);
+          for (let i = 0; i < input.length; i++) {
+            const s = Math.max(-1, Math.min(1, input[i]));
+            direct[i] = s < 0 ? s * 32768 : s * 32767;
+          }
+          return direct;
+        }
+
+        const targetLen = Math.max(1, Math.round(input.length * 16000 / srcRate));
+        const output = new Int16Array(targetLen);
+        const ratio = srcRate / 16000;
+
+        for (let i = 0; i < targetLen; i++) {
+          const index = i * ratio;
+          const left = Math.floor(index);
+          const right = Math.min(left + 1, input.length - 1);
+          const frac = index - left;
+          const sample = input[left] + (input[right] - input[left]) * frac;
+          const clamped = Math.max(-1, Math.min(1, sample));
+          output[i] = clamped < 0 ? clamped * 32768 : clamped * 32767;
+        }
+
+        return output;
+      };
+
       // 이전 VAD가 실행 중이면 먼저 정리
       stopVAD();
 
@@ -229,6 +265,38 @@ function InterviewPageInner() {
 
       // 소스 → 분석기 연결 (출력은 연결하지 않아 스피커로 소리가 나지 않음)
       source.connect(analyser);
+
+      // 서버 STT(Deepgram)용 오디오 전송 노드
+      // - 입력: 마이크 PCM float32
+      // - 처리: 16kHz/PCM16 변환
+      // - 전송: WebSocket binary frame
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      const muteGain = audioCtx.createGain();
+      muteGain.gain.value = 0;
+      sttProcessorRef.current = processor;
+      sttMuteGainRef.current = muteGain;
+
+      source.connect(processor);
+      processor.connect(muteGain);
+      muteGain.connect(audioCtx.destination);
+
+      processor.onaudioprocess = (event: AudioProcessingEvent) => {
+        if (!interviewStartedRef.current || !micEnabledRef.current) return;
+        if (!serverSttAvailableRef.current) return;
+
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+        const channelData = event.inputBuffer.getChannelData(0);
+        const pcm16 = toPcm16k(channelData, audioCtx.sampleRate);
+        if (pcm16.length === 0) return;
+
+        try {
+          ws.send(pcm16.buffer);
+        } catch {
+          // 전송 실패는 치명적 오류가 아니므로 무시 (브라우저 STT 폴백 유지)
+        }
+      };
 
       // 주파수 데이터를 저장할 버퍼 (0~255 범위의 바이트 값)
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -285,6 +353,26 @@ function InterviewPageInner() {
    * AudioContext, AnalyserNode, 주기적 타이머를 모두 해제합니다.
    */
   const stopVAD = () => {
+    if (sttPendingFallbackTimerRef.current) {
+      clearTimeout(sttPendingFallbackTimerRef.current);
+      sttPendingFallbackTimerRef.current = null;
+    }
+
+    if (sttProcessorRef.current) {
+      try {
+        sttProcessorRef.current.onaudioprocess = null;
+        sttProcessorRef.current.disconnect();
+      } catch {
+        // ignore
+      }
+      sttProcessorRef.current = null;
+    }
+
+    if (sttMuteGainRef.current) {
+      try { sttMuteGainRef.current.disconnect(); } catch { /* ignore */ }
+      sttMuteGainRef.current = null;
+    }
+
     // 주기적 분석 타이머 해제
     if (vadIntervalRef.current) {
       clearInterval(vadIntervalRef.current);
@@ -363,6 +451,55 @@ function InterviewPageInner() {
         streamRef.current = stream;
       }
 
+      // ── WebRTC /offer 연결 (오디오/비디오 트랙 서버 파이프라인 연결) ──
+      // 기존 WS 바이너리 STT 경로와 병행 가능하나, 아키텍처 정합성 확보를 위해
+      // 우선 /offer 경로를 연결하여 서버의 WebRTC 오디오 파이프라인을 활성화합니다.
+      if (streamRef.current) {
+        try {
+          if (pcRef.current) {
+            try { pcRef.current.close(); } catch { /* ignore */ }
+            pcRef.current = null;
+          }
+
+          const pc = new RTCPeerConnection();
+          pcRef.current = pc;
+
+          for (const track of streamRef.current.getTracks()) {
+            pc.addTrack(track, streamRef.current);
+          }
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+
+          const answer = await webrtcApi.offer({
+            sdp: offer.sdp || "",
+            type: offer.type,
+            session_id: sid,
+          });
+
+          await pc.setRemoteDescription(new RTCSessionDescription({
+            sdp: answer.sdp,
+            type: answer.type,
+          }));
+
+          // 서버가 동일 세션을 재사용하지 못한 경우를 대비해 동기화
+          if (answer.session_id && answer.session_id !== sid) {
+            setSessionId(answer.session_id);
+            sessionIdRef.current = answer.session_id;
+            if (STT_RUNTIME_DEBUG) {
+              console.warn(
+                `[STT-CHECK][webrtc-session-sync] requested=${sid.slice(0, 8)} actual=${answer.session_id.slice(0, 8)}`,
+              );
+            }
+          }
+        } catch (webrtcErr) {
+          // WebRTC 실패 시에도 WS 바이너리 + 브라우저 STT 폴백 경로로 계속 진행
+          console.warn("[WebRTC] /offer 연결 실패 — WS 경로로 계속 진행:", webrtcErr);
+          try { pcRef.current?.close(); } catch { /* ignore */ }
+          pcRef.current = null;
+        }
+      }
+
       // WebSocket 연결 + 자동 재연결 로직
       // 백엔드(uvicorn --reload) 재시작 시 WebSocket 끊김이 발생할 수 있으므로
       // onclose/onerror 핸들러에서 자동 재연결을 시도하여 세션 안정성 보장
@@ -405,14 +542,33 @@ function InterviewPageInner() {
                 );
               }
               if (serverSttOn) {
-                setBrowserSttEnabled(false);
+                // Deepgram 우선: server_pending 모드로 대기.
+                // 이 구간에서는 브라우저 인식은 동작하되 누적은 하지 않음.
+                sttSourceModeRef.current = "server_pending";
+                setBrowserSttEnabled(true);
                 setSttAvailable(true);
-                try {
-                  recognitionRef.current?.stop();
-                } catch {
-                  // ignore
+                if (sttPendingFallbackTimerRef.current) {
+                  clearTimeout(sttPendingFallbackTimerRef.current);
+                }
+                sttPendingFallbackTimerRef.current = setTimeout(() => {
+                  if (sttSourceModeRef.current === "server_pending") {
+                    sttSourceModeRef.current = "browser";
+                    if (STT_RUNTIME_DEBUG) {
+                      console.log(`[STT-CHECK][source-fallback] session=${targetSid.slice(0, 8)} mode=browser reason=server_timeout`);
+                    }
+                  }
+                }, 6000);
+                if (!recognitionRef.current) {
+                  initSpeechRecognition();
+                } else {
+                  try {
+                    recognitionRef.current.start();
+                  } catch {
+                    // 이미 시작된 상태일 수 있으므로 무시
+                  }
                 }
               } else {
+                sttSourceModeRef.current = "browser";
                 setBrowserSttEnabled(true);
                 if (!recognitionRef.current) {
                   initSpeechRecognition();
@@ -426,8 +582,47 @@ function InterviewPageInner() {
               }
               return;
             }
+            if (data.type === "stt_status") {
+              const available = Boolean(data.available);
+              setServerSttAvailable(available);
+              if (!available) {
+                sttSourceModeRef.current = "browser";
+                setBrowserSttEnabled(true);
+                if (sttPendingFallbackTimerRef.current) {
+                  clearTimeout(sttPendingFallbackTimerRef.current);
+                  sttPendingFallbackTimerRef.current = null;
+                }
+                try {
+                  recognitionRef.current?.start();
+                } catch {
+                  // ignore
+                }
+                if (STT_RUNTIME_DEBUG) {
+                  console.log(`[STT-CHECK][source-fallback] session=${targetSid.slice(0, 8)} mode=browser reason=${String(data.reason || "server_unavailable")}`);
+                }
+              }
+              return;
+            }
             if (data.type === "stt_result" && data.is_final) {
               const transcript = String(data.transcript || "").trim();
+              // 서버 최종 전사가 한 번이라도 오면 서버 엔진으로 단일 전환
+              // 이후 브라우저 최종 전사는 무시하여 듀얼 누적을 원천 차단
+              if (transcript && sttSourceModeRef.current !== "server") {
+                sttSourceModeRef.current = "server";
+                if (sttPendingFallbackTimerRef.current) {
+                  clearTimeout(sttPendingFallbackTimerRef.current);
+                  sttPendingFallbackTimerRef.current = null;
+                }
+                setBrowserSttEnabled(false);
+                try {
+                  recognitionRef.current?.stop();
+                } catch {
+                  // ignore
+                }
+                if (STT_RUNTIME_DEBUG) {
+                  console.log(`[STT-CHECK][source-lock] session=${targetSid.slice(0, 8)} mode=server`);
+                }
+              }
               if (STT_RUNTIME_DEBUG && transcript) {
                 const normalized = transcript.toLowerCase().replace(/\s+/g, " ");
                 const isDuplicateCandidate = normalized === lastServerFinalRef.current;
@@ -451,6 +646,19 @@ function InterviewPageInner() {
         ws.onclose = (ev) => {
           // 정상 종료(코드 1000)이거나 면접 종료 상태면 재연결하지 않음
           if (ev.code === 1000 || !interviewStartedRef.current) return;
+          // 서버 경로 단절 시 브라우저 STT 폴백 즉시 복구
+          sttSourceModeRef.current = "browser";
+          setServerSttAvailable(false);
+          if (sttPendingFallbackTimerRef.current) {
+            clearTimeout(sttPendingFallbackTimerRef.current);
+            sttPendingFallbackTimerRef.current = null;
+          }
+          setBrowserSttEnabled(true);
+          try {
+            recognitionRef.current?.start();
+          } catch {
+            // 이미 시작된 상태일 수 있으므로 무시
+          }
           console.warn(`[WebSocket] 연결 끊김 (code: ${ev.code}). 재연결 시도 ${wsReconnectAttemptsRef.current + 1}/${MAX_RECONNECT}`);
           if (wsReconnectAttemptsRef.current < MAX_RECONNECT) {
             wsReconnectAttemptsRef.current++;
@@ -566,6 +774,11 @@ function InterviewPageInner() {
 
     // 음성 인식 결과 핸들러 — 최종(final) 결과만 STT 텍스트에 추가
     recognition.onresult = (e: SpeechRecognitionEvent) => {
+      // browser 모드에서만 누적 (server_pending/server 모드에서는 누적 금지)
+      if (sttSourceModeRef.current !== "browser") {
+        return;
+      }
+
       consecutiveErrors = 0; // 정상 결과 수신 시 에러 카운터 리셋
       let final = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -801,6 +1014,11 @@ function InterviewPageInner() {
 
   // ========== 면접 종료 ==========
   const endInterview = async () => {
+    sttSourceModeRef.current = "browser";
+    if (sttPendingFallbackTimerRef.current) {
+      clearTimeout(sttPendingFallbackTimerRef.current);
+      sttPendingFallbackTimerRef.current = null;
+    }
     const closingMessage = "답변 감사합니다. 오늘 면접을 마치겠습니다. 수고하셨습니다.";
     setMessages(prev => [...prev, { role: "ai", text: closingMessage }]);
     try {
@@ -809,6 +1027,8 @@ function InterviewPageInner() {
 
     setInterviewStarted(false);
     setActiveSession(false); // 면접 종료 → Auth 유휴 타임아웃 재활성화
+    try { pcRef.current?.close(); } catch { /* ignore */ }
+    pcRef.current = null;
     recognitionRef.current?.stop();
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     stopVAD(); // VAD 리소스 정리

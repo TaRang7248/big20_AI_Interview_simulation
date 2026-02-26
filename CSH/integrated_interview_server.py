@@ -24,6 +24,7 @@ import time
 import uuid
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
@@ -3584,6 +3585,7 @@ class SessionInfo(BaseModel):
 class Offer(BaseModel):
     sdp: str
     type: str
+    session_id: Optional[str] = None
 
 
 # ========== 회원가입 모델 ==========
@@ -6804,7 +6806,22 @@ async def webrtc_offer(offer: Offer):
     try:
         pc = RTCPeerConnection()
         state.pcs.add(pc)
-        session_id = state.create_session()
+
+        requested_session_id = (
+            offer.session_id.strip()
+            if offer.session_id and offer.session_id.strip()
+            else None
+        )
+
+        if requested_session_id:
+            existing = state.get_session(requested_session_id)
+            if existing:
+                session_id = requested_session_id
+            else:
+                session_id = state.create_session(requested_session_id)
+        else:
+            session_id = state.create_session()
+
         state.pc_sessions[pc] = session_id
 
         @pc.on("iceconnectionstatechange")
@@ -7839,21 +7856,75 @@ async def websocket_interview(
 
     print(f"[WS] 세션 {session_id} WebSocket 연결됨 (사용자: {ws_user_email})")
 
-    server_stt_available = DEEPGRAM_AVAILABLE or (
-        WHISPER_AVAILABLE and whisper_service is not None
-    )
+    import json as _json
+
+    loop = asyncio.get_running_loop()
+
+    def _schedule(coro):
+        """콜백 스레드에서도 안전하게 코루틴을 실행합니다."""
+        try:
+            loop.call_soon_threadsafe(asyncio.create_task, coro)
+        except Exception:
+            pass
+
+    async def _send_stt_status(available: bool, reason: str = ""):
+        try:
+            await websocket.send_json(
+                {
+                    "type": "stt_status",
+                    "available": bool(available),
+                    "reason": reason,
+                    "timestamp": time.time(),
+                }
+            )
+        except Exception:
+            pass
+
+    # 원칙: Deepgram을 우선 사용하되, 실제 연결이 성립했을 때만 stt_available=true
+    # (엔진 "설치됨"이 아닌 "세션 준비됨" 기준)
+    server_stt_available = False
     if STT_RUNTIME_CHECK_LOG:
         print(
             f"[STT-CHECK][source-select] session={session_id[:8]} "
-            f"server_stt={'on' if server_stt_available else 'off'}"
+            f"server_stt={'on' if (DEEPGRAM_AVAILABLE and deepgram_client is not None) else 'off'}"
         )
 
     # 📤 EventBus에 WebSocket 등록 (이벤트 기반 WS 브로드캐스트 지원)
     if EVENT_BUS_AVAILABLE and event_bus:
         event_bus.register_ws(session_id, websocket)
 
+    ws_dg_connection = None
+    dg_stack = ExitStack()
+    deepgram_connect_error: Optional[str] = None
+
     try:
-        # 연결 성공 메시지
+        if DEEPGRAM_AVAILABLE and deepgram_client is not None:
+            try:
+                ws_dg_connection = dg_stack.enter_context(
+                    deepgram_client.listen.v1.connect(
+                        model="nova-3",
+                        language="ko",
+                        smart_format=True,
+                        encoding="linear16",
+                        sample_rate=16000,
+                        punctuate=True,
+                        interim_results=True,
+                        vad_events=True,
+                        diarize=False,
+                        endpointing=1100,
+                        utterance_end_ms=2200,
+                    )
+                )
+            except Exception as dg_conn_err:
+                deepgram_connect_error = str(dg_conn_err)
+                ws_dg_connection = None
+                print(
+                    f"⚠️ [WS-STT] 세션 {session_id[:8]} Deepgram 연결 실패: {dg_conn_err}"
+                )
+
+        server_stt_available = ws_dg_connection is not None
+
+        # WS는 항상 유지하고, STT 가용 여부는 신호로 전달하여 브라우저 폴백을 보장
         await websocket.send_json(
             {
                 "type": "connected",
@@ -7863,14 +7934,200 @@ async def websocket_interview(
             }
         )
 
+        if not server_stt_available and deepgram_connect_error:
+            await _send_stt_status(False, reason="deepgram_connect_failed")
+
+        if ws_dg_connection:
+
+            def on_message(message) -> None:
+                try:
+                    transcript = None
+                    is_final = False
+                    words_list = None
+                    confidence = None
+
+                    if hasattr(message, "results") and getattr(
+                        message.results, "channels", None
+                    ):
+                        is_final = getattr(message.results, "is_final", False)
+                        alts = message.results.channels[0].alternatives
+                        if alts:
+                            transcript = alts[0].transcript
+                            confidence = getattr(alts[0], "confidence", None)
+                            raw_words = getattr(alts[0], "words", None)
+                            if raw_words:
+                                words_list = [
+                                    {
+                                        "word": getattr(
+                                            w,
+                                            "word",
+                                            getattr(w, "punctuated_word", ""),
+                                        ),
+                                        "start": getattr(w, "start", 0.0),
+                                        "end": getattr(w, "end", 0.0),
+                                        "confidence": getattr(w, "confidence", 0.0),
+                                    }
+                                    for w in raw_words
+                                ]
+                    elif hasattr(message, "channel") and getattr(
+                        message.channel, "alternatives", None
+                    ):
+                        is_final = getattr(message, "is_final", True)
+                        alts = message.channel.alternatives
+                        if alts:
+                            transcript = alts[0].transcript
+                            confidence = getattr(alts[0], "confidence", None)
+                            raw_words = getattr(alts[0], "words", None)
+                            if raw_words:
+                                words_list = [
+                                    {
+                                        "word": getattr(
+                                            w,
+                                            "word",
+                                            getattr(w, "punctuated_word", ""),
+                                        ),
+                                        "start": getattr(w, "start", 0.0),
+                                        "end": getattr(w, "end", 0.0),
+                                        "confidence": getattr(w, "confidence", 0.0),
+                                    }
+                                    for w in raw_words
+                                ]
+
+                    _update_stt_quality_from_message(
+                        session_id,
+                        is_final=is_final,
+                        transcript=transcript,
+                        confidence=confidence,
+                        words=words_list,
+                    )
+
+                    if transcript:
+                        if SPEECH_ANALYSIS_AVAILABLE and speech_service:
+                            try:
+                                speech_service.add_stt_result(
+                                    session_id,
+                                    transcript,
+                                    is_final,
+                                    confidence=confidence,
+                                    words=words_list,
+                                )
+                            except Exception as e:
+                                print(f"[SpeechAnalysis] 데이터 전달 오류: {e}")
+
+                        spacing_result = _apply_spacing_correction_with_policy(
+                            transcript,
+                            is_final=is_final,
+                            words=words_list,
+                        )
+                        output_transcript = spacing_result["transcript"]
+
+                        _schedule(
+                            broadcast_stt_result(
+                                session_id,
+                                {
+                                    "type": "stt_result",
+                                    "transcript": output_transcript,
+                                    "raw_transcript": spacing_result["raw_transcript"],
+                                    "corrected_transcript": spacing_result[
+                                        "corrected_transcript"
+                                    ],
+                                    "spacing_applied": spacing_result["spacing_applied"],
+                                    "spacing_mode": spacing_result["spacing_mode"],
+                                    "is_final": is_final,
+                                    "source": "deepgram",
+                                    "timestamp": time.time(),
+                                },
+                            )
+                        )
+                except Exception as e:
+                    print(f"[WS-STT] 메시지 처리 오류: {e}")
+
+            def on_error(error) -> None:
+                print(f"[WS-STT] Deepgram 오류: {error}")
+                _schedule(_send_stt_status(False, reason="deepgram_error"))
+
+            ws_dg_connection.on(
+                EventType.OPEN,
+                lambda _: print(f"[WS-STT] 세션 {session_id[:8]} Deepgram 연결됨"),
+            )
+            ws_dg_connection.on(EventType.MESSAGE, on_message)
+            ws_dg_connection.on(
+                EventType.CLOSE,
+                lambda _: print(f"[WS-STT] 세션 {session_id[:8]} Deepgram 연결 종료"),
+            )
+            ws_dg_connection.on(EventType.ERROR, on_error)
+
+            def on_utterance_end(_utterance_end_msg) -> None:
+                try:
+                    _update_stt_quality_on_utterance_end(session_id)
+                    _schedule(
+                        broadcast_stt_result(
+                            session_id,
+                            {
+                                "type": "utterance_end",
+                                "timestamp": time.time(),
+                            },
+                        )
+                    )
+                except Exception as e:
+                    print(f"[WS-STT] UtteranceEnd 처리 오류: {e}")
+
+            _utter_evt = getattr(EventType, "UTTERANCE_END", None)
+            if _utter_evt:
+                ws_dg_connection.on(_utter_evt, on_utterance_end)
+            else:
+                try:
+                    from deepgram import LiveTranscriptionEvents
+
+                    ws_dg_connection.on(
+                        LiveTranscriptionEvents.UtteranceEnd, on_utterance_end
+                    )
+                except (ImportError, AttributeError):
+                    print(
+                        "[WS-STT] ⚠️ UtteranceEnd 이벤트 등록 실패 "
+                        "(SDK 버전 확인 필요, 기능에 영향 없음)"
+                    )
+
+            state.stt_connections[session_id] = ws_dg_connection
+
         while True:
-            # 클라이언트로부터 메시지 수신 (ping/pong 등)
-            data = await websocket.receive_json()
+            incoming = await websocket.receive()
+            message_type = incoming.get("type")
+
+            if message_type == "websocket.disconnect":
+                break
+
+            if incoming.get("bytes") is not None:
+                # 클라이언트 PCM16(16kHz, mono) 바이너리 입력을 Deepgram으로 전달
+                if ws_dg_connection and server_stt_available:
+                    try:
+                        from deepgram.extensions.types.sockets import (
+                            ListenV1MediaMessage,
+                        )
+
+                        ws_dg_connection.send_media(
+                            ListenV1MediaMessage(incoming["bytes"])
+                        )
+                    except Exception as send_err:
+                        print(
+                            f"⚠️ [WS-STT] 세션 {session_id[:8]} 오디오 전송 실패: {send_err}"
+                        )
+                        server_stt_available = False
+                        await _send_stt_status(False, reason="audio_send_failed")
+                continue
+
+            text_data = incoming.get("text")
+            if text_data is None:
+                continue
+
+            try:
+                data = _json.loads(text_data)
+            except Exception:
+                continue
 
             if data.get("type") == "ping":
                 await websocket.send_json({"type": "pong"})
             elif data.get("type") == "vad_signal":
-                # VAD 신호 처리 (기존 intervention 시스템과 연동)
                 pass
 
     except WebSocketDisconnect:
@@ -7878,6 +8135,12 @@ async def websocket_interview(
     except Exception as e:
         print(f"[WS] 세션 {session_id} 오류: {e}")
     finally:
+        try:
+            dg_stack.close()
+        except Exception:
+            pass
+        if ws_dg_connection:
+            state.stt_connections.pop(session_id, None)
         # 연결 제거
         if session_id in state.websocket_connections:
             if websocket in state.websocket_connections[session_id]:
