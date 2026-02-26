@@ -1,9 +1,15 @@
 import React, { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { FaBriefcase, FaUsers, FaChartLine, FaArrowRight, FaRegClock } from "react-icons/fa";
+import { FaBriefcase, FaUsers, FaChartLine, FaArrowRight, FaRegClock, FaSignOutAlt } from "react-icons/fa";
 
 export default function AdminPage_yyr() {
     const nav = useNavigate();
+    const handleLogout = () => {
+        // App.jsx랑 동일한 방식
+        localStorage.removeItem("auth_token");
+        localStorage.removeItem("role");
+        nav("/login", { replace: true });
+    };
 
     // ✅ 더미 데이터(지금은 구조만 잡기)
     const jobs = useMemo(
@@ -103,6 +109,14 @@ export default function AdminPage_yyr() {
                             className="px-3 py-2 rounded-xl bg-slate-900 text-white text-sm font-bold"
                         >
                             면접 화면으로
+                        </button>
+
+                        <button
+                            onClick={handleLogout}
+                            className="px-3 py-2 rounded-xl bg-white/70 border border-white/60 hover:bg-white transition text-sm font-bold"
+                        >
+                            {/* 아이콘 쓰면: <FaSignOutAlt className="inline -mt-[2px] mr-2" /> */}
+                            로그아웃
                         </button>
                     </div>
                 </div>
