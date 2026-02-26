@@ -145,45 +145,46 @@ function App() {
   };
 
   /* =========================================================
-     3) 음성 답변 제출 (Audio → AI 음성 응답)
-  ========================================================= */
-  const handleAudioSubmit = async (audioBlob) => {
+   3) 음성 답변 제출 (Web Speech 텍스트 → /chat)
+========================================================= */
+  const handleAudioSubmit = async (text) => {
     if (!sessionId) {
       alert("세션이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
       return;
     }
 
+    // 혹시 공백이면 방어
+    const cleaned = (text || "").trim();
+    if (!cleaned) {
+      alert("음성 인식 결과가 비어있어요. 다시 시도해 주세요.");
+      return;
+    }
+
     setIsProcessing(true);
-    setChatLog((prev) => [...prev, { sender: "user", text: "🎤 (음성 전송 중...)" }]);
+    setChatLog((prev) => [...prev, { sender: "user", text: "🎤 (음성 인식 중...)" }]);
 
     try {
-      const formData = new FormData();
-      formData.append("file", audioBlob, "user_voice.webm");
-      formData.append("current_emotion", visionResult);
-
-      const response = await axios.post(`${API_BASE_URL}/chat/voice/audio`, formData, {
-        params: { thread_id: sessionId },
+      // ✅ /chat 으로 텍스트 전송 (FastAPI ChatRequest)
+      const response = await axios.post(`${API_BASE_URL}/chat`, {
+        user_input: cleaned,
+        thread_id: sessionId,
       });
 
-      const data = response.data;
+      const data = response.data; // { response, current_phase, question_count }
 
       setChatLog((prev) => {
         const next = [...prev];
-        if (next.length > 0 && next[next.length - 1].text.includes("음성 전송 중")) {
+        if (next.length > 0 && next[next.length - 1].text.includes("음성 인식 중")) {
           next.pop();
         }
-        next.push({ sender: "user", text: data.user_text || "(STT 결과 없음)" });
-        next.push({ sender: "ai", text: data.ai_text || "(AI 응답 없음)" });
+        next.push({ sender: "user", text: cleaned });
+        next.push({ sender: "ai", text: data.response || "(AI 응답 없음)" });
         return next;
       });
 
-      if (data.audio_url && audioPlayerRef.current) {
-        audioPlayerRef.current.src = `${API_BASE_URL}${data.audio_url}`;
-        await audioPlayerRef.current.play();
-      }
     } catch (error) {
-      console.error("음성 대화 에러:", error);
-      alert("음성 처리 실패! 콘솔/네트워크 응답을 확인하세요.");
+      console.error("텍스트 대화 에러:", error);
+      alert("AI 서버 연결 실패! 콘솔/네트워크 응답을 확인하세요.");
     } finally {
       setIsProcessing(false);
     }
