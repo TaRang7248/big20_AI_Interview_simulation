@@ -75,7 +75,7 @@ function clearSignupForm() {
 
 // --- 3. 초기화 ---
 document.addEventListener('DOMContentLoaded', () => {
-    console.log("[System] Application initialization started.");
+    console.log("[시스템] 애플리케이션 초기화 시작.");
 
     const initFunctions = [
         { name: 'Router', func: initRouter },
@@ -95,12 +95,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    console.log("[System] Application initialization completed.");
+    console.log("[시스템] 애플리케이션 초기화 완료.");
 });
 
 // --- ID/PW 찾기 로직 ---
 function initFindAccount() {
-    console.log("[Auth] Initializing ID/PW recovery listeners.");
+    console.log("[인증] ID/PW 찾기 이벤트 초기화.");
 
     // 탭 전환: ID 찾기
     $('#btn-tab-find-id').addEventListener('click', () => {

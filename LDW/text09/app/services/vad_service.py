@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def calculate_average_rms(audio_path):
     """
     오디오 파일의 평균 RMS(Root Mean Square) 에너지를 계산합니다.
-    Returns:
+    반환값:
         float: 평균 RMS 값.
     """
     try:
@@ -26,7 +26,7 @@ def calculate_average_rms(audio_path):
 def check_vad_activity(audio_path, aggressiveness=3):
     """
     WebRTC VAD를 사용하여 음성 활동을 확인합니다.
-    Returns:
+    반환값:
         float: 전체 프레임 대비 음성 프레임의 비율 (0.0 ~ 1.0).
     """
     try:

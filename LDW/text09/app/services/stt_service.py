@@ -5,61 +5,10 @@ import logging
 import numpy as np
 import librosa
 import soundfile as sf
-import noisereduce as nr
-import parselmouth
-import Levenshtein
 import torch
 import whisper
-from openai import OpenAI
-import google.generativeai as genai
-from parselmouth.praat import call
-from ..config import logger, GOOGLE_API_KEY, OPENAI_API_KEY, BASE_DIR
-
-# Gemini 모델 인스턴스 재사용을 위한 전역 변수
-_STT_MODEL_CACHE = {}
-
-def get_gemini_model(model_name="gemini-2.0-flash"):
-    """
-    Gemini 모델 인스턴스를 반환합니다. 이미 생성된 인스턴스가 있으면 재사용합니다.
-    """
-    if model_name not in _STT_MODEL_CACHE:
-        logger.info(f"STT용 새로운 {model_name} 모델 인스턴스를 생성합니다.")
-        _STT_MODEL_CACHE[model_name] = genai.GenerativeModel(
-            model_name=model_name,
-            generation_config={"temperature": 0.0}
-        )
-    return _STT_MODEL_CACHE[model_name]
-
-# GenAI 설정
-if GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-
-# OpenAI API 설정 (필요시 사용)
-openai_client = None
-if OPENAI_API_KEY:
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
-
-# 로컬 Whisper 모델 캐시
-_WHISPER_MODEL_CACHE = None
-
-def get_whisper_model():
-    """
-    OpenAI Whisper (V3 Turbo) 모델을 로드하거나 캐시된 인스턴스를 반환합니다.
-    """
-    global _WHISPER_MODEL_CACHE
-    if _WHISPER_MODEL_CACHE is None:
-        model_name = "large-v3-turbo"
-        logger.info(f"Whisper 로컬 모델({model_name}) 로딩 중... (최초 실행 시 시간이 걸릴 수 있습니다)")
-        
-        # GPU 사용 가능 여부 확인
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        logger.info(f"Whisper 실행 장치: {device}")
-        
-        # 모델 로드
-        _WHISPER_MODEL_CACHE = whisper.load_model(model_name, device=device)
-        logger.info(f"Whisper 로컬 모델({model_name}) 로드 완료.")
-    
-    return _WHISPER_MODEL_CACHE
+import speech_recognition as sr_lib
+from ..config import logger, OPENAI_API_KEY, BASE_DIR
 
 # ---------------------------------------------------------
 # 1. 오디오 전처리 (노이즈 제거 및 정규화)
@@ -67,8 +16,8 @@ def get_whisper_model():
 def preprocess_audio(input_path):
     """
     오디오 파일의 전처리를 수행합니다.
-    - 노이즈 제거(noisereduce)는 원본 손상을 방지하기 위해 삭제되었습니다.
     - 오디오 품질(RMS)이 이미 충분히 높다면 전처리를 최소화합니다.
+    - 정규화를 통해 일관된 음량을 유지합니다.
     """
     try:
         # 오디오 로드 (샘플링 레이트 보존)
@@ -89,7 +38,6 @@ def preprocess_audio(input_path):
         logger.info(f"원본 오디오 RMS: {rms:.5f}")
 
         # 정규화 및 최소 전처리 로직
-        # RMS가 충분히 크면(0.05 이상) 원본의 품질이 좋다고 판단하여 정규화만 수행
         if rms > 0.05:
             logger.info("오디오 품질이 양호하므로 전처리를 최소화합니다.")
             y_norm = librosa.util.normalize(y) * 0.9
@@ -97,7 +45,7 @@ def preprocess_audio(input_path):
             # 품질이 낮을 경우 적절한 수준으로 증폭 및 정규화
             y_norm = librosa.util.normalize(y) * 0.707
 
-        # 처리된 파일 저장 (WAV 형식 권장)
+        # 처리된 파일 저장 (WAV 형식)
         base, _ = os.path.splitext(input_path)
         output_path = f"{base}_processed.wav"
         
@@ -110,73 +58,52 @@ def preprocess_audio(input_path):
         return input_path, None, None
 
 # ---------------------------------------------------------
-# 2. 오디오 분석 (Librosa & Parselmouth)
+# 2. 오디오 분석 (Librosa)
 # ---------------------------------------------------------
 def analyze_audio_features(audio_path, y, sr):
     """
     오디오 분석 항목:
     - 무음 지속 시간
     - RMS 에너지 (신뢰도/볼륨 안정성)
-    - 피치/F0 (Jitter, Shimmer 사용)
-    - 발화 속도 (추정 음절 / 시간)
+    - 긴장도 및 신뢰도 점수 계산
     """
     analysis_result = {
         "silence_duration": 0.0,
         "rms_mean": 0.0,
         "rms_std": 0.0,
-        "pitch_jitter": 0.0,
-        "pitch_shimmer": 0.0,
         "speech_rate": 0.0,
-        "confidence_score": 0.0, # 계산된 지표
+        "confidence_score": 0.0, 
         "is_nervous": False
     }
 
     try:
         if y is None:
-            # 전달되지 않은 경우 다시 로드
             try:
                 y, sr = librosa.load(audio_path, sr=None)
             except Exception as load_err:
-                 logger.warning(f"오디오 분석 건너뜀 (오디오를 로드할 수 없음): {load_err}")
-                 return analysis_result 
+                logger.warning(f"오디오 분석 건너뜀 (오디오를 로드할 수 없음): {load_err}")
+                return analysis_result 
         
         duration = librosa.get_duration(y=y, sr=sr)
         
-        # --- 1. 무음 측정 ---
-        # 임계값 미만인 구간
+        # 무음 측정
         non_silent_intervals = librosa.effects.split(y, top_db=30)
         non_silent_duration = sum(end - start for start, end in non_silent_intervals) / sr
         silence_duration = duration - non_silent_duration
         analysis_result["silence_duration"] = round(silence_duration, 2)
 
-        # --- 2. RMS 에너지 (볼륨/신뢰도) ---
-        rms = librosa.feature.rms(y=y)[0]
-        analysis_result["rms_mean"] = float(np.mean(rms))
-        analysis_result["rms_std"] = float(np.std(rms)) # 높은 표준 편차 = 불안정한 볼륨
+        # RMS 에너지
+        rms_vals = librosa.feature.rms(y=y)[0]
+        analysis_result["rms_mean"] = float(np.mean(rms_vals))
+        analysis_result["rms_std"] = float(np.std(rms_vals))
 
-        # --- 3. Jitter & Shimmer (Parselmouth) ---
-        sound = parselmouth.Sound(audio_path)
-        point_process = call(sound, "To PointProcess (periodic, cc)", 75, 500)
-        
-        # Jitter (local)
-        jitter = call(point_process, "Get jitter (local)", 0, 0, 0.0001, 0.02, 1.3)
-        analysis_result["pitch_jitter"] = round(jitter * 100, 4) if jitter != jitter else 0.0 # NaN 처리
-        
-        # Shimmer (local)
-        shimmer = call([sound, point_process], "Get shimmer (local)", 0, 0, 0.0001, 0.02, 1.3, 1.6)
-        analysis_result["pitch_shimmer"] = round(shimmer * 100, 4) if shimmer != shimmer else 0.0
-
-        # --- 4. 신뢰도/긴장도 로직 ---
+        # 긴장도 판단 (무음 비율 및 볼륨 안정성 기반)
         nervous_score = 0
-        if analysis_result["pitch_jitter"] > 1.5: nervous_score += 1
-        if analysis_result["pitch_shimmer"] > 4.0: nervous_score += 1
-        if duration > 0 and analysis_result["silence_duration"] / duration > 0.4: nervous_score += 1 # 무음이 너무 많음
+        if duration > 0 and analysis_result["silence_duration"] / duration > 0.4: nervous_score += 1
+        if analysis_result["rms_std"] > 0.05: nervous_score += 1
         
         analysis_result["is_nervous"] = nervous_score >= 1
-        
-        # 단순화된 신뢰도 점수 (0-100)
-        # 기본 80점에서 무음과 Jitter에 따라 감점
-        confidence = 80 - (analysis_result["silence_duration"] * 2) - (analysis_result["pitch_jitter"] * 5)
+        confidence = 100 - (analysis_result["silence_duration"] * 5)
         analysis_result["confidence_score"] = round(max(0, min(100, confidence)), 1)
         
     except Exception as e:
@@ -185,171 +112,98 @@ def analyze_audio_features(audio_path, y, sr):
     return analysis_result
 
 # ---------------------------------------------------------
-# 3. STT 함수
+# 3. STT 함수 (Google Web Speech & Whisper)
 # ---------------------------------------------------------
-def transcribe_with_gemini(audio_path):
+def transcribe_with_google_web_speech(audio_path):
     """
-    Google Gemini 2.0 Flash (Multimodal) 모델을 사용하여 음성 전사를 수행합니다.
+    Google Web Speech API를 사용하여 음성 전사를 수행합니다.
+    (SpeechRecognition 라이브러리 사용)
     """
     try:
-        if not GOOGLE_API_KEY: return None
+        recognizer = sr_lib.Recognizer()
+        with sr_lib.AudioFile(audio_path) as source:
+            audio_data = recognizer.record(source)
         
-        logger.info(f"Gemini에 오디오 업로드 중: {audio_path}")
-        audio_file = genai.upload_file(path=audio_path)
-        
-        while audio_file.state.name == "PROCESSING":
-             time.sleep(0.5)
-             audio_file = genai.get_file(audio_file.name)
-        
-        if audio_file.state.name == "FAILED":
-             return None
-        
-        # 모델 인스턴스 재사용
-        model = get_gemini_model("gemini-2.0-flash")
-        
-        prompt = """
-        [역할: 최고 성능의 한국어 음성 전사 전문가]
-        이 오디오 파일은 면접 지원자의 답변입니다. 
-        당신의 임무는 들리는 '모든 소리'를 단 한 글자도 빠짐없이, 그리고 단 한 글자도 변형하지 않고 '완벽하게 똑같이' 전사하는 것입니다.
-
-        [절대 규칙]
-        - 문맥에 맞게 문장을 완성하지 마세요.
-        - 지원자가 말을 더듬으면 '어... 그게...'와 같이 들리는 그대로 적으세요.
-        - 비문(틀린 문장)이라도 절대로 교정하지 마세요.
-        - 사람의 목소리가 전혀 들리지 않거나 침묵, 백색소음만 있다면 "답변 없음" 이라고만 출력하세요.
-        - 오디오에 없는 내용을 절대로 추측하거나 생성하지 마세요.
-        """
-        response = model.generate_content(
-            [prompt, audio_file],
-            request_options={"timeout": 30}
-        )
-        return response.text.strip()
-    except Exception as e:
-        logger.error(f"Gemini STT 오류: {e}")
+        logger.info(f"Google Web Speech 전사 시도: {audio_path}")
+        text = recognizer.recognize_google(audio_data, language="ko-KR")
+        return text.strip()
+    except sr_lib.UnknownValueError:
+        # 음성이 인식되지 않는 경우 '답변 없음' 반환
+        logger.info("Google Web Speech: 음성을 인식할 수 없음 (답변 없음 처리)")
+        return "답변 없음"
+    except sr_lib.RequestError as e:
+        # 서비스 연결 오류 등이 발생한 경우 None 반환하여 Whisper로 전환 유도
+        logger.error(f"Google Web Speech: 서비스 요청 오류; {e}")
         return None
+    except Exception as e:
+        logger.error(f"Google Web Speech 오류: {e}")
+        return None
+
+# OpenAI Whisper 모델 캐시
+_WHISPER_MODEL_CACHE = None
+
+def get_whisper_model():
+    global _WHISPER_MODEL_CACHE
+    if _WHISPER_MODEL_CACHE is None:
+        model_name = "turbo"
+        logger.info(f"Whisper 로컬 모델({model_name}) 로딩 중...")
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        _WHISPER_MODEL_CACHE = whisper.load_model(model_name, device=device)
+        logger.info(f"Whisper 로컬 모델({model_name}) 로드 완료.")
+    return _WHISPER_MODEL_CACHE
 
 def transcribe_with_whisper(audio_path):
     """
-    로컬 OpenAI Whisper (V3 Turbo) 모델을 사용하여 음성 전사를 수행합니다.
+    로컬 OpenAI Whisper 모델을 사용하여 음성 전사를 수행합니다. (보조 엔진)
     """
     try:
         model = get_whisper_model()
-        
-        logger.info(f"Whisper 로컬 모델 전사 시작: {audio_path}")
+        logger.info(f"Whisper 로컬 모델 전사 시작 (보조): {audio_path}")
         device = "cuda" if torch.cuda.is_available() else "cpu"
         result = model.transcribe(
             audio_path, 
             language="ko", 
             temperature=0.0,
-            initial_prompt="이것은 한국어 면접 답변입니다. 간투사(어, 음)를 포함하여 들리는 모든 소리를 단 한 글자도 변형하지 말고 있는 그대로 똑같이 전사하세요. 목소리가 없다면 절대로 내용을 지어내지 마세요.",
+            initial_prompt="이것은 한국어 면접 답변입니다.",
             fp16=(device == "cuda")
         )
-        
         text = result["text"].strip()
         
-        # Whisper 환각(Hallucination) 필터 강화
-        hallucinations = ["시청해주셔서", "MBC 뉴스", "한글 자막", "Subtitles", "감사합니다", "9시 뉴스", "오늘 영상 여기까지입니다", "구독과 좋아요"]
+        # 환각 필터
+        hallucinations = ["시청해주셔서", "MBC 뉴스", "한글 자막", "Subtitles", "감사합니다"]
         if len(text) < 15 and any(h in text for h in hallucinations):
-            logger.info(f"Whisper 환각 감지 및 필터링: {text}")
-            return None # 환각 가능성 높음
+            return None
                 
         return text
     except Exception as e:
         logger.error(f"Whisper 로컬 STT 오류: {e}")
         return None
 
-def calculate_levenshtein_similarity(text1, text2):
-    """
-    두 텍스트 간의 Levenshtein 유사도를 계산합니다. (0.0 ~ 1.0)
-    """
-    return Levenshtein.ratio(text1, text2)
-
-def select_best_transcript(gemini_text, whisper_text):
-    """
-    Gemini와 Whisper의 전사 결과 중 최적의 결과를 선택하는 스마트 로직입니다.
-    간투사 보존과 정보량(길이)을 우선적으로 고려합니다.
-    """
-    if not gemini_text and not whisper_text:
-        return "답변 없음"
-    if not gemini_text:
-        return whisper_text
-    if not whisper_text:
-        return gemini_text
-
-    g = gemini_text.strip()
-    w = whisper_text.strip()
-
-    # 둘 중 하나가 "답변 없음" 수준이면 다른 쪽 우선
-    if g == "답변 없음" and w != "답변 없음":
-        return w
-    if w == "답변 없음" and g != "답변 없음":
-        return g
-
-    # 포함관계(한쪽이 다른 쪽을 거의 포함)면 더 긴 쪽 선택
-    if g in w and len(w) >= len(g) + 5:
-        return w
-    if w in g and len(g) >= len(w) + 5:
-        return g
-
-    # 간투사/머뭇거림 보존을 우선 (면접 답변은 이게 중요)
-    fillers = ["어", "음", "그", "저", "아", "흠"]
-    g_fill = sum(g.count(x) for x in fillers)
-    w_fill = sum(w.count(x) for x in fillers)
-
-    # 너무 짧은 결과는 불리하게 (10자 미만 필터링)
-    if len(g) < 10 and len(w) >= 10:
-        return w
-    if len(w) < 10 and len(g) >= 10:
-        return g
-
-    # 간투사 더 많이 보존한 쪽 우선
-    if g_fill != w_fill:
-        return g if g_fill > w_fill else w
-
-    # 마지막: 더 긴 쪽(정보 보존) 선택
-    return g if len(g) >= len(w) else w
-
 # ---------------------------------------------------------
-# 4. 메인 함수
+# 4. 메인 파이프라인
 # ---------------------------------------------------------
 def transcribe_audio(original_audio_path):
     """
-    메인 파이프라인:
-    1. 전처리 (노이즈 제거, 정규화)
-    2. 특징 분석 (Parselmouth, Librosa)
-    3. STT (Gemini + Whisper + 선택)
-    4. 발화 속도 계산
-    5. 종합 결과 반환
+    메인 STT 파이프라인
+    1. Google Web Speech (주력) 실행
+    2. 실패 시 Whisper (보조) 실행
     """
     if not os.path.exists(original_audio_path):
         return {"text": "파일 없음", "analysis": {}}
 
-    # 0. RMS 체크 (사전 필터링)
     try:
         y_orig, sr_orig = librosa.load(original_audio_path, sr=None)
         rms_total = np.sqrt(np.mean(y_orig**2))
-        
-        # RMS 임계값 아주 작은 소리도 허용
         if rms_total < 0.001:
-            logger.info(f"전체 오디오 신호가 너무 약함 ({rms_total:.5f}). 무음 처리합니다.")
-            return {
-                "text": "답변 없음",
-                "analysis": {"rms_mean": rms_total},
-                "debug_info": {"skipped_due_to_low_signal": True}
-            }
+            return {"text": "답변 없음", "analysis": {"rms_mean": rms_total}}
     except Exception as e:
-        logger.error(f"초기 신호 확인 중 오류: {e}")
+        logger.error(f"신호 확인 오류: {e}")
 
-    # VAD 체크 (발화 존재 여부 확인)
+    # VAD 체크
     from .vad_service import check_vad_activity
     vad_ratio = check_vad_activity(original_audio_path)
     if vad_ratio < 0.01:
-        logger.info(f"VAD 발화 비율이 매우 낮음 ({vad_ratio:.2f}). 무음 처리합니다.")
-        return {
-            "text": "답변 없음",
-            "analysis": {"vad_ratio": vad_ratio},
-            "debug_info": {"skipped_due_to_vad": True}
-        }
+        return {"text": "답변 없음", "analysis": {"vad_ratio": vad_ratio}}
 
     # 1. 전처리
     processed_path, y, sr = preprocess_audio(original_audio_path)
@@ -357,60 +211,34 @@ def transcribe_audio(original_audio_path):
     # 2. 특징 분석
     analysis = analyze_audio_features(processed_path, y, sr)
     
-    # 3. 침묵 비중 체크
-    duration = librosa.get_duration(y=y, sr=sr) if y is not None else 0
-    if duration > 0 and (analysis.get("silence_duration", 0) / duration > 0.95):
-        logger.info("오디오의 대부분이 침묵입니다. '답변 없음' 처리합니다.")
-        return {
-            "text": "답변 없음",
-            "analysis": analysis,
-            "debug_info": {"skipped_due_to_silence": True}
-        }
-
-    # 4. STT (Gemini + Whisper 병렬 실행)
-    from concurrent.futures import ThreadPoolExecutor
+    # 3. STT 실행 (Google 우선 → 오류 시 Whisper 보조)
+    stt_method = "google"
+    final_text = transcribe_with_google_web_speech(processed_path)
     
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        logger.info("Gemini 및 Whisper STT 병렬 실행 시작...")
-        future_gemini = executor.submit(transcribe_with_gemini, processed_path)
-        future_whisper = executor.submit(transcribe_with_whisper, processed_path)
-        
-        gemini_res = future_gemini.result()
-        whisper_res = future_whisper.result()
-        
-    final_text = select_best_transcript(gemini_res, whisper_res)
+    # Google Web Speech에서 접속 오류(None)가 발생한 경우에만 Whisper로 전환
+    if final_text is None:
+        logger.warning("Google STT 서비스 오류. 보조 엔진(Whisper)으로 전환합니다.")
+        stt_method = "whisper"
+        final_text = transcribe_with_whisper(processed_path)
     
-    # 5. 발화 속도 계산 (초당 음절 수)
+    if not final_text:
+        final_text = "답변 없음"
+    
+    # 4. 속도 계산
     syllable_count = len(final_text.replace(" ", ""))
-    
-    try:
-        if y is None or sr is None:
-             duration = librosa.get_duration(path=processed_path)
-        else:
-             duration = librosa.get_duration(y=y, sr=sr)
-    except Exception as e:
-        logger.warning(f"길이 계산 불가: {e}")
-        duration = 0
-
-    speech_rate = 0
-    if duration > 0:
-        speech_rate = round(syllable_count / duration, 2)
-    
+    duration = librosa.get_duration(y=y, sr=sr) if y is not None else 0
+    speech_rate = round(syllable_count / duration, 2) if duration > 0 else 0
     analysis["speech_rate"] = speech_rate
     
-    # 발화 속도 피드백
     if speech_rate < 2.5: analysis["speed_feedback"] = "느림"
     elif speech_rate > 5.5: analysis["speed_feedback"] = "빠름"
     else: analysis["speed_feedback"] = "적절"
 
-    logger.info(f"STT 파이프라인 완료. 텍스트 길이: {len(final_text)}")
-    
     return {
         "text": final_text,
         "analysis": analysis,
         "debug_info": {
-            "gemini": gemini_res,
-            "whisper": whisper_res,
-            "similarity_used": True
+            "stt_engine_used": stt_method,
+            "processed_path": processed_path
         }
     }

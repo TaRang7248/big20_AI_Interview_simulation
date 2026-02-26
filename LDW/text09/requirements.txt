@@ -1,5 +1,5 @@
-# AI Interview Simulation - 패키지 의존성 목록
-# 최종 업데이트: 2026-02-25
+# AI 면접 시뮬레이션 - 패키지 의존성 목록
+# 최종 업데이트: 2026-02-25 (numpy 및 pyannote-audio 버전 고정)
 
 # 웹 프레임워크 / API
 fastapi==0.115.8
@@ -30,7 +30,7 @@ websockets==12.0
 
 # TTS (음성 합성)
 aiohttp==3.11.12
-edge-tts==6.1.13
+gTTS==2.5.1
 
 # LLM 오케스트레이션 / RAG
 google-generativeai==0.7.2
@@ -50,13 +50,12 @@ easyocr==1.7.2
 soundfile==0.13.1
 librosa==0.10.1
 scipy==1.12.0
-praat-parselmouth==0.4.5
 numpy==1.26.2
 pyaudio==0.2.14
 pyannote-audio==3.1.1
 webrtcvad-wheels==2.0.14
 openai-whisper==20240930
-python-Levenshtein==0.26.1
+SpeechRecognition==3.10.0
 
 # 컴퓨터 비전 / 감정 분석 / 비디오
 opencv-python==4.11.0.86

@@ -14,5 +14,5 @@ def get_db_connection():
         )
         return conn
     except psycopg2.OperationalError as e:
-        logger.error(f"DB Connection Failed: {e}")
-        raise HTTPException(status_code=500, detail="Database connection failed")
+        logger.error(f"데이터베이스 연결 실패: {e}")
+        raise HTTPException(status_code=500, detail="데이터베이스 연결에 실패했습니다.")

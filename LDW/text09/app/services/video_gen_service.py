@@ -71,7 +71,7 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
     output_dir = os.path.abspath(WAV2LIP_OUTPUT_FOLDER)
     os.makedirs(output_dir, exist_ok=True)
 
-    # 파일명 생성
+    # 임시 파일명 및 최종 파일명 생성
     temp_filename = f"temp_wav2lip_{uuid.uuid4().hex[:8]}.mp4"
     temp_filepath = os.path.join(output_dir, temp_filename)
 
@@ -101,19 +101,19 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
         logger.error(f"[비디오 생성] 입력 오디오 파일이 없습니다: {audio_filepath}")
         return None
 
-    # ── 오디오를 wav로 변환 (안정화) ──
+    # ── 오디오를 wav로 변환 (Wav2Lip 안정적 실행을 위해 필수) ──
     wav_audio_path = os.path.join(output_dir, f"tts_{uuid.uuid4().hex[:8]}.wav")
     logger.info(f"[비디오 생성] 오디오 변환 시작: {audio_filepath} -> {wav_audio_path}")
     ok = await _convert_audio_to_wav_16k_mono(os.path.abspath(audio_filepath), wav_audio_path)
     if not ok:
         return None
 
-    # 환경 변수(PYTHONPATH)에 Wav2Lip 경로 추가
+    # 환경 변수(PYTHONPATH)에 Wav2Lip 경로 추가하여 내부 모듈 참조 가능하게 함
     process_env = os.environ.copy()
     existing_pythonpath = process_env.get("PYTHONPATH", "")
     process_env["PYTHONPATH"] = wav2lip_dir + (os.pathsep + existing_pythonpath if existing_pythonpath else "")
 
-    # ── Wav2Lip 실행 ──
+    # ── Wav2Lip 실행 명령 설정 ──
     wav2lip_cmd = [
         python_exe,
         inference_script,
@@ -138,13 +138,11 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
 
         if not os.path.exists(temp_filepath):
             logger.error(f"[비디오 생성] Wav2Lip 실행은 성공했으나 결과 파일이 생성되지 않았습니다: {temp_filepath}")
-            logger.error(f"[비디오 생성] stdout: {out}")
-            logger.error(f"[비디오 생성] stderr: {err}")
             return None
 
         logger.info("[비디오 생성] Wav2Lip 기본 비디오 생성 완료. 웹 재생 최적화 시작...")
 
-        # ── FFmpeg로 웹 재생 친화 포맷으로 변환 ──
+        # ── FFmpeg로 웹 재생 친화 포맷(H.264)으로 변환 ──
         if not FFMPEG_EXE:
             logger.warning("[비디오 생성] FFmpeg를 찾지 못해 최적화를 건너뜁니다. 원본을 그대로 사용합니다.")
             shutil.move(temp_filepath, final_filepath)
@@ -164,27 +162,25 @@ async def generate_wav2lip_video(audio_filepath: str) -> str | None:
 
             if frc != 0 or not os.path.exists(final_filepath):
                 logger.error("[비디오 생성] FFmpeg 변환 실패. 원본 파일을 그대로 사용합니다.")
-                logger.error(f"[비디오 생성] ffmpeg stdout: {fout}")
-                logger.error(f"[비디오 생성] ffmpeg stderr: {ferr}")
                 shutil.move(temp_filepath, final_filepath)
             else:
                 # 변환 성공 시 임시 파일 삭제
                 if os.path.exists(temp_filepath):
                     os.remove(temp_filepath)
 
-        # 오디오 임시 wav 삭제
+        # 사용이 끝난 임시 wav 오디오 파일 삭제
         if os.path.exists(wav_audio_path):
             os.remove(wav_audio_path)
 
         logger.info(f"[비디오 생성] 최종 비디오 생성 완료: {final_filepath}")
 
-        # 웹 접근 경로 반환
+        # 웹 브라우저에서 접근 가능한 상대 경로 반환
         return f"/uploads/Wav2Lip_mp4/{final_filename}"
 
     except Exception as e:
         logger.error(f"[비디오 생성] 비디오 생성 중 예외 발생: {e}")
 
-        # 예외 시 임시 파일 정리
+        # 예외 발생 시 생성 중이던 파일들을 정리합니다.
         for p in [temp_filepath, final_filepath, wav_audio_path]:
             try:
                 if p and os.path.exists(p):
