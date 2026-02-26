@@ -192,6 +192,30 @@ services:
     networks:
       - interview_net
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # Celery Beat — 주기 작업 스케줄러 (SAD: Async Tasks Layer)
+  # ─────────────────────────────────────────────────────────────────────────
+  celery_beat:
+    build:
+      context: .
+      dockerfile: CSH/Dockerfile
+    container_name: interview_celery_beat
+    command: ["python", "-m", "celery", "-A", "celery_app", "beat", "--loglevel=info"]
+    environment:
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/interview_db
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - LLM_MODEL=${LLM_MODEL:-exaone3.5:7.8b}
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+    depends_on:
+      redis:
+        condition: service_started
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - interview_net
+
 # ─────────────────────────────────────────────────────────────────────────
 # 볼륨 정의
 # ─────────────────────────────────────────────────────────────────────────
