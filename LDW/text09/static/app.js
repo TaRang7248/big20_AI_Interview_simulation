@@ -606,6 +606,52 @@ $('#btn-change-pw').addEventListener('click', () => {
     navigateTo('password-change-page');
 });
 
+// 회원 탈퇴 버튼 이벤트 핸들러 추가
+$('#btn-delete-user').addEventListener('click', async () => {
+    // 1. 비밀번호 입력 확인
+    const password = prompt("회원 탈퇴를 위해 비밀번호를 입력해주세요:");
+    if (!password) return;
+
+    try {
+        // 비밀번호 검증 API 호출
+        const verifyResp = await fetch('/api/verify-password', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id_name: AppState.currentUser.id_name,
+                pw: password
+            })
+        });
+        const verifyResult = await verifyResp.json();
+
+        if (verifyResult.success) {
+            // 2. 최종 탈퇴 확인
+            if (confirm("정말 회원을 탈퇴하시겠습니까? 탈퇴 시 모든 정보가 삭제되며 이 작업은 취소할 수 없습니다.")) {
+                // 회원 탈퇴 API (DELETE) 호출
+                const deleteResp = await fetch(`/api/user/${AppState.currentUser.id_name}`, {
+                    method: 'DELETE'
+                });
+                const deleteResult = await deleteResp.json();
+
+                if (deleteResult.success) {
+                    alert("회원 탈퇴가 완료되었습니다. 그동안 이용해주셔서 감사합니다.");
+                    // 로그아웃 처리 및 초기 화면 이동
+                    AppState.currentUser = null;
+                    $('#navbar').classList.add('hidden');
+                    navigateTo('login-page');
+                } else {
+                    alert(deleteResult.message || "탈퇴 처리 중 오류가 발생했습니다.");
+                }
+            }
+        } else {
+            alert("비밀번호가 일치하지 않습니다.");
+        }
+    } catch (error) {
+        console.error("회원 탈퇴 오류:", error);
+        alert("서버 통신 중 오류가 발생했습니다.");
+    }
+});
+
 $('#btn-cancel-myinfo').addEventListener('click', () => {
     if (AppState.currentUser.type === 'admin') navigateTo('admin-dashboard-page');
     else navigateTo('applicant-dashboard-page');
