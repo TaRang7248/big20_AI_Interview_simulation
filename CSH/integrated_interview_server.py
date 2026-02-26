@@ -126,6 +126,30 @@ DEFAULT_LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "8192"))
 # 60초 내 응답 없으면 폴백 질문으로 전환하여 사용자 대기 시간 최소화
 LLM_TIMEOUT_SEC = int(os.getenv("LLM_TIMEOUT_SEC", "60"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+STT_RUNTIME_CHECK_LOG = os.getenv("STT_RUNTIME_CHECK_LOG", "0") == "1"
+STT_QUALITY_LOG_ENABLED = os.getenv("STT_QUALITY_LOG_ENABLED", "1") == "1"
+STT_QUALITY_LOG_EVERY_FINAL = int(os.getenv("STT_QUALITY_LOG_EVERY_FINAL", "5"))
+STT_QUALITY_LOG_EVERY_UTTERANCE = int(os.getenv("STT_QUALITY_LOG_EVERY_UTTERANCE", "3"))
+
+# LLM 한국어 출력 강제 정책 (운영 가드)
+LLM_KOREAN_GUARD_ENABLED = os.getenv("LLM_KOREAN_GUARD_ENABLED", "1") == "1"
+LLM_KOREAN_MIN_RATIO = float(os.getenv("LLM_KOREAN_MIN_RATIO", "0.6"))
+LLM_KOREAN_MAX_RETRIES = int(os.getenv("LLM_KOREAN_MAX_RETRIES", "2"))
+
+# STT 띄어쓰기 보정 모드
+# - off : 보정 미적용 (원문 유지)
+# - safe: 짧은 발화/저신뢰/코드성 토큰에 보수적으로 대응 후 보정
+# - full: 가능한 최종 발화에 적극 보정
+STT_SPACING_MODE = os.getenv("STT_SPACING_MODE", "safe").strip().lower()
+if STT_SPACING_MODE not in {"off", "safe", "full"}:
+    STT_SPACING_MODE = "safe"
+
+STT_SPACING_MIN_CHARS = int(os.getenv("STT_SPACING_MIN_CHARS", "8"))
+STT_SPACING_LOW_CONFIDENCE = float(os.getenv("STT_SPACING_LOW_CONFIDENCE", "0.80"))
+STT_SPACING_HIGH_STD = float(os.getenv("STT_SPACING_HIGH_STD", "0.18"))
+STT_SPACING_PROTECT_TECH_TOKENS = (
+    os.getenv("STT_SPACING_PROTECT_TECH_TOKENS", "1").strip() == "1"
+)
 
 # 소셜 로그인 설정
 KAKAO_CLIENT_ID = os.getenv("KAKAO_CLIENT_ID", "")
@@ -219,6 +243,339 @@ def sanitize_user_input(text: str) -> str:
             index += 1
 
     return " ".join(compact_tokens).strip()
+
+
+def _stt_confidence_stats(
+    words: Optional[List[Dict[str, Any]]],
+) -> tuple[float, float, int]:
+    """word-level confidence의 평균/표준편차/개수를 계산합니다."""
+    if not words:
+        return (1.0, 0.0, 0)
+
+    values: List[float] = []
+    for item in words:
+        try:
+            conf = float(item.get("confidence", 0.0))
+            if 0.0 <= conf <= 1.0:
+                values.append(conf)
+        except Exception:
+            continue
+
+    if not values:
+        return (1.0, 0.0, 0)
+
+    avg = sum(values) / len(values)
+    variance = sum((v - avg) ** 2 for v in values) / len(values)
+    std = variance**0.5
+    return (avg, std, len(values))
+
+
+def _protect_technical_tokens(text: str) -> tuple[str, Dict[str, str]]:
+    """
+    띄어쓰기 보정 시 왜곡될 가능성이 높은 기술 토큰을 플레이스홀더로 보호합니다.
+    예: Redis, JWT, Node.js, C++, /api/chat, snake_case, camelCase, v1.2.3
+    """
+    if not text:
+        return text, {}
+
+    token_map: Dict[str, str] = {}
+    token_index = 0
+    token_pattern = re.compile(r"(?:[A-Za-z]+(?:[A-Za-z0-9_+./:-]*[A-Za-z0-9_+])?)")
+
+    def replacer(match: re.Match) -> str:
+        nonlocal token_index
+        token = match.group(0)
+        placeholder = f"__TECH_TOKEN_{token_index}__"
+        token_map[placeholder] = token
+        token_index += 1
+        return placeholder
+
+    protected = token_pattern.sub(replacer, text)
+    return protected, token_map
+
+
+def _restore_technical_tokens(text: str, token_map: Dict[str, str]) -> str:
+    if not token_map:
+        return text
+    restored = text
+    for placeholder, token in token_map.items():
+        restored = restored.replace(placeholder, token)
+    return restored
+
+
+def _should_apply_spacing_safe_policy(
+    transcript: str,
+    words: Optional[List[Dict[str, Any]]],
+) -> bool:
+    """
+    safe 모드 보정 조건:
+    - 너무 짧은 발화는 보정하지 않음
+    - confidence가 낮거나 변동성이 큰 발화는 보정하지 않음
+    """
+    normalized = transcript.strip()
+    if len(normalized) < STT_SPACING_MIN_CHARS:
+        return False
+
+    avg_conf, std_conf, count = _stt_confidence_stats(words)
+    if count >= 3 and avg_conf < STT_SPACING_LOW_CONFIDENCE:
+        return False
+    if count >= 3 and std_conf > STT_SPACING_HIGH_STD:
+        return False
+
+    return True
+
+
+def _apply_spacing_correction_with_policy(
+    transcript: str,
+    *,
+    is_final: bool,
+    words: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    STT 띄어쓰기 보정 정책 적용 결과를 반환합니다.
+    반환 필드:
+      - raw_transcript
+      - corrected_transcript
+      - transcript (UI 기본 표시용: corrected 우선)
+      - spacing_applied
+      - spacing_mode
+    """
+    raw = transcript or ""
+    corrected = raw
+    spacing_applied = False
+
+    if not raw.strip() or not is_final:
+        return {
+            "raw_transcript": raw,
+            "corrected_transcript": corrected,
+            "transcript": corrected,
+            "spacing_applied": spacing_applied,
+            "spacing_mode": STT_SPACING_MODE,
+        }
+
+    if (
+        STT_SPACING_MODE == "off"
+        or not SPACING_CORRECTION_AVAILABLE
+        or not _spacing_corrector
+    ):
+        return {
+            "raw_transcript": raw,
+            "corrected_transcript": corrected,
+            "transcript": corrected,
+            "spacing_applied": spacing_applied,
+            "spacing_mode": STT_SPACING_MODE,
+        }
+
+    if STT_SPACING_MODE == "safe" and not _should_apply_spacing_safe_policy(raw, words):
+        return {
+            "raw_transcript": raw,
+            "corrected_transcript": corrected,
+            "transcript": corrected,
+            "spacing_applied": spacing_applied,
+            "spacing_mode": STT_SPACING_MODE,
+        }
+
+    try:
+        input_text = raw
+        token_map: Dict[str, str] = {}
+        if STT_SPACING_PROTECT_TECH_TOKENS:
+            input_text, token_map = _protect_technical_tokens(raw)
+
+        candidate = _spacing_corrector.correct(input_text)
+        if candidate and candidate.strip():
+            candidate = _restore_technical_tokens(candidate, token_map)
+            corrected = candidate
+            spacing_applied = corrected.strip() != raw.strip()
+    except Exception:
+        corrected = raw
+        spacing_applied = False
+
+    return {
+        "raw_transcript": raw,
+        "corrected_transcript": corrected,
+        "transcript": corrected,
+        "spacing_applied": spacing_applied,
+        "spacing_mode": STT_SPACING_MODE,
+    }
+
+
+_stt_quality_by_session: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_stt_quality_metrics(session_id: str) -> Dict[str, Any]:
+    """세션별 STT 품질 메트릭 저장소를 반환(없으면 초기화)합니다."""
+    if session_id not in _stt_quality_by_session:
+        _stt_quality_by_session[session_id] = {
+            "message_count": 0,
+            "interim_count": 0,
+            "final_count": 0,
+            "final_with_text_count": 0,
+            "final_empty_count": 0,
+            "utterance_end_count": 0,
+            "utterance_with_final_count": 0,
+            "no_transcription_count": 0,
+            "final_since_last_utterance": False,
+            "confidence_sum": 0.0,
+            "confidence_count": 0,
+            "confidence_min": 1.0,
+            "confidence_max": 0.0,
+            "word_score_sum": 0.0,
+            "word_score_count": 0,
+            "word_score_min": 1.0,
+            "word_score_max": 0.0,
+        }
+    return _stt_quality_by_session[session_id]
+
+
+def _snapshot_stt_quality_metrics(session_id: str) -> Dict[str, Any]:
+    """운영 로그 출력을 위한 STT 품질 메트릭 스냅샷을 생성합니다."""
+    metrics = _get_stt_quality_metrics(session_id)
+    utterance_total = metrics["utterance_end_count"]
+
+    final_reach_rate = (
+        metrics["utterance_with_final_count"] / utterance_total
+        if utterance_total > 0
+        else None
+    )
+    no_transcription_rate = (
+        metrics["no_transcription_count"] / utterance_total
+        if utterance_total > 0
+        else None
+    )
+    avg_confidence = (
+        metrics["confidence_sum"] / metrics["confidence_count"]
+        if metrics["confidence_count"] > 0
+        else None
+    )
+    avg_word_score = (
+        metrics["word_score_sum"] / metrics["word_score_count"]
+        if metrics["word_score_count"] > 0
+        else None
+    )
+
+    return {
+        "message_count": metrics["message_count"],
+        "interim_count": metrics["interim_count"],
+        "final_count": metrics["final_count"],
+        "final_with_text_count": metrics["final_with_text_count"],
+        "final_empty_count": metrics["final_empty_count"],
+        "utterance_end_count": utterance_total,
+        "utterance_with_final_count": metrics["utterance_with_final_count"],
+        "no_transcription_count": metrics["no_transcription_count"],
+        "final_reach_rate": final_reach_rate,
+        "no_transcription_rate": no_transcription_rate,
+        "avg_confidence": avg_confidence,
+        "min_confidence": (
+            metrics["confidence_min"] if metrics["confidence_count"] > 0 else None
+        ),
+        "max_confidence": (
+            metrics["confidence_max"] if metrics["confidence_count"] > 0 else None
+        ),
+        "avg_word_score": avg_word_score,
+        "min_word_score": (
+            metrics["word_score_min"] if metrics["word_score_count"] > 0 else None
+        ),
+        "max_word_score": (
+            metrics["word_score_max"] if metrics["word_score_count"] > 0 else None
+        ),
+    }
+
+
+def _log_stt_quality_metrics(session_id: str, reason: str):
+    """STT 품질 운영 로그를 출력합니다."""
+    if not STT_QUALITY_LOG_ENABLED:
+        return
+
+    snapshot = _snapshot_stt_quality_metrics(session_id)
+
+    def _fmt(value: Optional[float]) -> str:
+        return f"{value:.3f}" if value is not None else "NA"
+
+    print(
+        "[STT-QUALITY] "
+        f"session={session_id[:8]} reason={reason} "
+        f"final_reach={_fmt(snapshot['final_reach_rate'])} "
+        f"no_transcription={_fmt(snapshot['no_transcription_rate'])} "
+        f"avg_conf={_fmt(snapshot['avg_confidence'])} "
+        f"avg_word_score={_fmt(snapshot['avg_word_score'])} "
+        f"final={snapshot['final_with_text_count']}/{snapshot['final_count']} "
+        f"utterance_end={snapshot['utterance_end_count']}"
+    )
+
+
+def _update_stt_quality_from_message(
+    session_id: str,
+    *,
+    is_final: bool,
+    transcript: Optional[str],
+    confidence: Optional[float],
+    words: Optional[List[Dict[str, Any]]],
+):
+    """STT 메시지 단위 품질 메트릭을 갱신합니다."""
+    metrics = _get_stt_quality_metrics(session_id)
+    metrics["message_count"] += 1
+
+    if is_final:
+        metrics["final_count"] += 1
+        if transcript and transcript.strip():
+            metrics["final_with_text_count"] += 1
+            metrics["final_since_last_utterance"] = True
+        else:
+            metrics["final_empty_count"] += 1
+    else:
+        metrics["interim_count"] += 1
+
+    try:
+        if confidence is not None:
+            conf = float(confidence)
+            if 0.0 <= conf <= 1.0:
+                metrics["confidence_sum"] += conf
+                metrics["confidence_count"] += 1
+                metrics["confidence_min"] = min(metrics["confidence_min"], conf)
+                metrics["confidence_max"] = max(metrics["confidence_max"], conf)
+    except (TypeError, ValueError):
+        pass
+
+    if words:
+        for word in words:
+            try:
+                score = float(word.get("confidence", 0.0))
+            except (TypeError, ValueError):
+                continue
+            if 0.0 <= score <= 1.0:
+                metrics["word_score_sum"] += score
+                metrics["word_score_count"] += 1
+                metrics["word_score_min"] = min(metrics["word_score_min"], score)
+                metrics["word_score_max"] = max(metrics["word_score_max"], score)
+
+    if (
+        STT_QUALITY_LOG_ENABLED
+        and is_final
+        and metrics["final_count"] > 0
+        and metrics["final_count"] % max(1, STT_QUALITY_LOG_EVERY_FINAL) == 0
+    ):
+        _log_stt_quality_metrics(session_id, reason="final")
+
+
+def _update_stt_quality_on_utterance_end(session_id: str):
+    """UtteranceEnd 이벤트 기준 final 도달률/무전사율 메트릭을 갱신합니다."""
+    metrics = _get_stt_quality_metrics(session_id)
+    metrics["utterance_end_count"] += 1
+
+    if metrics["final_since_last_utterance"]:
+        metrics["utterance_with_final_count"] += 1
+    else:
+        metrics["no_transcription_count"] += 1
+
+    metrics["final_since_last_utterance"] = False
+
+    if (
+        STT_QUALITY_LOG_ENABLED
+        and metrics["utterance_end_count"] > 0
+        and metrics["utterance_end_count"] % max(1, STT_QUALITY_LOG_EVERY_UTTERANCE)
+        == 0
+    ):
+        _log_stt_quality_metrics(session_id, reason="utterance_end")
 
 
 import re as _re  # strip_think_tokens 에서 사용
@@ -316,6 +673,52 @@ def extract_single_question(text: str) -> str:
             return paragraphs[0]
 
     return text
+
+
+def _korean_ratio_stats(text: str) -> Dict[str, float]:
+    """텍스트 내 한글 비율(한글 vs 영문 알파벳)을 계산합니다."""
+    if not text:
+        return {
+            "korean_count": 0.0,
+            "english_count": 0.0,
+            "ratio": 1.0,
+        }
+
+    korean_count = len(_re.findall(r"[가-힣ㄱ-ㅎㅏ-ㅣ]", text))
+    english_count = len(_re.findall(r"[A-Za-z]", text))
+    total = korean_count + english_count
+    ratio = (korean_count / total) if total > 0 else 1.0
+    return {
+        "korean_count": float(korean_count),
+        "english_count": float(english_count),
+        "ratio": float(ratio),
+    }
+
+
+def _is_korean_output_acceptable(text: str) -> tuple[bool, Dict[str, float]]:
+    """
+    한국어 출력 정책 통과 여부를 반환합니다.
+
+    정책:
+    - 영어 알파벳이 포함될 경우 한글 비율이 임계치 이상이어야 함
+    - 영어만 있고 한글이 없는 경우 실패
+    """
+    stats = _korean_ratio_stats(text)
+    korean_count = stats["korean_count"]
+    english_count = stats["english_count"]
+    ratio = stats["ratio"]
+
+    if english_count > 0 and korean_count <= 0:
+        return False, stats
+    if english_count > 0 and ratio < LLM_KOREAN_MIN_RATIO:
+        return False, stats
+    return True, stats
+
+
+def _postprocess_question_output(text: str) -> str:
+    """질문 출력 후처리: think 토큰 제거 + 단일 질문 추출"""
+    cleaned = strip_think_tokens(text)
+    return extract_single_question(cleaned)
 
 
 async def run_llm_async(llm, messages):
@@ -2010,21 +2413,53 @@ class AIInterviewer:
         )
         messages.append(HumanMessage(content=question_prompt))
 
-        # ========== 7. LLM 호출 + strip_think_tokens + 단일 질문 추출 + 빈 응답 재시도 ==========
+        # ========== 7. LLM 호출 + 언어 정책 강제 가드(한국어 비율 검사) ==========
         response = await run_llm_async(self.question_llm, messages)
-        next_question = strip_think_tokens(response.content)
-        # LLM이 한 번에 여러 질문을 나열한 경우, 첫 번째 질문만 추출
-        next_question = extract_single_question(next_question)
+        next_question = _postprocess_question_output(response.content)
+
+        guard_retry_count = 0
+        while guard_retry_count < max(0, LLM_KOREAN_MAX_RETRIES):
+            needs_retry = not next_question
+            reason = "empty"
+            ratio_stats = {"ratio": 1.0, "korean_count": 0.0, "english_count": 0.0}
+
+            if next_question and LLM_KOREAN_GUARD_ENABLED:
+                acceptable, ratio_stats = _is_korean_output_acceptable(next_question)
+                if not acceptable:
+                    needs_retry = True
+                    reason = "language_policy"
+
+            if not needs_retry:
+                break
+
+            print(
+                f"⚠️ [LLM Guard] 재생성 시도 {guard_retry_count + 1}/{LLM_KOREAN_MAX_RETRIES} "
+                f"(reason={reason}, ratio={ratio_stats.get('ratio', 1.0):.3f})"
+            )
+
+            retry_messages = messages + [
+                HumanMessage(
+                    content=(
+                        "⚠️ 출력 규칙 재강조: 반드시 한국어로 질문 1개만 작성하세요. "
+                        "영어 문장으로 답변하지 마세요. 기술 용어만 영어 병기 가능합니다."
+                    )
+                )
+            ]
+            retry_response = await run_llm_async(self.question_llm, retry_messages)
+            next_question = _postprocess_question_output(retry_response.content)
+            guard_retry_count += 1
 
         if not next_question:
-            print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
-            retry_response = await run_llm_async(self.question_llm, messages)
-            next_question = strip_think_tokens(retry_response.content)
-            next_question = extract_single_question(next_question)
-            if not next_question:
-                raise RuntimeError(
-                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+            raise RuntimeError("LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 지속)")
+
+        if LLM_KOREAN_GUARD_ENABLED:
+            acceptable, ratio_stats = _is_korean_output_acceptable(next_question)
+            if not acceptable:
+                print(
+                    f"⚠️ [LLM Guard] 한국어 정책 미충족 지속 (ratio={ratio_stats['ratio']:.3f}) "
+                    "→ 한국어 폴백 질문 사용"
                 )
+                next_question = "지금 말씀하신 내용을 바탕으로, 가장 핵심적인 성과를 한국어로 구체적으로 설명해 주시겠어요?"
 
         return next_question
 
@@ -2386,28 +2821,61 @@ class AIInterviewer:
 
             messages.append(HumanMessage(content=question_prompt))
 
-            # ========== 7. LLM 호출 - 비동기 ==========
-            # ThreadPoolExecutor로 블로킹 LLM 호출을 비동기로 실행
+            # ========== 7. LLM 호출 + 언어 정책 강제 가드(한국어 비율 검사) ==========
             response = await run_llm_async(self.question_llm, messages)
-            # ── qwen3 <think> 토큰 제거 ──
-            # think=False 설정에도 일부 버전에서 <think>블록</think>이 포함될 수 있음
-            # 제거하지 않으면 LLM 내부 추론이 면접관 발화로 노출됨 ("엉뚱한 답변" 원인)
-            next_question = strip_think_tokens(response.content)
-            # ── 복수 질문 방어: LLM이 여러 질문을 나열한 경우 첫 번째만 추출 ──
-            next_question = extract_single_question(next_question)
+            next_question = _postprocess_question_output(response.content)
 
-            # ── 빈 응답 방어 ──
-            # <thought>/<think> 블록만 있고 실제 질문이 없는 경우 LLM 재호출
-            if not next_question:
-                print("⚠️ [LLM] thinking 토큰 제거 후 빈 응답 → LLM 재호출 시도")
-                # 재호출 시 temperature를 약간 높여 다른 출력 유도
-                retry_response = await run_llm_async(self.question_llm, messages)
-                next_question = strip_think_tokens(retry_response.content)
-                next_question = extract_single_question(next_question)
-                if not next_question:
-                    raise RuntimeError(
-                        "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 2회 연속)"
+            guard_retry_count = 0
+            while guard_retry_count < max(0, LLM_KOREAN_MAX_RETRIES):
+                needs_retry = not next_question
+                reason = "empty"
+                ratio_stats = {
+                    "ratio": 1.0,
+                    "korean_count": 0.0,
+                    "english_count": 0.0,
+                }
+
+                if next_question and LLM_KOREAN_GUARD_ENABLED:
+                    acceptable, ratio_stats = _is_korean_output_acceptable(
+                        next_question
                     )
+                    if not acceptable:
+                        needs_retry = True
+                        reason = "language_policy"
+
+                if not needs_retry:
+                    break
+
+                print(
+                    f"⚠️ [LLM Guard] 재생성 시도 {guard_retry_count + 1}/{LLM_KOREAN_MAX_RETRIES} "
+                    f"(reason={reason}, ratio={ratio_stats.get('ratio', 1.0):.3f})"
+                )
+
+                retry_messages = messages + [
+                    HumanMessage(
+                        content=(
+                            "⚠️ 출력 규칙 재강조: 반드시 한국어로 질문 1개만 작성하세요. "
+                            "영어 문장으로 답변하지 마세요. 기술 용어만 영어 병기 가능합니다."
+                        )
+                    )
+                ]
+                retry_response = await run_llm_async(self.question_llm, retry_messages)
+                next_question = _postprocess_question_output(retry_response.content)
+                guard_retry_count += 1
+
+            if not next_question:
+                raise RuntimeError(
+                    "LLM이 유효한 질문을 생성하지 못했습니다 (빈 응답 지속)"
+                )
+
+            if LLM_KOREAN_GUARD_ENABLED:
+                acceptable, ratio_stats = _is_korean_output_acceptable(next_question)
+                if not acceptable:
+                    print(
+                        f"⚠️ [LLM Guard] 한국어 정책 미충족 지속 (ratio={ratio_stats['ratio']:.3f}) "
+                        "→ 한국어 폴백 질문 사용"
+                    )
+                    next_question = "지금 말씀하신 내용을 바탕으로, 가장 핵심적인 성과를 한국어로 구체적으로 설명해 주시겠어요?"
 
             # ========== 8. 주제 추적 업데이트 ==========
             self.update_topic_tracking(session_id, user_answer, needs_follow_up)
@@ -5834,23 +6302,62 @@ async def chat_stream(
             if rid:
                 latency_monitor.end_phase(rid, "llm_inference")
 
-            # ── 3단계: 후처리 (think 토큰 제거, 복수 질문 방어, 대화 기록 저장) ──
-            # <think>…</think> 블록이 포함된 경우 제거
-            final_question = strip_think_tokens(full_response)
-            # LLM이 여러 질문을 나열한 경우 첫 번째만 추출
-            final_question = extract_single_question(final_question)
+            # ── 3단계: 후처리 + 언어 정책 강제 가드 (한국어 비율 검사) ──
+            final_question = _postprocess_question_output(full_response)
 
-            # 빈 응답 방어 — 스트리밍 결과가 빈 경우 폴백
-            if not final_question:
-                print("⚠️ [LLM Stream] 빈 응답 → 비스트리밍 재시도")
+            guard_retry_count = 0
+            while guard_retry_count < max(0, LLM_KOREAN_MAX_RETRIES):
+                needs_retry = not final_question
+                reason = "empty"
+                ratio_stats = {
+                    "ratio": 1.0,
+                    "korean_count": 0.0,
+                    "english_count": 0.0,
+                }
+
+                if final_question and LLM_KOREAN_GUARD_ENABLED:
+                    acceptable, ratio_stats = _is_korean_output_acceptable(
+                        final_question
+                    )
+                    if not acceptable:
+                        needs_retry = True
+                        reason = "language_policy"
+
+                if not needs_retry:
+                    break
+
+                print(
+                    f"⚠️ [LLM Stream Guard] 재생성 시도 {guard_retry_count + 1}/{LLM_KOREAN_MAX_RETRIES} "
+                    f"(reason={reason}, ratio={ratio_stats.get('ratio', 1.0):.3f})"
+                )
                 try:
-                    retry_resp = await run_llm_async(interviewer.question_llm, messages)
-                    final_question = strip_think_tokens(retry_resp.content)
-                    final_question = extract_single_question(final_question)
+                    retry_messages = messages + [
+                        HumanMessage(
+                            content=(
+                                "⚠️ 출력 규칙 재강조: 반드시 한국어로 질문 1개만 작성하세요. "
+                                "영어 문장으로 답변하지 마세요. 기술 용어만 영어 병기 가능합니다."
+                            )
+                        )
+                    ]
+                    retry_resp = await run_llm_async(
+                        interviewer.question_llm, retry_messages
+                    )
+                    final_question = _postprocess_question_output(retry_resp.content)
                 except Exception:
-                    pass
-                if not final_question:
-                    final_question = "지금까지의 경험 중 가장 도전적이었던 프로젝트에 대해 말씀해 주시겠어요?"
+                    final_question = ""
+                guard_retry_count += 1
+
+            if not final_question:
+                final_question = "지금까지의 경험 중 가장 도전적이었던 프로젝트에 대해 한국어로 말씀해 주시겠어요?"
+
+            if LLM_KOREAN_GUARD_ENABLED:
+                acceptable, ratio_stats = _is_korean_output_acceptable(final_question)
+                if not acceptable:
+                    print(
+                        f"⚠️ [LLM Stream Guard] 한국어 정책 미충족 지속 (ratio={ratio_stats['ratio']:.3f}) "
+                        "→ 한국어 폴백 질문 사용"
+                    )
+                    final_question = "지금 말씀하신 내용을 바탕으로, 가장 핵심적인 성과를 한국어로 구체적으로 설명해 주시겠어요?"
 
             # ── 대화 기록 및 주제 추적 업데이트 ──
             chat_history.append({"role": "assistant", "content": final_question})
@@ -6518,14 +7025,66 @@ async def _analyze_prosody_from_audio(session_id: str, raw_pcm: bytes, transcrip
         print(f"[Prosody] 분석 오류 (세션 {session_id[:8]}): {e}")
 
 
+def _convert_frame_to_pcm16_mono_16k(frame) -> bytes:
+    """
+    aiortc AudioFrame을 Deepgram 권장 포맷(16kHz, mono, PCM16)으로 변환.
+
+    - 다운믹스(Downmix): 다채널 입력을 mono로 평균 결합
+    - 리샘플링(Resampling): 입력 sample_rate를 16kHz로 선형 보간
+    - 출력 포맷: little-endian PCM16 bytes
+
+    변환 실패 시 빈 바이트를 반환하여 상위 루프가 Graceful Degradation으로
+    다음 프레임을 계속 처리할 수 있도록 합니다.
+    """
+    try:
+        import numpy as np
+
+        audio_data = frame.to_ndarray()
+        if audio_data is None or audio_data.size == 0:
+            return b""
+
+        # 입력 배열 형태 정규화:
+        # - (channels, samples) 형태를 우선 가정
+        # - (samples, channels) 가능성도 안전하게 처리
+        samples = audio_data.astype(np.float32, copy=False)
+        if samples.ndim == 1:
+            mono = samples
+        elif samples.ndim == 2:
+            if samples.shape[0] <= 8 and samples.shape[1] >= samples.shape[0]:
+                mono = samples.mean(axis=0)
+            else:
+                mono = samples.mean(axis=1)
+        else:
+            mono = samples.reshape(-1)
+
+        # float 입력이 -1.0~1.0 범위라면 PCM16 스케일로 변환
+        if np.issubdtype(audio_data.dtype, np.floating):
+            max_abs = float(np.max(np.abs(mono))) if mono.size else 0.0
+            if max_abs <= 1.5:
+                mono = mono * 32767.0
+
+        src_rate = int(getattr(frame, "sample_rate", 16000) or 16000)
+        target_rate = 16000
+
+        # 명시적 리샘플링: src_rate != 16kHz 인 경우 선형 보간 적용
+        if src_rate != target_rate and mono.size > 1:
+            target_len = max(1, int(round(mono.size * target_rate / src_rate)))
+            x_old = np.linspace(0.0, 1.0, num=mono.size, endpoint=False)
+            x_new = np.linspace(0.0, 1.0, num=target_len, endpoint=False)
+            mono = np.interp(x_new, x_old, mono)
+
+        pcm16 = np.clip(mono, -32768, 32767).astype(np.int16)
+        return pcm16.tobytes()
+    except Exception:
+        return b""
+
+
 async def _audio_pipeline(track, session_id: str):
     """
     오디오 트랙 통합 파이프라인:
     1. STT 처리 (Deepgram/Whisper)
     2. GStreamer/FFmpeg 녹화 파이프에 오디오 프레임 전송
     """
-    import numpy as np
-
     recording_active = (
         RECORDING_AVAILABLE
         and recording_service
@@ -6539,9 +7098,9 @@ async def _audio_pipeline(track, session_id: str):
                 frame = await track.recv()
                 if recording_active:
                     try:
-                        audio_data = frame.to_ndarray()
-                        pcm = audio_data.astype(np.int16).tobytes()
-                        await recording_service.write_audio_frame(session_id, pcm)
+                        pcm = _convert_frame_to_pcm16_mono_16k(frame)
+                        if pcm:
+                            await recording_service.write_audio_frame(session_id, pcm)
                     except Exception:
                         pass
         except Exception:
@@ -6572,8 +7131,6 @@ async def _process_audio_with_stt_and_recording(
     if not DEEPGRAM_AVAILABLE or not deepgram_client:
         return
 
-    import numpy as np
-
     try:
         with deepgram_client.listen.v1.connect(
             model="nova-3",
@@ -6584,9 +7141,9 @@ async def _process_audio_with_stt_and_recording(
             punctuate=True,
             interim_results=True,
             vad_events=True,
-            diarize=True,
-            endpointing=500,
-            utterance_end_ms=1000,
+            diarize=False,
+            endpointing=1100,
+            utterance_end_ms=2200,
         ) as dg_connection:
 
             def on_message(message) -> None:
@@ -6639,6 +7196,14 @@ async def _process_audio_with_stt_and_recording(
                                     for w in raw_words
                                 ]
 
+                    _update_stt_quality_from_message(
+                        session_id,
+                        is_final=is_final,
+                        transcript=transcript,
+                        confidence=confidence,
+                        words=words_list,
+                    )
+
                     if transcript:
                         if SPEECH_ANALYSIS_AVAILABLE and speech_service:
                             try:
@@ -6652,22 +7217,29 @@ async def _process_audio_with_stt_and_recording(
                             except Exception as e:
                                 print(f"[SpeechAnalysis] 데이터 전달 오류: {e}")
 
-                        if (
-                            is_final
-                            and SPACING_CORRECTION_AVAILABLE
-                            and _spacing_corrector
-                        ):
-                            corrected = _spacing_corrector.correct(transcript)
-                            if corrected and corrected.strip():
-                                transcript = corrected
+                        spacing_result = _apply_spacing_correction_with_policy(
+                            transcript,
+                            is_final=is_final,
+                            words=words_list,
+                        )
+                        output_transcript = spacing_result["transcript"]
 
                         asyncio.create_task(
                             broadcast_stt_result(
                                 session_id,
                                 {
                                     "type": "stt_result",
-                                    "transcript": transcript,
+                                    "transcript": output_transcript,
+                                    "raw_transcript": spacing_result["raw_transcript"],
+                                    "corrected_transcript": spacing_result[
+                                        "corrected_transcript"
+                                    ],
+                                    "spacing_applied": spacing_result[
+                                        "spacing_applied"
+                                    ],
+                                    "spacing_mode": spacing_result["spacing_mode"],
                                     "is_final": is_final,
+                                    "source": "deepgram",
                                     "timestamp": time.time(),
                                 },
                             )
@@ -6682,7 +7254,7 @@ async def _process_audio_with_stt_and_recording(
                             if len(buffered) > 3200:  # 최소 0.1초 (16kHz, 16bit)
                                 asyncio.create_task(
                                     _analyze_prosody_from_audio(
-                                        session_id, buffered, transcript
+                                        session_id, buffered, output_transcript
                                     )
                                 )
 
@@ -6708,6 +7280,7 @@ async def _process_audio_with_stt_and_recording(
             def on_utterance_end(utterance_end_msg) -> None:
                 """발화 종료 감지 — utterance_end_ms 침묵 후 Deepgram이 전송"""
                 try:
+                    _update_stt_quality_on_utterance_end(session_id)
                     asyncio.create_task(
                         broadcast_stt_result(
                             session_id,
@@ -6748,16 +7321,9 @@ async def _process_audio_with_stt_and_recording(
                 while True:
                     frame = await track.recv()
                     try:
-                        audio_data = frame.to_ndarray()
-                        if (
-                            audio_data.dtype == np.float32
-                            or audio_data.dtype == np.float64
-                        ):
-                            audio_bytes = (
-                                (audio_data * 32767).astype(np.int16).tobytes()
-                            )
-                        else:
-                            audio_bytes = audio_data.astype(np.int16).tobytes()
+                        audio_bytes = _convert_frame_to_pcm16_mono_16k(frame)
+                        if not audio_bytes:
+                            continue
 
                         # → Deepgram STT 전송
                         from deepgram.extensions.types.sockets import (
@@ -6815,23 +7381,23 @@ async def _process_audio_with_stt(track, session_id: str):
         return
 
     try:
-        import numpy as np
-
         # Deepgram WebSocket 연결 (SDK v5.3.2 스타일)
         # _process_audio_with_stt_and_recording 과 동일한 설정 유지
-        with deepgram_client.listen.v1.connect(
-            model="nova-3",
-            language="ko",
-            smart_format=True,
-            encoding="linear16",
-            sample_rate=16000,
-            punctuate=True,
-            interim_results=True,
-            vad_events=True,
-            diarize=True,  # 화자 분리 활성화
-            endpointing=500,  # 발화 종료 판단 500ms
-            utterance_end_ms=1000,  # 1초 침묵 시 UtteranceEnd 이벤트 전송
-        ) as dg_connection:
+        with (
+            deepgram_client.listen.v1.connect(
+                model="nova-3",
+                language="ko",
+                smart_format=True,
+                encoding="linear16",
+                sample_rate=16000,
+                punctuate=True,
+                interim_results=True,
+                vad_events=True,
+                diarize=False,  # 1인 면접 서비스: 화자 분리 비활성화
+                endpointing=1100,  # 발화 종료 판단 1100ms (정확도 우선)
+                utterance_end_ms=2200,  # 2.2초 침묵 시 UtteranceEnd 이벤트 전송 (단어 절단 완화)
+            ) as dg_connection
+        ):
             # 이벤트 핸들러 정의
             def on_message(message) -> None:
                 """STT 결과 처리 및 WebSocket으로 클라이언트에 전송"""
@@ -6885,6 +7451,14 @@ async def _process_audio_with_stt(track, session_id: str):
                                     for w in raw_words
                                 ]
 
+                    _update_stt_quality_from_message(
+                        session_id,
+                        is_final=is_final,
+                        transcript=transcript,
+                        confidence=confidence,
+                        words=words_list,
+                    )
+
                     if transcript:
                         # 발화 분석 서비스에 STT 결과 전달
                         if SPEECH_ANALYSIS_AVAILABLE and speech_service:
@@ -6899,15 +7473,12 @@ async def _process_audio_with_stt(track, session_id: str):
                             except Exception as e:
                                 print(f"[SpeechAnalysis] 데이터 전달 오류: {e}")
 
-                        # 최종 결과에 한국어 띄어쓰기 보정 적용
-                        if (
-                            is_final
-                            and SPACING_CORRECTION_AVAILABLE
-                            and _spacing_corrector
-                        ):
-                            corrected = _spacing_corrector.correct(transcript)
-                            if corrected and corrected.strip():
-                                transcript = corrected
+                        spacing_result = _apply_spacing_correction_with_policy(
+                            transcript,
+                            is_final=is_final,
+                            words=words_list,
+                        )
+                        output_transcript = spacing_result["transcript"]
 
                         # 비동기 브로드캐스트를 위해 이벤트 루프에 태스크 추가
                         asyncio.create_task(
@@ -6915,8 +7486,17 @@ async def _process_audio_with_stt(track, session_id: str):
                                 session_id,
                                 {
                                     "type": "stt_result",
-                                    "transcript": transcript,
+                                    "transcript": output_transcript,
+                                    "raw_transcript": spacing_result["raw_transcript"],
+                                    "corrected_transcript": spacing_result[
+                                        "corrected_transcript"
+                                    ],
+                                    "spacing_applied": spacing_result[
+                                        "spacing_applied"
+                                    ],
+                                    "spacing_mode": spacing_result["spacing_mode"],
                                     "is_final": is_final,
+                                    "source": "deepgram",
                                     "timestamp": time.time(),
                                 },
                             )
@@ -6943,6 +7523,7 @@ async def _process_audio_with_stt(track, session_id: str):
             def on_utterance_end(utterance_end_msg) -> None:
                 """발화 종료 감지 — utterance_end_ms 침묵 후 Deepgram이 전송"""
                 try:
+                    _update_stt_quality_on_utterance_end(session_id)
                     asyncio.create_task(
                         broadcast_stt_result(
                             session_id,
@@ -6979,17 +7560,9 @@ async def _process_audio_with_stt(track, session_id: str):
                     frame = await track.recv()
                     # aiortc 오디오 프레임을 raw PCM으로 변환
                     try:
-                        audio_data = frame.to_ndarray()
-                        # 16bit PCM으로 변환
-                        if (
-                            audio_data.dtype == np.float32
-                            or audio_data.dtype == np.float64
-                        ):
-                            audio_bytes = (
-                                (audio_data * 32767).astype(np.int16).tobytes()
-                            )
-                        else:
-                            audio_bytes = audio_data.astype(np.int16).tobytes()
+                        audio_bytes = _convert_frame_to_pcm16_mono_16k(frame)
+                        if not audio_bytes:
+                            continue
 
                         # Deepgram에 오디오 전송
                         from deepgram.extensions.types.sockets import (
@@ -7026,6 +7599,23 @@ async def _process_audio_with_stt(track, session_id: str):
 
 async def broadcast_stt_result(session_id: str, data: dict):
     """세션의 모든 WebSocket 클라이언트에 STT 결과 브로드캐스트"""
+    if (
+        STT_RUNTIME_CHECK_LOG
+        and data.get("type") == "stt_result"
+        and data.get("is_final")
+    ):
+        transcript = str(data.get("transcript", "")).strip()
+        if transcript:
+            normalized = re.sub(r"\s+", " ", transcript).lower()
+            previous = _stt_last_final_by_session.get(session_id, "")
+            is_duplicate_candidate = normalized == previous
+            print(
+                f"[STT-CHECK][broadcast][{data.get('source', 'unknown')}] "
+                f"session={session_id[:8]} dup={'Y' if is_duplicate_candidate else 'N'} "
+                f'text="{transcript[:60]}"'
+            )
+            _stt_last_final_by_session[session_id] = normalized
+
     if session_id not in state.websocket_connections:
         return
 
@@ -7042,6 +7632,9 @@ async def broadcast_stt_result(session_id: str, data: dict):
 
 
 # ========== 녹화 / 트랜스코딩 API ==========
+
+
+_stt_last_final_by_session: Dict[str, str] = {}
 
 
 @app.post("/api/recording/{session_id}/start")
@@ -7246,6 +7839,15 @@ async def websocket_interview(
 
     print(f"[WS] 세션 {session_id} WebSocket 연결됨 (사용자: {ws_user_email})")
 
+    server_stt_available = DEEPGRAM_AVAILABLE or (
+        WHISPER_AVAILABLE and whisper_service is not None
+    )
+    if STT_RUNTIME_CHECK_LOG:
+        print(
+            f"[STT-CHECK][source-select] session={session_id[:8]} "
+            f"server_stt={'on' if server_stt_available else 'off'}"
+        )
+
     # 📤 EventBus에 WebSocket 등록 (이벤트 기반 WS 브로드캐스트 지원)
     if EVENT_BUS_AVAILABLE and event_bus:
         event_bus.register_ws(session_id, websocket)
@@ -7257,7 +7859,7 @@ async def websocket_interview(
                 "type": "connected",
                 "session_id": session_id,
                 "user": ws_user_email,
-                "stt_available": DEEPGRAM_AVAILABLE,
+                "stt_available": server_stt_available,
             }
         )
 
@@ -7280,6 +7882,9 @@ async def websocket_interview(
         if session_id in state.websocket_connections:
             if websocket in state.websocket_connections[session_id]:
                 state.websocket_connections[session_id].remove(websocket)
+            if not state.websocket_connections[session_id]:
+                _stt_last_final_by_session.pop(session_id, None)
+                _stt_quality_by_session.pop(session_id, None)
         # EventBus에서 WebSocket 해제
         if EVENT_BUS_AVAILABLE and event_bus:
             event_bus.unregister_ws(session_id, websocket)
@@ -7393,6 +7998,8 @@ async def get_status(current_user: Optional[Dict] = Depends(get_current_user_opt
             "stt": DEEPGRAM_AVAILABLE,
             "stt_whisper_fallback": WHISPER_AVAILABLE,
             "stt_spacing_correction": SPACING_CORRECTION_AVAILABLE,
+            "stt_spacing_mode": STT_SPACING_MODE,
+            "llm_korean_guard": LLM_KOREAN_GUARD_ENABLED,
             "rag": RAG_AVAILABLE,
             "emotion": EMOTION_AVAILABLE,
             "redis": REDIS_AVAILABLE,
@@ -7431,6 +8038,28 @@ async def get_stt_status(
         if DEEPGRAM_AVAILABLE
         else ("whisper" if WHISPER_AVAILABLE else "none"),
         "spacing_correction": SPACING_CORRECTION_AVAILABLE,
+        "spacing_mode": STT_SPACING_MODE,
+        "spacing_safe_policy": {
+            "min_chars": STT_SPACING_MIN_CHARS,
+            "low_confidence_threshold": STT_SPACING_LOW_CONFIDENCE,
+            "high_std_threshold": STT_SPACING_HIGH_STD,
+            "protect_tech_tokens": STT_SPACING_PROTECT_TECH_TOKENS,
+        },
+        "quality_logging": {
+            "enabled": STT_QUALITY_LOG_ENABLED,
+            "log_every_final": STT_QUALITY_LOG_EVERY_FINAL,
+            "log_every_utterance_end": STT_QUALITY_LOG_EVERY_UTTERANCE,
+            "active_quality_sessions": len(_stt_quality_by_session),
+        },
+        "quality_snapshot": {
+            sid[:8]: _snapshot_stt_quality_metrics(sid)
+            for sid in list(_stt_quality_by_session.keys())[:5]
+        },
+        "llm_korean_guard": {
+            "enabled": LLM_KOREAN_GUARD_ENABLED,
+            "min_ratio": LLM_KOREAN_MIN_RATIO,
+            "max_retries": LLM_KOREAN_MAX_RETRIES,
+        },
     }
     if WHISPER_AVAILABLE and whisper_service:
         status["fallback"].update(whisper_service.get_status())
