@@ -801,6 +801,12 @@ function InterviewPageInner() {
 
   // ========== 면접 종료 ==========
   const endInterview = async () => {
+    const closingMessage = "답변 감사합니다. 오늘 면접을 마치겠습니다. 수고하셨습니다.";
+    setMessages(prev => [...prev, { role: "ai", text: closingMessage }]);
+    try {
+      await speakQuestion(closingMessage);
+    } catch { /* ignore */ }
+
     setInterviewStarted(false);
     setActiveSession(false); // 면접 종료 → Auth 유휴 타임아웃 재활성화
     recognitionRef.current?.stop();
