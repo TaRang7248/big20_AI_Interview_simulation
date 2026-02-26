@@ -121,7 +121,8 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 
 ### 핵심 기술 (AI & Backend)
 - **FastAPI**: 고성능 비동기 웹 프레임워크 (백엔드 서버)
-- **Google Gemini 2.0 Flash**: 면접 질문 생성, 답변 분석, 평가(LLM) 및 **음성 인식(STT)** 통합 모델 - **[NEW]** All-in-One AI 적용
+- **Google Web Speech API**: 실시간 음성 인식을 위한 메인 STT 엔진 (SpeechRecognition 라이브러리 활용) **[NEW]**
+- **Google Gemini 2.0 Flash**: 면접 질문 생성, 답변 분석, 평가(LLM) 통합 모델 - **[NEW]** All-in-One AI 적용
 - **LangChain**: LLM 오케스트레이션 및 프롬프트 관리
 - **Uvicorn**: ASGI 웹 서버
 - **numpy==1.26.2**: 특정 버전 고정 (바이너리 호환성 해결) **[UPDATED]**
@@ -131,7 +132,7 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 - **onnx==1.15.0 / onnxruntime==1.17.1**: ml_dtypes 호환성 문제 해결을 위해 버전 고정 **[NEW]**
 
 ### 음성 및 멀티미디어
-- **Google Gemini (Multimodal)**: 고성능 음성 인식 (STT) - [유지]
+- **Google Web Speech API**: 안정적인 온라인 음성 인식 (STT) - [교체] 기존 Gemini STT를 대체
 - **OpenAI Whisper**: 음성 인식 (STT) 교차 검증용 모델 - **[NEW]** Gemini와 결과 비교
 - **Python Levenshtein**: 두 STT 결과 간의 유사도 정밀 분석 **[NEW]**
 - **gTTS**: 안정적인 구글 기반 음성 합성 (TTS) - **[UPDATED]** 기존 Edge-TTS의 403 연결 오류 대체
@@ -217,7 +218,7 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
 
 ## 7. 최근 추가/변경된 기능
 - **STT/LLM 모델 통합**: OpenAI Whisper 및 GPT-4o를 **Google Gemini 2.0 Flash**로 전면 교체하여 비용 효율성과 처리 속도를 개선했습니다.
-- **음성 인식(STT) 강화**: Gemini Multimodal 기능을 활용하여 음성 파일의 유효성을 검사하고, 인식 실패 시 재시도하거나 명확한 에러 메시지를 반환하도록 개선했습니다.
+- **음성 인식(STT) 엔진 교체**: 기존 Gemini Multimodal 기반 STT를 **Google Web Speech API**로 교체하여 한국어 인식의 범용성과 안정성을 높였습니다.
 - **질문 생성 로직 개선**: Gemini 2.0 Flash의 JSON 출력 안정성을 확보하기 위해 마크다운 정리 로직(`clean_json_string`)과 재시도 메커니즘을 추가했습니다.
 - **Rate Limit 대응**: 무료 등급 사용 시 발생할 수 있는 할당량 초과(429 Error)에 대비하여 지수 백오프(Exponential Backoff) 기반의 재시도 로직을 구현했습니다.
 - **테스트 스크립트 정리**: `scripts/check_env.py` 및 `tests/manual_verification/` 하위 스크립트를 통해 각 기능을 독립적으로 검증할 수 있습니다.
@@ -233,7 +234,7 @@ Docker가 설치되어 있다면, 다음 명령어로 간편하게 실행할 수
     - **목소리 떨림 (Pitch Jitter & Shimmer)**: `Parselmouth`를 사용하여 목소리의 미세한 떨림과 진폭 변동을 수치화해 긴장도를 분석합니다.
     - **말하기 속도 (Speech Rate)**: 전사된 글자 수와 시간을 비교하여 말이 너무 빠르거나 느린지 판단합니다.
 - **STT 전사 로직 고도화**: 
-    - Gemini와 Whisper 결과를 비교하여 최적의 답변을 선택하는 스마트 엔진을 적용했습니다.
+    - **STT 교차 검증**: Google Web Speech와 Whisper 결과를 비교하여 최적의 답변을 선택하는 스마트 엔진을 적용했습니다.
     - **간투사 보존 우선**: "어", "음", "그" 등 면접의 생동감을 나타내는 간투사를 더 많이 포함한 결과를 우선적으로 선택합니다.
     - **답변 없음 처리**: 두 모델 모두 결과가 없거나 "답변 없음"인 경우를 정밀하게 판별합니다.
     - **정보량 위주 선택**: 포함 관계가 성립하거나 길이가 10자 미만인 짧은 결과에 대해 패널티를 부여하고 더 상세한(긴) 결과를 선택합니다.
