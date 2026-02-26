@@ -19,6 +19,10 @@ class InterviewSession(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     thread_id = Column(String, unique=True, index=True)  # LangGraph의 thread_id와 매핑
+
+    user_id = Column(Integer, index=True)
+    resume_id = Column(Integer, index=True)
+
     candidate_name = Column(String, nullable=True)
     status = Column(String, default="in_progress")       # in_progress, completed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -55,3 +59,12 @@ class EvaluationReport(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     session = relationship("InterviewSession", back_populates="report")
+
+# Resume 테이블 분리 # 여러번 면접을 보려면 필요
+class Resume(Base):
+    __tablename__ = "resumes"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, index=True)
+    filename = Column(String)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

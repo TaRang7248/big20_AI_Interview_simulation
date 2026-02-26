@@ -14,18 +14,18 @@ from pydantic import BaseModel
 from langchain_core.messages import HumanMessage
 
 # 프로젝트 모듈 임포트
-from YJH.agents.interview_graph import app as interview_graph
+from YYR.agents.interview_graph import app as interview_graph
 from YYR.services.voice_service import transcribe_audio
-from YJH.services.tts_service import generate_audio
-from YJH.database import get_db, SessionLocal
+from YYR.services.tts_service import generate_audio
+from YYR.database import get_db, SessionLocal
 # [수정] EvaluationReport 모델 추가 임포트
-from YJH.models import InterviewSession, Transcript, EvaluationReport
+from YYR.models import InterviewSession, Transcript, EvaluationReport
 # [수정] 리포트 생성 서비스 추가 임포트
-from YJH.services.report_service import generate_interview_report
+from YYR.services.report_service import generate_interview_report
 # [추가] 비디오 면접(Video Interview)
-from YJH.services.vision_service import analyze_face_emotion
+from YYR.services.vision_service import analyze_face_emotion
 # [추가] 업로드 API 추가 및 RAG 연동 임포트
-from YJH.services.rag_service import process_resume_pdf, get_relevant_context
+from YYR.services.rag_service import process_resume_pdf, get_relevant_context
 # 이전 세션이 준 새로운 import
 from sqlalchemy import text
 
