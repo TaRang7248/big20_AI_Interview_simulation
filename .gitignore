@@ -11,7 +11,7 @@ evaluate_and_fix_answers.py
 generate_answers.py
 # local data
 YYR/data/
-YYR/uploads
+uploads/
 
 # Distribution / packaging
 .Python

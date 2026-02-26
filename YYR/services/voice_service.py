@@ -18,6 +18,7 @@ from typing import Optional
 import httpx
 from dotenv import load_dotenv
 from google.cloud import speech
+from google.oauth2 import service_account
 
 load_dotenv()
 
@@ -33,9 +34,20 @@ async def transcribe_audio(audio_bytes: bytes, mimetype: str = "audio/webm") -> 
     오디오 바이트를 텍스트로 변환해서 반환.
     기본: Google Cloud STT
     """
+
     text = await _transcribe_with_google_cloud(audio_bytes, mimetype)
     return (text or "").strip()
+    
+    # 🔐 안전장치 로그
+    logger.info(
+        "[STT] provider=google-cloud-speech | "
+        f"mimetype={mimetype} | "
+        f"GOOGLE_APPLICATION_CREDENTIALS="
+        f"{'set' if os.getenv('GOOGLE_APPLICATION_CREDENTIALS') else 'unset'}"
+    )
 
+    text = await _transcribe_with_google_cloud(audio_bytes, mimetype)
+    return (text or "").strip()
 
 def handle_web_speech_transcript(transcript: str) -> str:
     """
@@ -74,23 +86,32 @@ def _guess_sample_rate(encoding: speech.RecognitionConfig.AudioEncoding) -> int:
     return 16000
 
 
+from google.oauth2 import service_account
+
 def _sync_google_stt(audio_bytes: bytes, mimetype: str) -> str:
     """
     google-cloud-speech SDK는 동기라서 동기 함수로 구현 후,
     async wrapper에서 to_thread로 호출한다.
     """
-    client = speech.SpeechClient()
 
+    # 1) 서비스계정 키 직접 로드 (ADC 우회)
+    sa_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if not sa_path or not os.path.exists(sa_path):
+        raise RuntimeError(f"Service account JSON not found: {sa_path}")
+
+    creds = service_account.Credentials.from_service_account_file(sa_path)
+    client = speech.SpeechClient(credentials=creds)
+
+    # 2) encoding / sample rate 정의
     encoding = _guess_google_encoding(mimetype)
     sample_rate_hertz = _guess_sample_rate(encoding)
 
+    # 3) STT 설정
     config = speech.RecognitionConfig(
         encoding=encoding,
         sample_rate_hertz=sample_rate_hertz,
         language_code="ko-KR",
         enable_automatic_punctuation=True,
-        # 필요하면 옵션 추가 가능:
-        # model="latest_long",
     )
 
     audio = speech.RecognitionAudio(content=audio_bytes)
@@ -99,7 +120,6 @@ def _sync_google_stt(audio_bytes: bytes, mimetype: str) -> str:
     if not response.results:
         return ""
 
-    # 모든 결과를 합쳐서 반환 (짧은 발화도 누락 덜함)
     parts = []
     for r in response.results:
         if r.alternatives:

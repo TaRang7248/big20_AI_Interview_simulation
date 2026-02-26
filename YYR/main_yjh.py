@@ -367,6 +367,49 @@ async def list_jobs():
     finally:
         db.close()
 
+# [추가] 공고 등록 API (POST /admin/jobs)
+from pydantic import BaseModel, Field
+
+class JobCreateRequest(BaseModel):
+    job_code: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    status: str = "모집중"          # 모집중 | 마감 | 임시저장
+    applicants: int = 0
+
+@app.post("/admin/jobs")
+async def create_job(payload: JobCreateRequest):
+    db = SessionLocal()
+    try:
+        # job_code 중복이면 업데이트(UPSERT) / 없으면 삽입
+        row = db.execute(
+            text("""
+                INSERT INTO jobs (job_code, title, status, applicants, updated_at, created_at)
+                VALUES (:job_code, :title, :status, :applicants, NOW(), NOW())
+                ON CONFLICT (job_code) DO UPDATE
+                SET title = EXCLUDED.title,
+                    status = EXCLUDED.status,
+                    applicants = EXCLUDED.applicants,
+                    updated_at = NOW()
+                RETURNING id, job_code, title, status, applicants, updated_at, created_at
+            """),
+            {
+                "job_code": payload.job_code.strip(),
+                "title": payload.title.strip(),
+                "status": payload.status,
+                "applicants": int(payload.applicants or 0),
+            }
+        ).mappings().first()
+
+        db.commit()
+        return {"status": "success", "job": dict(row) if row else None}
+
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 from pydantic import BaseModel
 from typing import Optional
 
