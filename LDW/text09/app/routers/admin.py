@@ -90,3 +90,34 @@ def get_applicant_details(interview_number: str):
         }
     finally:
         conn.close()
+
+@router.delete("/applicants/{interview_number}")
+def delete_applicant(interview_number: str):
+    """
+    지원자 면접 정보를 삭제하는 API 엔드포인트
+    """
+    conn = get_db_connection()
+    try:
+        c = conn.cursor()
+        
+        # 삭제할 데이터 유무 확인
+        c.execute("SELECT id_name FROM Interview_Result WHERE interview_number = %s", (interview_number,))
+        result = c.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="해당 면접 정보를 찾을 수 없습니다.")
+        
+        # Interview_Result 삭제 (연계된 다른 테이블이 있다면 쿼리 추가 필요)
+        c.execute("DELETE FROM Interview_Result WHERE interview_number = %s", (interview_number,))
+        
+        # Interview_Progress 삭제
+        c.execute("DELETE FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
+        
+        # 트랜잭션 적용
+        conn.commit()
+        return {"success": True, "message": "지원자 정보가 삭제되었습니다."}
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"지원자 삭제 오류 (Applicant Delete Error): {e}")
+        raise HTTPException(status_code=500, detail="삭제 중 오류가 발생했습니다.")
+    finally:
+        conn.close()

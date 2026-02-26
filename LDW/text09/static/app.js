@@ -1555,17 +1555,42 @@ function renderAdminApplicantList(applicants) {
     applicants.forEach(app => {
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td>${app.applicant_name} <br><span style="font-size: 0.8em; color: gray;">(${app.email || '이메일 미등록'})</span></td>
+            <td>${app.applicant_name} <br><span style="font-size: 0.8em; color: gray;">(req)</span></td>
             <td>${app.announcement_title}</td>
             <td>${app.announcement_job}</td>
             <td>${app.interview_time}</td>
             <td>
                 <button class="btn-small" onclick="showApplicantDetail('${app.interview_number}')">상세보기</button>
+                <button class="btn-small" onclick="deleteApplicant('${app.interview_number}')" style="background-color: #e74c3c; color: white;">삭제</button>
             </td>
         `;
+        // 이메일 유지
+        tr.innerHTML = tr.innerHTML.replace('(req)', app.email || '이메일 미등록');
         tbody.appendChild(tr);
     });
 }
+
+window.deleteApplicant = async (interviewNumber) => {
+    if (!confirm('해당 지원자의 면접 정보를 정말 삭제하시겠습니까?')) return;
+
+    try {
+        const response = await fetch(`/api/admin/applicants/${interviewNumber}`, {
+            method: 'DELETE'
+        });
+        const result = await response.json();
+
+        if (result.success) {
+            showToast(result.message || '삭제가 완료되었습니다.', 'success');
+            // 목록 새로고침
+            fetchAdminApplicants();
+        } else {
+            showToast(result.message || '삭제에 실패했습니다.', 'error');
+        }
+    } catch (error) {
+        console.error('삭제 중 오류 발생:', error);
+        showToast('서버 통신 오류가 발생했습니다.', 'error');
+    }
+};
 
 window.showApplicantDetail = async (interviewNumber) => {
     try {
