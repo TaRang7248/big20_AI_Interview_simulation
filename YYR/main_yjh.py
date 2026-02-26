@@ -349,6 +349,60 @@ async def debug_db():
     finally:
         db.close()
 
+@app.get("/admin/jobs")
+async def list_jobs():
+    db = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT id, job_code, title, status, applicants, updated_at, created_at
+            FROM jobs
+            ORDER BY created_at DESC
+        """)).mappings().all()
+
+        # rows는 RowMapping 리스트라 그대로 JSON으로 바꿔주면 됨
+        return {"status": "success", "jobs": [dict(r) for r in rows]}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+from pydantic import BaseModel
+from typing import Optional
+
+class JobUpsertRequest(BaseModel):
+    job_code: str
+    title: str
+    status: str = "모집중"       # 모집중 | 마감
+    applicants: int = 0
+
+@app.post("/admin/jobs")
+async def upsert_job(payload: JobUpsertRequest):
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text("""
+                INSERT INTO jobs (job_code, title, status, applicants)
+                VALUES (:job_code, :title, :status, :applicants)
+                ON CONFLICT (job_code) DO UPDATE
+                SET title = EXCLUDED.title,
+                    status = EXCLUDED.status,
+                    applicants = EXCLUDED.applicants,
+                    updated_at = NOW()
+                RETURNING id, job_code, title, status, applicants, updated_at, created_at
+            """),
+            payload.model_dump()
+        ).mappings().first()
+
+        db.commit()
+        return {"status": "success", "job": dict(row)}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
 
 # 다시 새로운 추가
 @app.get("/report/session/{session_id}/result")

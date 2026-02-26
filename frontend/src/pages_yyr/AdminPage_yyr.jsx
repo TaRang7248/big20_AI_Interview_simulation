@@ -1,9 +1,13 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useEffect, useState } from "react"; // 🔥(수정) useEffect, useState 추가 ✨
+import axios from "axios"; // 🔥(추가) API 호출용 ✨
 import { Link, useNavigate } from "react-router-dom";
 import { FaBriefcase, FaUsers, FaChartLine, FaArrowRight, FaRegClock, FaSignOutAlt } from "react-icons/fa";
 
+const API_BASE_URL = "http://127.0.0.1:8001"; // 🔥(추가) 백엔드 주소 ✨
+
 export default function AdminPage_yyr() {
     const nav = useNavigate();
+
     const handleLogout = () => {
         // App.jsx랑 동일한 방식
         localStorage.removeItem("auth_token");
@@ -11,33 +15,31 @@ export default function AdminPage_yyr() {
         nav("/login", { replace: true });
     };
 
-    // ✅ 더미 데이터(지금은 구조만 잡기)
-    const jobs = useMemo(
-        () => [
-            {
-                jobId: "JOB-001",
-                title: "백엔드 개발자 (FastAPI)",
-                status: "모집중", // 모집중 | 마감 | 임시저장
-                applicants: 12,
-                updatedAt: "2026-02-25",
-            },
-            {
-                jobId: "JOB-002",
-                title: "데이터 분석가 (SQL/BI)",
-                status: "모집중",
-                applicants: 7,
-                updatedAt: "2026-02-24",
-            },
-            {
-                jobId: "JOB-003",
-                title: "프론트엔드 개발자 (React)",
-                status: "마감",
-                applicants: 21,
-                updatedAt: "2026-02-20",
-            },
-        ],
-        []
-    );
+    // 🔥(수정) jobs: 더미(useMemo) 제거 → state로 관리 ✨
+    const [jobs, setJobs] = useState([]);
+    const [jobsLoading, setJobsLoading] = useState(false);
+    const [jobsError, setJobsError] = useState("");
+
+    // 🔥(추가) jobs를 백엔드에서 가져오기 ✨
+    useEffect(() => {
+        const fetchJobs = async () => {
+            setJobsLoading(true);
+            setJobsError("");
+            try {
+                const res = await axios.get(`${API_BASE_URL}/admin/jobs`);
+                const list = res.data?.jobs ?? [];
+                setJobs(list);
+            } catch (e) {
+                console.error("jobs fetch error:", e);
+                setJobsError("공고 목록을 불러오지 못했습니다. (백엔드 /admin/jobs 확인)");
+            } finally {
+                setJobsLoading(false);
+            }
+        };
+
+        fetchJobs();
+    }, []);
+    // ✨(추가 끝)✨
 
     const interviews = useMemo(
         () => [
@@ -72,10 +74,13 @@ export default function AdminPage_yyr() {
         []
     );
 
+    // 🔥(주의) jobs 데이터 구조가 DB 컬럼명으로 바뀌었으므로 여기서 그대로 사용 가능 ✨
+    // (jobs: { job_code, title, status, applicants, updated_at, ... })
+
     const stats = useMemo(() => {
         const openJobs = jobs.filter((j) => j.status === "모집중").length;
         const closedJobs = jobs.filter((j) => j.status === "마감").length;
-        const totalApplicants = jobs.reduce((sum, j) => sum + j.applicants, 0);
+        const totalApplicants = jobs.reduce((sum, j) => sum + (j.applicants ?? 0), 0);
         const completed = interviews.filter((i) => i.status === "완료").length;
         return { openJobs, closedJobs, totalApplicants, completed };
     }, [jobs, interviews]);
@@ -171,17 +176,26 @@ export default function AdminPage_yyr() {
                                 <p className="text-xs text-slate-500 font-semibold">Jobs</p>
                                 <p className="text-base font-extrabold mt-1">공고 상태</p>
                                 <p className="text-sm text-slate-500 mt-2">
-                                    (지금은 더미) 나중에 여기서 공고 생성/수정/마감까지 확장
+                                    (지금은 DB 연동) 나중에 여기서 공고 생성/수정/마감까지 확장
                                 </p>
                             </div>
                             <button
                                 type="button"
                                 className="px-3 py-2 rounded-xl bg-white/70 border border-white/60 hover:bg-white transition text-sm font-bold"
-                                onClick={() => alert("다음 단계: 공고 관리 페이지(/admin/jobs) 뼈대 추가")}
+                                onClick={() => nav("/admin/jobs")}
                             >
                                 + 공고 관리
                             </button>
                         </div>
+
+                        {/* 🔥(추가) 로딩/에러 표시 ✨ */}
+                        {jobsLoading && (
+                            <div className="mt-4 text-sm text-slate-500">공고 목록 불러오는 중...</div>
+                        )}
+                        {jobsError && (
+                            <div className="mt-4 text-sm font-bold text-rose-600">{jobsError}</div>
+                        )}
+                        {/* ✨(추가 끝)✨ */}
 
                         <div className="mt-5 overflow-x-auto">
                             <table className="w-full text-sm">
@@ -194,19 +208,23 @@ export default function AdminPage_yyr() {
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    {/* 🔥(수정) key / 표시 필드명을 DB 컬럼명으로 교체 ✨ */}
                                     {jobs.map((j) => (
-                                        <tr key={j.jobId} className="border-t border-white/60">
+                                        <tr key={j.job_code} className="border-t border-white/60">
                                             <td className="py-3 pr-3">
                                                 <span className={badge(j.status)}>{j.status}</span>
                                             </td>
                                             <td className="py-3 pr-3">
                                                 <div className="font-bold text-slate-900">{j.title}</div>
-                                                <div className="text-xs text-slate-500">{j.jobId}</div>
+                                                <div className="text-xs text-slate-500">{j.job_code}</div>
                                             </td>
                                             <td className="py-3 pr-3 font-bold">{j.applicants}</td>
-                                            <td className="py-3 pr-3 text-slate-600">{j.updatedAt}</td>
+                                            <td className="py-3 pr-3 text-slate-600">
+                                                {String(j.updated_at ?? "").slice(0, 10)}
+                                            </td>
                                         </tr>
                                     ))}
+                                    {/* ✨(수정 끝)✨ */}
                                 </tbody>
                             </table>
                         </div>

@@ -12,6 +12,7 @@ import InterviewPage_yyr from "./pages_yyr/InterviewPage_yyr";
 import ResultRoutePage_yyr from "./pages_yyr/ResultRoutePage_yyr";
 import RequireAdmin_yyr from "./pages_yyr/RequireAdmin_yyr";
 import AdminResultRoutePage_yyr from "./pages_yyr/AdminResultRoutePage_yyr";
+import AdminJobsPage_yyr from "./pages_yyr/AdminJobsPage_yyr";
 
 // 백엔드 주소
 const API_BASE_URL = "http://127.0.0.1:8001";
@@ -267,6 +268,14 @@ function App() {
         element={
           <RequireAdmin_yyr>
             <AdminResultRoutePage_yyr />
+          </RequireAdmin_yyr>
+        }
+      />
+      <Route
+        path="/admin/jobs"
+        element={
+          <RequireAdmin_yyr>
+            <AdminJobsPage_yyr />
           </RequireAdmin_yyr>
         }
       />
