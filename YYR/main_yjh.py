@@ -37,11 +37,13 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 정적 파일(생성된 mp3) 저장 폴더 준비
-os.makedirs("generated_audio", exist_ok=True)
+# YYR 폴더 기준으로 generated_audio 경로 통일
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+AUDIO_DIR = os.path.join(BASE_DIR, "generated_audio")
 
-# /generated_audio/xxx.mp3 로 접근 가능하게 마운트
-app.mount("/generated_audio", StaticFiles(directory="generated_audio"), name="generated_audio")
+os.makedirs(AUDIO_DIR, exist_ok=True)
+
+app.mount("/generated_audio", StaticFiles(directory=AUDIO_DIR), name="generated_audio")
 
 # CORS 미들웨어 설정 (app 생성 바로 아래에 추가)
 app.add_middleware(
@@ -158,13 +160,31 @@ async def chat_text_with_tts(req: TextChatRequest):
         # 3) DB 저장 (ai)
         save_transcript(db, req.thread_id, "ai", ai_text)
 
-        # 4) TTS 생성 (audio_outputs에 저장된 파일 경로 반환받기)
+                # 4) TTS 생성
         output_filename = f"response_{uuid.uuid4()}.mp3"
-        audio_path = await generate_audio(ai_text, output_file=output_filename)
+        audio_result = await generate_audio(ai_text, output_file=output_filename)
 
-        # 5) 프론트가 접근할 URL로 변환
-        # audio_path = ".../audio_outputs/response_xxx.mp3"
-        audio_url = f"/static/audio/{output_filename}"
+        # 5) 프론트가 접근할 URL 만들기 (안전 처리)
+        audio_url = None
+        if audio_result:
+            # (A) generate_audio가 이미 "/generated_audio/xxx.mp3" 형태로 주는 경우
+            if isinstance(audio_result, str) and audio_result.startswith("/generated_audio/"):
+                audio_url = audio_result
+
+            # (B) generate_audio가 파일 경로(C:\... / .../generated_audio/xxx.mp3)를 주는 경우
+            else:
+                # 파일이 실제로 존재하면, 현재 서버의 generated_audio 폴더로 복사(필요시)
+                if isinstance(audio_result, str) and os.path.exists(audio_result):
+                    target_path = os.path.join("generated_audio", output_filename)
+
+                    # 같은 파일이면 복사 생략, 다르면 복사
+                    if os.path.abspath(audio_result) != os.path.abspath(target_path):
+                        shutil.copy(audio_result, target_path)
+
+                # 어쨌든 서버는 /generated_audio 로 마운트되어 있으니 이 URL로 접근
+                audio_url = f"/generated_audio/{output_filename}"
+                print("✅ [TTS] target_path =", target_path)
+                print("✅ [TTS] exists? =", os.path.exists(target_path))
 
         return TextChatResponse(
             status="success",
@@ -240,7 +260,7 @@ async def chat_voice_audio_endpoint(
         audio_path = await generate_audio(ai_text, output_file=output_filename)
 
         # 🔴 mp3를 정적 폴더로 복사
-        target_path = os.path.join("generated_audio", output_filename)
+        target_path = os.path.join(AUDIO_DIR, output_filename)
         shutil.copy(audio_path, target_path)
 
         # 4. 파일 반환
