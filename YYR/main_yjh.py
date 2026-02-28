@@ -77,23 +77,70 @@ class ChatResponse(BaseModel):
 
 
 # --- [Helper] DB 저장 함수 ---
-def save_transcript(db, thread_id: str, sender: str, content: str):
-    """대화 내용을 DB에 저장하고 로그를 출력합니다."""
-    try:
-        # 1. 세션 찾기 (없으면 생성)
-        session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
-        if not session:
-            print(f"🆕 [DB] 새 세션 생성: {thread_id}")
-            session = InterviewSession(thread_id=thread_id, candidate_name="Unknown")
-            db.add(session)
-            db.commit()
-            db.refresh(session)
+from collections import defaultdict
+from datetime import datetime
 
-        # 2. 대화 기록 저장
-        transcript = Transcript(session_id=session.id, sender=sender, content=content)
-        db.add(transcript)
-        db.commit()
-        print(f"💾 [DB 저장] {sender}: {content[:30]}...")  # 로그 출력
+# ✅ 설정: 이 개수 미만이면 DB에 저장하지 않음(임시 버퍼만)
+MIN_TRANSCRIPTS_TO_PERSIST = 4  # human/ai 합쳐서 4개 이상이면 저장 시작
+
+# ✅ 임시 버퍼: thread_id별로 (sender, content, timestamp) 쌓기
+_TRANSCRIPT_BUFFER = defaultdict(list)
+_PERSIST_ENABLED = set()  # 저장이 "활성화"된 thread_id 집합
+
+
+def save_transcript(db, thread_id: str, sender: str, content: str):
+    """
+    (개선) 짧은 테스트 대화는 DB에 저장하지 않기 위해 버퍼링.
+    - thread_id별로 임시로 쌓아두다가,
+    - 누적 개수가 MIN_TRANSCRIPTS_TO_PERSIST 이상이 되면
+      -> 세션 생성 + 버퍼 전체를 DB에 한번에 저장하고,
+      -> 이후부터는 들어오는 대화는 즉시 DB에 저장.
+    """
+    try:
+        ts = datetime.now()
+
+        # 0) 이미 저장 활성화된 thread_id면 즉시 DB 저장
+        if thread_id in _PERSIST_ENABLED:
+            session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
+            if not session:
+                print(f"🆕 [DB] 새 세션 생성: {thread_id}")
+                session = InterviewSession(thread_id=thread_id, candidate_name="Unknown")
+                db.add(session)
+                db.commit()
+                db.refresh(session)
+
+            transcript = Transcript(session_id=session.id, sender=sender, content=content)
+            db.add(transcript)
+            db.commit()
+            print(f"💾 [DB 저장] {sender}: {content[:30]}...")
+            return
+
+        # 1) 아직 활성화 전이면 버퍼에만 쌓기
+        _TRANSCRIPT_BUFFER[thread_id].append((sender, content, ts))
+        buffered_count = len(_TRANSCRIPT_BUFFER[thread_id])
+        print(f"🧪 [BUFFER] {thread_id} buffered={buffered_count} (DB 저장 보류)")
+
+        # 2) 기준 넘으면: 세션 생성 + 버퍼 전체 DB 저장 + 저장 활성화
+        if buffered_count >= MIN_TRANSCRIPTS_TO_PERSIST:
+            session = db.query(InterviewSession).filter(InterviewSession.thread_id == thread_id).first()
+            if not session:
+                print(f"🆕 [DB] 새 세션 생성(버퍼 flush): {thread_id}")
+                session = InterviewSession(thread_id=thread_id, candidate_name="Unknown")
+                db.add(session)
+                db.commit()
+                db.refresh(session)
+
+            # 버퍼에 쌓인 것들을 순서대로 모두 저장
+            for s, c, _ in _TRANSCRIPT_BUFFER[thread_id]:
+                db.add(Transcript(session_id=session.id, sender=s, content=c))
+            db.commit()
+
+            # 활성화 및 버퍼 비우기
+            _PERSIST_ENABLED.add(thread_id)
+            _TRANSCRIPT_BUFFER.pop(thread_id, None)
+
+            print(f"✅ [DB] 버퍼 flush 완료 + 저장 활성화: {thread_id}")
+
     except Exception as e:
         print(f"❌ [DB 저장 실패] {e}")
         db.rollback()
