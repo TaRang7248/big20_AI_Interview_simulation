@@ -70,7 +70,7 @@
 - **TASK-035 (LLM Wiring Sprint) 완료**:
   - Status: DONE
   - Scope:
-    - Weight Sync wiring (Snapshot-first, Fail-Fast enforced)
+    - Weight Sync wiring (Snapshot-first, FAIL-FAST enforced)
     - PhaseManager Flow Contract runtime enforcement
     - Fixed Question insertion (verbatim, no LLM/RAG)
     - Resume Summary prompt injection (MAIN/FOLLOW_UP 조건부)
@@ -82,6 +82,25 @@
     - No Redis Write-Back
     - No runtime snapshot mutation
     - Deterministic distribution maintained
+
+### 2.9 Multimodal Layer (WebRTC Real-time) - 완료
+- Real-time Audio/Video ingestion
+- STT (Faster-Whisper, Resident)
+- Vision (MediaPipe 2-3FPS)
+- Emotion (DeepFace <1FPS)
+- Audio (Parselmouth window-based)
+- Redis Streams (At-least-once + Idempotent DB)
+- PostgreSQL multimodal_observations
+- SSE Projection
+- gTTS
+- PDF Snapshot Integration
+- GPU Mutex with Cooperative Yield
+- OOM Graceful Degradation
+
+**Contracts:**
+- Authority = PostgreSQL only
+- Projection = Non-authoritative
+- Evaluation Integration = Flag OFF (default)
 - 잔여 승격 조건:
   - DB 레벨 Snapshot Immutable 강제 및 UPSERT 갱신 경로 차단 (R-3 제거)
   - DB 레벨 tag_code 허용 값 제약 강화 (R-2 제거)
@@ -137,7 +156,12 @@
   - Faster-Whisper-v3-turbo를 공식 로컬 STT 엔진으로 확정. 
   - `initial_prompt` 기반 전문 용어(IT Key terms) 인식 최적화 완료.
   - Verification: `docs/STT_ENGINE_SELECTION_REPORT.md` (EXIT 0)
-- TASK-016 (TTS Provider): 스트리밍 아키텍처 연동 고려로 인해 일시 보류.
+- **TASK-M (Multimodal Integration MVP)**: [DONE]
+  - Sprint 1-4 완료. Fast Gate 53/53 PASS.
+  - multimodal_observations 테이블 신설 및 멱등성 확보.
+  - Redis Streams, GPU Mutex, STT/Vision/Emotion/Audio Workers, WebRTC API 구현 완료.
+  - Verification: `scripts/verify_mm_cli.py` Pass.
+- TASK-016 (TTS Provider): 스트리밍 아키텍처 연동 기능이 TASK-M에 통합되어 완료됨. (gTTS Facade)
 
 
 ---

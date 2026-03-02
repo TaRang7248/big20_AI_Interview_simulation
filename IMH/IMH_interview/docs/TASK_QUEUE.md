@@ -330,6 +330,26 @@
 ---
 
 
+### TASK-M: Multimodal Integration (WebRTC Real-time MVP)
+- Goal: 실시간 멀티모달(WebRTC, STT, Vision, Emotion, Audio) 분석 파이프라인 구축 및 API 연동.
+- Scope: WebRTC Signaling, Redis Streams, GPU Mutex, Analysis Workers, Projection/SSE API.
+- Verification: python scripts/verify_mm_cli.py Pass
+- Status: DONE
+
+---
+
+## BACKLOG
+
+### TASK-FRONT-001: WebRTC Frontend MVP 구현
+- Goal: 백엔드 멀티모달 API를 소비하는 프론트엔드 연동 개발.
+- Scope:
+    - WebRTC Frontend MVP 구현
+    - Projection Dashboard (Gaze/Emotion)
+    - TTS Audio Playback
+    - Resume Upload UI
+    - Session Lifecycle UI
+- Status: BACKLOG
+
 ---
 
 ### TASK-032 tag_code 허용 값 제약 및 무결성 강화

@@ -5,19 +5,25 @@
 
 ---
 
-# 1. 시스템 아키텍처 현재 상태
+### Active Runtime Components
 
-| 계층 | 상세 내용 | 구현 위치 | 기술 스택 |
-| :--- | :--- | :--- | :--- |
-| **Backend** | FastAPI 기반 비동기 API 서버 | `IMH/IMH_Interview/IMH/api/` | FastAPI |
-| **Service** | 유스케이스 오케스트레이션 & 트랜잭션 경계 | `packages/imh_service/session_service.py` | Python 3.10 |
-| **Domain** | 세션 상태 엔진 및 공고 정책 관리 | `packages/imh_session/`, `packages/imh_job/` | Pydantic v2 |
-| **Repository** | PostgreSQL 영속화 및 Redis 캐시 레이어 | `packages/imh_session/repository.py` | SQLAlchemy, Redis |
-| **Redis Runtime** | 분산 락, 런타임 미러링, 프로젝션 최적화 | `packages/imh_service/infra/` | Redis (No Write-Back) |
-| **PostgreSQL** | **단일 권위 저장소 (Source of Truth)** | `IMH/alembic/versions/` | PostgreSQL 16+, pgvector |
-| **LLM Provider** | Ollama 및 OpenAI 어댑터 구조 | `packages/imh_providers/llm/` | Ollama, OpenAI API |
-| **STT Provider** | 로컬 Faster-Whisper 엔진 (v3-turbo) | `packages/imh_providers/stt/` | Faster-Whisper |
-| **평가 엔진** | 루브릭 기반 정량/정성 동기 평가 | `packages/imh_eval/engine.py` | Python |
+- **Ollama LLM**: `exaone3.5:2.4b` (Main Reasoning)
+- **Faster-Whisper**: GPU Resident (v3-turbo)
+- **Redis**: Streams (MM Data) + Pub/Sub (SSE) + Mutex (GPU/Concurrent)
+- **PostgreSQL**: Authority Persistence
+- **CPU Workers**: Vision (MediaPipe), Emotion (DeepFace), Audio (Parselmouth)
+- **SSE Broadcaster**: Real-time Projection push
+- **WebRTC Signaling**: SDP Offer/Answer Endpoint
+
+### Runtime Constraints
+
+- **Hardware**: GTX 1660 Super 6GB
+- **Concurrency**: Max 5 concurrent sessions (due to VRAM limits)
+- **Redis Streams**: `MAXLEN ~10,000` per session
+- **Persistence**: 5-min temp TTL for buffers
+- **GPU Mutex**: STT Yield to LLM, Soft Degrade after 3 failures
+- **Neutral Default**: 0.5 for all normalized metrics
+- **STT Privacy**: Raw text excluded from DB (Projection only, masked)
 
 **[위험 요소]**: 
 - Redis 미러링 실패 시 PG로부터의 Hydration 경로가 존재하나, 고부하 상황에서 성능 검증 필요.

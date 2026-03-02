@@ -1181,3 +1181,30 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
     - **Snapshot Authority**: 모든 가중치와 고정 질문은 Snapshot 데이터를 유일한 권위로 사용.
     - **No Write-Back**: 런타임 중 Snapshot 수정 또는 Redis 역류 쓰기 없음.
     - **Deterministic**: 질문 분배 및 고정 질문 삽입 위치가 결정론적으로 작동함.
+
+---
+
+## 2026-03-03
+
+### TASK-M: Multimodal Integration (WebRTC Real-time MVP)
+- **요약**: WebRTC 기반 실시간 멀티모달 분석 파이프라인 및 인터페이스 구축 완료.
+- **변경 사항**:
+    - **WebRTC Signaling**: `IMH/api/multimodal.py` 신설. Full SDP Exchange (Offer/Answer) 구현.
+    - **Redis Streams**: 분석용 고빈도 데이터 전송 패키지(`imh_multimodal/redis_streams.py`) 및 스트림 관리 로직 구현.
+    - **Persistence**: `multimodal_observations` 테이블 신설 (idempotent INSERT via `signal_id`).
+    - **GPU Mutex**: `GPUMutexManager` 구현. LLM > STT 우선순위, Cooperative Yield 및 Orphan Recovery 정책 적용.
+    - **Analysis Workers**: STT(Whisper), Vision(MediaPipe), Emotion(DeepFace), Audio(Parselmouth) 실시간 분석 워커 구현 (Stub -> Real Wiring 완료).
+    - **TTS & PDF**: gTTS 통합(Cache/Non-blocking) 및 PDF 텍스트 추출 가드레일(Size/Page limit) 적용.
+    - **Projection & SSE**: Redis 기반 비권위 프로젝션 캐시 및 SSE(`text/event-stream`) 실시간 푸시 엔드포인트 구현.
+- **검증 증거**:
+    - **주요 검수 (scripts/verify_mm_cli.py)**: V1~V6 PASS (Lifecycle, STT Partial, Gaze/Video, Mutex, TTS, PDF)
+    - **Fast Gate (scripts/test_task_m_sprint23_fast_gate.py)**: FG-M7~M12 PASS (WebRTC Setup, SSE Latency, Mutex Robustness, STT Drop, gTTS Cache, PDF Safety)
+    - **DB Migration**: `scripts/migrate_task_m_sprint1.py` EXIT 0.
+- **비고**:
+    - **GTX 1660 Super 6GB** 최적화: 동시 세션 5개 제한.
+    - **Security**: STT 원문 텍스트 DB 저장 금지 계약 준수 (프로젝션 전용, PII 마스킹 적용).
+    - **TURN/Trickle ICE**: Phase 2 확장 범위로 제외.
+- **계약 준수**:
+    - **Authority**: PostgreSQL이 유일한 권위 저장소임을 유지 (`multimodal_observations`).
+    - **No Write-Back**: Redis Projection은 오직 Read-Only 최적화 용도로만 사용됨.
+    - **Idempotency**: `signal_id` 기반 멱등 쓰기 정책 준수.

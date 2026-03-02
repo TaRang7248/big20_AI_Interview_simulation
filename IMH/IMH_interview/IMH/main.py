@@ -17,6 +17,7 @@ from IMH.api.auth import router as auth_router
 from IMH.api.jobs import router as jobs_router
 from IMH.api.interviews import router as interviews_router
 from IMH.api.resume import router as resume_router
+from IMH.api.multimodal import router as multimodal_router
 
 
 def create_app() -> FastAPI:
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs_router, prefix="/api/v1")
     app.include_router(interviews_router, prefix="/api/v1")
     app.include_router(resume_router, prefix="/api/v1")
+    app.include_router(multimodal_router, prefix="/api/v1")
     # Legacy routes kept for compatibility
     app.include_router(session_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")

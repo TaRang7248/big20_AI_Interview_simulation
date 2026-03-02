@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TASK-M Multimodal Verification Client (Minimal)</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #f4f7f6; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+        h1 { margin-top: 0; font-weight: 700; color: #2c3e50; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 600; }
+        input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; margin-top: 5px; box-sizing: border-box; }
+        button { background: #3498db; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; transition: background 0.3s; width: 100%; margin-top: 10px; }
+        button:hover { background: #2980b9; }
+        button:disabled { background: #bdc3c7; cursor: not-allowed; }
+        .status { padding: 12px; border-radius: 8px; margin-top: 20px; font-weight: 500; font-size: 14px; }
+        .status.connected { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .status.error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .status.disconnected { background: #e2e3e5; color: #383d41; border: 1px solid #d6d8db; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-top: 30px; }
+        video { width: 100%; border-radius: 8px; background: #000; }
+        .metrics-card { padding: 15px; border-radius: 8px; background: #f8f9fa; border: 1px solid #eee; }
+        .metric-item { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; border-bottom: 1px solid #f0f0f0; padding-bottom: 4px; }
+        pre { background: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 12px; white-space: pre-wrap; word-wrap: break-word; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>TASK-M Verification Tool</h1>
+    <p>본 도구는 <strong>WebRTC (Gaze/STT)</strong> 및 <strong>Projection</strong> 연동 계약을 검수하기 위한 프론트엔드 모의 클라이언트입니다.</p>
+
+    <div class="form-group">
+        <label for="apiUrl">API Base URL</label>
+        <input type="text" id="apiUrl" value="http://localhost:8000/api/v1">
+    </div>
+
+    <div class="form-group">
+        <label for="sessionId">Session UUID</label>
+        <input type="text" id="sessionId" placeholder="예: 06af720b-cd93-4e53-9233-f945f55b29d9">
+    </div>
+
+    <button id="connectBtn">WebRTC 연결 및 스트리밍 시작</button>
+    <div id="statusMsg" class="status disconnected">상태: 연결 대기 중...</div>
+
+    <div class="grid">
+        <div class="video-container">
+            <label>Local Stream</label>
+            <video id="localVideo" autoplay playsinline muted></video>
+        </div>
+        <div class="metrics-container">
+            <div class="metrics-card">
+                <label>Real-time Projection Metrics</label>
+                <div id="metricsList">
+                    <div class="metric-item">연결 후 데이터가 표시됩니다.</div>
+                </div>
+            </div>
+            <div id="sseLog" style="margin-top:20px;">
+                <label>SSE Stream Data</label>
+                <pre id="sseContent">이벤트 수신 중...</pre>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let pc = null;
+    let sseSource = null;
+    const connectBtn = document.getElementById('connectBtn');
+    const statusMsg = document.getElementById('statusMsg');
+    const localVideo = document.getElementById('localVideo');
+    const metricsList = document.getElementById('metricsList');
+    const sseContent = document.getElementById('sseContent');
+
+    async function startWebRTC() {
+        const apiUrl = document.getElementById('apiUrl').value;
+        const sessionId = document.getElementById('sessionId').value;
+
+        if (!sessionId) {
+            alert("Session UUID를 입력하세요.");
+            return;
+        }
+
+        connectBtn.disabled = true;
+        statusMsg.innerText = "상태: 미디어 권한 요청 중...";
+        
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            localVideo.srcObject = stream;
+
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+            });
+
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            statusMsg.innerText = "상태: Signaling 엔드포인트에 Offer 전송 중...";
+
+            const response = await fetch(`${apiUrl}/sessions/${sessionId}/multimodal/webrtc/offer`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sdp: pc.localDescription.sdp, type: 'offer' })
+            });
+
+            if (!response.ok) throw new Error("Signaling 실패: " + response.status);
+
+            const answer = await response.json();
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+            statusMsg.className = "status connected";
+            statusMsg.innerText = "상태: 연결됨 (RTC established)";
+
+            startMonitoring(apiUrl, sessionId);
+
+        } catch (e) {
+            statusMsg.className = "status error";
+            statusMsg.innerText = "에러: " + e.message;
+            connectBtn.disabled = false;
+        }
+    }
+
+    function startMonitoring(apiUrl, sessionId) {
+        // SSE Listener
+        if (sseSource) sseSource.close();
+        sseSource = new EventSource(`${apiUrl}/sessions/${sessionId}/multimodal/stream`);
+        sseSource.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            sseContent.innerText = JSON.stringify(data, null, 2);
+        };
+
+        // Projection Polling (0.5s)
+        setInterval(async () => {
+            try {
+                const res = await fetch(`${apiUrl}/sessions/${sessionId}/multimodal/projection`);
+                const data = await res.json();
+                renderMetrics(data.metrics);
+            } catch (e) {}
+        }, 500);
+    }
+
+    function renderMetrics(metrics) {
+        if (!metrics) return;
+        metricsList.innerHTML = '';
+        const modalities = Object.keys(metrics);
+        if (modalities.length === 0) {
+            metricsList.innerHTML = '<div class="metric-item">메트릭 데이터 없음</div>';
+            return;
+        }
+
+        modalities.forEach(mod => {
+            const group = metrics[mod];
+            Object.keys(group).forEach(key => {
+                const item = document.createElement('div');
+                item.className = 'metric-item';
+                item.innerHTML = `<span>[${mod}] ${key}</span> <strong>${group[key].toFixed(4)}</strong>`;
+                metricsList.appendChild(item);
+            });
+        });
+    }
+
+    connectBtn.onclick = startWebRTC;
+</script>
+
+</body>
+</html>
