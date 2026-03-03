@@ -118,6 +118,11 @@ function InterviewPageInner() {
   const lastServerFinalRef = useRef("");
   const lastBrowserFinalRef = useRef("");
 
+  // ── 스트리밍 TTS용 한국어 음성 캐시 ──
+  // voiceschanged 이벤트에서 한국어 음성을 미리 캐싱하여,
+  // SSE 토큰 도착 시 비동기 검색 없이 즉시 발화할 수 있도록 합니다.
+  const koreanVoiceRef = useRef<SpeechSynthesisVoice | null>(null);
+
   // state 변경 시 ref도 동기화 — 콜백에서 항상 최신 값 참조 가능
   useEffect(() => { interviewStartedRef.current = interviewStarted; }, [interviewStarted]);
   useEffect(() => { micEnabledRef.current = micEnabled; }, [micEnabled]);
@@ -135,9 +140,15 @@ function InterviewPageInner() {
     speechSynthesis.getVoices();
     const onVoicesChanged = () => {
       const voices = speechSynthesis.getVoices();
-      const koVoice = voices.find((v) => v.lang === "ko-KR" || v.lang.startsWith("ko"));
+      // 한국어 음성 검색 우선순위: Google ko-KR > ko-KR > ko* 접두사
+      const googleKo = voices.find((v) => v.lang === "ko-KR" && v.name.toLowerCase().includes("google"));
+      const exactKo = voices.find((v) => v.lang === "ko-KR");
+      const partialKo = voices.find((v) => v.lang.toLowerCase().startsWith("ko"));
+      const koVoice = googleKo || exactKo || partialKo || null;
+      // 스트리밍 TTS에서 즉시 사용할 수 있도록 Ref에 캐싱
+      koreanVoiceRef.current = koVoice;
       if (koVoice) {
-        console.log(`✅ [TTS] 한국어 음성 사용 가능: ${koVoice.name} (${koVoice.lang})`);
+        console.log(`✅ [TTS] 한국어 음성 캐싱 완료: ${koVoice.name} (${koVoice.lang})`);
       } else {
         console.warn("⚠️ [TTS] 한국어 음성이 설치되지 않았습니다. Windows 설정 > 시간 및 언어 > 음성에서 한국어 음성을 추가하세요.");
       }
@@ -903,24 +914,49 @@ function InterviewPageInner() {
   const getNextQuestion = async (sid: string, message: string) => {
     setStatus("processing");
     try {
-      // ── SSE 스트리밍 방식: 토큰이 도착할 때마다 UI에 실시간 표시 ──
-      // ChatGPT처럼 AI 응답이 글자 단위로 나타나 체감 대기 시간을 대폭 줄임
-      let streamedText = "";  // 스트리밍된 토큰 누적 변수
+      // ── SSE 스트리밍 방식: 토큰이 도착할 때마다 UI에 실시간 표시 + 동시 TTS 발화 ──
+      // ChatGPT처럼 AI 응답이 글자 단위로 나타나며,
+      // 문장이 완성될 때마다 즉시 TTS로 읽어줘 체감 대기 시간을 대폭 줄입니다.
+      let streamedText = "";  // 스트리밍된 토큰 누적 변수 (UI 표시용)
+      let ttsBuffer = "";     // TTS 발화를 위한 문장 버퍼 (문장 경계 감지용)
+      let streamingTtsUsed = false;  // 스트리밍 중 TTS가 사용되었는지 추적
 
       // 스트리밍 시작 전, 빈 AI 메시지 슬롯을 미리 추가 (토큰이 들어올 때마다 업데이트)
       setMessages(prev => [...prev, { role: "ai", text: "" }]);
+
+      // 스트리밍 시작 시 이전 발화를 취소하여 겹침 방지
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        speechSynthesis.cancel();
+      }
 
       const res = await interviewApi.chatStream(
         { session_id: sid, message, mode: "interview" },
         // onToken 콜백: 각 토큰이 도착할 때마다 호출
         (token: string) => {
           streamedText += token;
+          ttsBuffer += token;
+
           // messages 배열의 마지막 항목(AI 메시지)을 누적된 텍스트로 업데이트
           setMessages(prev => {
             const updated = [...prev];
             updated[updated.length - 1] = { role: "ai", text: streamedText };
             return updated;
           });
+
+          // ── 문장 경계 감지 → 즉시 TTS 발화 ──
+          // 마침표(.)·물음표(?)·느낌표(!) 뒤에 공백/줄바꿈이 오면 문장 완성으로 판단
+          // 최소 5자 이상일 때만 발화하여 너무 짧은 조각 방지
+          const boundaryIdx = findLastSentenceBoundary(ttsBuffer);
+          if (boundaryIdx >= 0) {
+            const speakText = ttsBuffer.slice(0, boundaryIdx + 1).trim();
+            ttsBuffer = ttsBuffer.slice(boundaryIdx + 1).trimStart();
+            if (speakText.length >= 5) {
+              speakSentenceFragment(speakText);
+              streamingTtsUsed = true;
+              // 첫 문장 발화 시 status를 speaking으로 변경
+              setStatus("speaking");
+            }
+          }
         },
         // onStatus 콜백: 처리 단계 표시 (선택적)
         (phase: string) => {
@@ -939,7 +975,20 @@ function InterviewPageInner() {
         updated[updated.length - 1] = { role: "ai", text: finalQuestion };
         return updated;
       });
-      await speakQuestion(finalQuestion);
+
+      // ── 스트리밍 TTS 마무리 ──
+      if (streamingTtsUsed) {
+        // 잔여 버퍼에 아직 발화되지 않은 텍스트가 있으면 마지막으로 발화
+        if (ttsBuffer.trim()) {
+          speakSentenceFragment(ttsBuffer.trim());
+        }
+        // 모든 문장 발화가 완료될 때까지 대기
+        await waitForSpeechEnd();
+      } else {
+        // 스트리밍 중 문장 경계가 감지되지 않은 경우 (매우 짧은 응답 등)
+        // → 전체 텍스트를 한 번에 발화 (기존 방식 폴백)
+        await speakQuestion(finalQuestion);
+      }
       setStatus("listening");
 
       // 개입 체크 시작
@@ -1018,6 +1067,79 @@ function InterviewPageInner() {
       await new Promise((r) => setTimeout(r, 300));
     }
     return null;
+  };
+
+  // ========== 스트리밍 TTS 헬퍼 함수 ==========
+  /**
+   * 문장 버퍼에서 완성된 문장의 경계(마침표/물음표/느낌표 + 공백·줄바꿈)를 찾습니다.
+   * 여러 문장이 있으면 마지막 경계 위치를 반환하여 한 번에 더 많이 발화합니다.
+   *
+   * @param text - 토큰이 누적된 TTS 버퍼 문자열
+   * @returns 마지막 문장 경계의 인덱스 (구두점 위치), 없으면 -1
+   */
+  const findLastSentenceBoundary = (text: string): number => {
+    let lastIdx = -1;
+    for (let i = 0; i < text.length - 1; i++) {
+      // 마침표·물음표·느낌표 뒤에 공백 또는 줄바꿈이 오면 문장 경계로 판단
+      if ((text[i] === '.' || text[i] === '?' || text[i] === '!') &&
+        (text[i + 1] === ' ' || text[i + 1] === '\n')) {
+        lastIdx = i;
+      }
+    }
+    return lastIdx;
+  };
+
+  /**
+   * 스트리밍 전용 문장 단위 TTS 발화 (Web Speech API)
+   *
+   * speechSynthesis.speak()는 자체 큐를 가지고 있어,
+   * 여러 번 호출하면 이전 발화 완료 후 자동으로 다음 발화가 시작됩니다.
+   * 따라서 문장이 감지될 때마다 바로 호출해도 안전합니다.
+   *
+   * @param text - 발화할 문장 텍스트
+   */
+  const speakSentenceFragment = (text: string) => {
+    if (!text.trim() || typeof window === "undefined" || !window.speechSynthesis) return;
+    try {
+      const utterance = new SpeechSynthesisUtterance(text.trim());
+      utterance.lang = "ko-KR";
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      // 캐싱된 한국어 음성 사용 (voiceschanged에서 미리 설정됨)
+      if (koreanVoiceRef.current) {
+        utterance.voice = koreanVoiceRef.current;
+      }
+      speechSynthesis.speak(utterance);
+    } catch {
+      // Web Speech API 미지원 환경 — 무시
+    }
+  };
+
+  /**
+   * speechSynthesis 큐의 모든 발화(진행 중 + 대기 중)가 완료될 때까지 대기합니다.
+   * 100ms 간격으로 폴링하며, 최대 60초 타임아웃으로 무한 대기를 방지합니다.
+   *
+   * @returns 모든 발화 완료 시 resolve되는 Promise
+   */
+  const waitForSpeechEnd = (): Promise<void> => {
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+      const MAX_WAIT_MS = 60000; // 최대 60초 대기
+      const check = () => {
+        // 발화 중이 아니고 대기 큐도 비어있으면 완료
+        if (!speechSynthesis.speaking && !speechSynthesis.pending) {
+          resolve();
+        } else if (Date.now() - startTime > MAX_WAIT_MS) {
+          // 타임아웃 — 무한 대기 방지
+          speechSynthesis.cancel();
+          resolve();
+        } else {
+          setTimeout(check, 100);
+        }
+      };
+      // 첫 체크 전 약간의 지연 — speak() 직후 호출 시 큐 등록 전일 수 있음
+      setTimeout(check, 150);
+    });
   };
 
   const speakQuestion = async (text: string) => {
