@@ -145,15 +145,14 @@ function App() {
   };
 
   /* =========================================================
-   3) 음성 답변 제출 (Web Speech 텍스트 → /chat)
-========================================================= */
+     3) 음성 답변 제출 (Web Speech 텍스트 → /chat/text)
+  ========================================================= */
   const handleAudioSubmit = async (text) => {
     if (!sessionId) {
       alert("세션이 아직 준비되지 않았습니다. 잠시 후 다시 시도해주세요.");
       return;
     }
 
-    // 혹시 공백이면 방어
     const cleaned = (text || "").trim();
     if (!cleaned) {
       alert("음성 인식 결과가 비어있어요. 다시 시도해 주세요.");
@@ -164,23 +163,38 @@ function App() {
     setChatLog((prev) => [...prev, { sender: "user", text: "🎤 (음성 인식 중...)" }]);
 
     try {
-      // ✅ /chat 으로 텍스트 전송 (FastAPI ChatRequest)
-      const response = await axios.post(`${API_BASE_URL}/chat`, {
+      const response = await axios.post(`${API_BASE_URL}/chat/text`, {
         user_input: cleaned,
         thread_id: sessionId,
       });
 
-      const data = response.data; // { response, current_phase, question_count }
+      const data = response.data; // { status, thread_id, user_text, ai_text, audio_url }
 
+      // 1) 채팅 로그 갱신
       setChatLog((prev) => {
         const next = [...prev];
+
         if (next.length > 0 && next[next.length - 1].text.includes("음성 인식 중")) {
           next.pop();
         }
-        next.push({ sender: "user", text: cleaned });
-        next.push({ sender: "ai", text: data.response || "(AI 응답 없음)" });
+
+        next.push({ sender: "user", text: data.user_text || cleaned });
+        next.push({ sender: "ai", text: data.ai_text || "(AI 응답 없음)" });
+
         return next;
       });
+
+      // 2) 🔊 오디오 재생 (setChatLog 바깥!)
+      if (data.audio_url && audioPlayerRef?.current) {
+        const fullUrl = `${API_BASE_URL}${data.audio_url}`;
+        audioPlayerRef.current.src = fullUrl;
+        audioPlayerRef.current.load();
+
+        // 자동재생이 막힐 수 있어서 catch는 필수
+        await audioPlayerRef.current.play();
+      } else {
+        console.log("🔇 audio_url 없음 또는 audioPlayerRef 없음", data.audio_url);
+      }
 
     } catch (error) {
       console.error("텍스트 대화 에러:", error);

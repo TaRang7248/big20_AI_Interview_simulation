@@ -59,9 +59,12 @@ class ChatRequest(BaseModel):
     user_input: str
     thread_id: str = "session_1"
 
+from typing import Literal
+
 class TextChatRequest(BaseModel):
     user_input: str
     thread_id: str
+    role: Literal["ux", "tech"] = "tech"   # ✅ 기본값은 tech
 
 class TextChatResponse(BaseModel):
     status: str
@@ -199,7 +202,10 @@ async def chat_text_with_tts(req: TextChatRequest):
 
         # 2) LangGraph
         config = {"configurable": {"thread_id": req.thread_id}}
-        inputs = {"messages": [HumanMessage(content=user_text)]}
+        inputs = {
+            "messages": [HumanMessage(content=user_text)],
+            "role": req.role,   # ✅ role을 LangGraph state로 전달
+            }
         result = interview_graph.invoke(inputs, config=config)
 
         ai_text = result["messages"][-1].content
