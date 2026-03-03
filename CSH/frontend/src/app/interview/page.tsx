@@ -124,6 +124,27 @@ function InterviewPageInner() {
   useEffect(() => { serverSttAvailableRef.current = serverSttAvailable; }, [serverSttAvailable]);
   useEffect(() => { browserSttEnabledRef.current = browserSttEnabled; }, [browserSttEnabled]);
 
+  // ── Web Speech API 음성 목록 사전 로드 ──
+  // Chrome 등 일부 브라우저는 getVoices()가 비동기적으로 로딩되므로,
+  // voiceschanged 이벤트를 통해 음성 목록이 준비되었음을 보장합니다.
+  // 이를 미리 호출하면 speakQuestion() 시점에 한국어 음성이 즉시 사용 가능합니다.
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    // 초기 호출 — 일부 브라우저는 getVoices()를 한 번 호출해야 로딩을 시작함
+    speechSynthesis.getVoices();
+    const onVoicesChanged = () => {
+      const voices = speechSynthesis.getVoices();
+      const koVoice = voices.find((v) => v.lang === "ko-KR" || v.lang.startsWith("ko"));
+      if (koVoice) {
+        console.log(`✅ [TTS] 한국어 음성 사용 가능: ${koVoice.name} (${koVoice.lang})`);
+      } else {
+        console.warn("⚠️ [TTS] 한국어 음성이 설치되지 않았습니다. Windows 설정 > 시간 및 언어 > 음성에서 한국어 음성을 추가하세요.");
+      }
+    };
+    speechSynthesis.addEventListener("voiceschanged", onVoicesChanged);
+    return () => speechSynthesis.removeEventListener("voiceschanged", onVoicesChanged);
+  }, []);
+
   // 인증 확인 — loading 완료 후에만 리다이렉트 (sessionStorage 복원 대기)
   // 면접 진행 중(interviewStartedRef)에는 토큰 만료로 인한 리다이렉트 방지
   // → AuthContext의 유휴 타임아웃으로 token이 null이 되어도 면접 화면 유지
@@ -938,9 +959,49 @@ function InterviewPageInner() {
   };
 
   // ========== TTS 발화 ==========
+  /**
+   * 한국어 음성(voice)을 찾아 반환하는 헬퍼 함수.
+   *
+   * Web Speech API의 speechSynthesis.getVoices()는 브라우저마다
+   * 비동기 로딩 타이밍이 다르므로, 최대 3회(300ms 간격)까지 재시도합니다.
+   *
+   * 우선순위:
+   *  1) lang이 "ko-KR"인 음성 중 이름에 "Google"이 포함된 것 (가장 자연스러움)
+   *  2) lang이 "ko-KR"인 음성 아무거나
+   *  3) lang이 "ko"로 시작하는 음성 아무거나 (ko, ko-KR, ko_KR 등)
+   *  4) 없으면 null 반환 → 기본 음성 사용 (영어일 수 있음)
+   */
+  const findKoreanVoice = async (): Promise<SpeechSynthesisVoice | null> => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const voices = speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        // 1순위: lang === "ko-KR" && 이름에 "Google" 포함 (고품질 음성)
+        const googleKo = voices.find(
+          (v) => v.lang === "ko-KR" && v.name.toLowerCase().includes("google")
+        );
+        if (googleKo) return googleKo;
+
+        // 2순위: lang === "ko-KR"
+        const exactKo = voices.find((v) => v.lang === "ko-KR");
+        if (exactKo) return exactKo;
+
+        // 3순위: lang이 "ko"로 시작 (ko, ko_KR 등 변형 대응)
+        const partialKo = voices.find((v) => v.lang.toLowerCase().startsWith("ko"));
+        if (partialKo) return partialKo;
+
+        // 음성 목록이 로드됐지만 한국어가 없는 경우 — 더 기다려도 소용없음
+        return null;
+      }
+      // 음성 목록이 아직 비어 있으면 로딩 대기 후 재시도
+      await new Promise((r) => setTimeout(r, 300));
+    }
+    return null;
+  };
+
   const speakQuestion = async (text: string) => {
     setStatus("speaking");
 
+    // ── 1단계: 서버 TTS (Hume AI) 시도 ──
     if (serverTtsEnabled) {
       try {
         const blob = await ttsApi.speak(text, "professional");
@@ -954,16 +1015,38 @@ function InterviewPageInner() {
         URL.revokeObjectURL(url);
         return;
       } catch {
+        // 서버 TTS 실패 → 이번 세션 동안 비활성화하고 Web Speech API로 폴백
         setServerTtsEnabled(false);
       }
     }
 
-    // 서버 TTS 비활성/실패 시 Web Speech API 폴백
+    // ── 2단계: Web Speech API 폴백 (한국어 음성 명시 선택) ──
+    // 브라우저 기본 음성이 영어일 수 있으므로 반드시 한국어 voice 객체를 지정
     try {
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = "ko-KR";
-      speechSynthesis.speak(utterance);
-    } catch { /* ignore */ }
+      utterance.rate = 1.0;   // 말하기 속도 (1.0 = 정상)
+      utterance.pitch = 1.0;  // 음높이 (1.0 = 정상)
+
+      // 한국어 음성 검색 — 없으면 lang 힌트에만 의존 (최선의 폴백)
+      const koreanVoice = await findKoreanVoice();
+      if (koreanVoice) {
+        utterance.voice = koreanVoice;
+        console.log(`🗣️ [TTS Fallback] 한국어 음성 선택: ${koreanVoice.name} (${koreanVoice.lang})`);
+      } else {
+        console.warn("⚠️ [TTS Fallback] 한국어 음성을 찾지 못함 — 브라우저 기본 음성 사용");
+      }
+
+      // 발화 완료까지 대기 (발화 중 status="speaking" 유지)
+      await new Promise<void>((resolve) => {
+        utterance.onend = () => resolve();
+        utterance.onerror = () => resolve();
+        speechSynthesis.speak(utterance);
+      });
+    } catch {
+      // Web Speech API 자체가 지원되지 않는 환경 — 무음 처리
+      console.warn("⚠️ [TTS] Web Speech API 사용 불가");
+    }
   };
 
   // ========== 개입 체크 ==========

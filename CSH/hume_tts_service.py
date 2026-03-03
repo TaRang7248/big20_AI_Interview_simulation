@@ -83,10 +83,15 @@ async def get_hume_access_token() -> Optional[str]:
 
 @dataclass  # 데이터 클래스 사용
 class HumeVoiceConfig:
-    """Hume AI 음성 설정"""
+    """Hume AI 음성 설정
 
-    voice_name: str = "ITO"  # Hume 기본 음성
-    language: str = "ko"  # 한국어 지원 (EVI 4-mini)
+    Octave 2 (version="2") 사용 시 한국어 포함 11개 언어 지원.
+    ITO는 Hume AI Voice Library의 기본 음성으로,
+    Octave 1/2 모두 호환됩니다.
+    """
+
+    voice_name: str = "ITO"  # Hume 기본 음성 (Octave 1/2 호환)
+    language: str = "ko"  # 한국어 지원 (Octave 2 필수)
     speaking_rate: float = 1.0
     emotion_style: str = "professional"  # professional, friendly, empathetic
 
@@ -229,10 +234,17 @@ class HumeTTSService:
         # ========== 전송 데이터(Payload) 구성 — Octave utterances 형식 ==========
         # Hume Octave TTS API는 'utterances' 배열 형식을 사용
         # 각 utterance에는 text, voice(name + provider), description(선택) 등이 포함됨
+        #
+        # ⚠️ 중요: "version": "2" (Octave 2) 필수!
+        # - Octave 1 (기본값): 영어, 스페인어만 지원 → 한국어 텍스트를 영어 발음으로 읽어버림
+        # - Octave 2: 한국어 포함 11개 언어 지원 (English, Japanese, Korean, Spanish,
+        #   French, Portuguese, Italian, German, Russian, Hindi, Arabic)
+        # - Octave 1 음성(ITO 등)은 Octave 2에서도 호환 사용 가능
         voice_name = (
             self.voice_config.voice_name if hasattr(self, "voice_config") else "ITO"
         )
         payload = {
+            "version": "2",  # ★ Octave 2 사용 — 한국어 TTS 지원 필수 설정
             "utterances": [
                 {
                     "text": text,
