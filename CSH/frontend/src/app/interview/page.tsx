@@ -635,13 +635,15 @@ function InterviewPageInner() {
               return;
             }
             // ★ 서버(Deepgram) STT 결과 수신
-            // server 또는 server_pending 모드일 때만 sttText에 누적
-            if (data.type === "stt_result" && data.is_final) {
+            // server 또는 server_pending 모드일 때만 처리
+            // is_final=true → sttText에 누적 (확정 전사)
+            // is_final=false → interimText에 표시 (중간 결과 실시간 피드백)
+            if (data.type === "stt_result") {
               const mode = sttSourceModeRef.current;
               if (mode === "server" || mode === "server_pending") {
                 const transcript = (data.transcript || "").trim();
                 if (transcript) {
-                  // server_pending → server 확정 전환 (첫 결과 수신)
+                  // server_pending → server 확정 전환 (첫 결과 수신 — final/interim 무관)
                   if (mode === "server_pending") {
                     sttSourceModeRef.current = "server";
                     if (sttPendingFallbackTimerRef.current) {
@@ -652,15 +654,22 @@ function InterviewPageInner() {
                       console.log(`[STT-CHECK] server_pending → server 확정 (Deepgram 첫 결과 수신)`);
                     }
                   }
-                  // 중복 방지
-                  const normalized = transcript.toLowerCase().replace(/\s+/g, " ");
-                  if (normalized !== lastServerFinalRef.current) {
-                    lastServerFinalRef.current = normalized;
-                    setSttText(prev => prev + " " + transcript);
-                    setInterimText("");
-                    if (STT_RUNTIME_DEBUG) {
-                      console.log(`[STT-CHECK][append][server] text="${transcript.slice(0, 60)}"`);
+
+                  if (data.is_final) {
+                    // ── 확정(final) 결과: sttText에 누적, interim 초기화 ──
+                    const normalized = transcript.toLowerCase().replace(/\s+/g, " ");
+                    if (normalized !== lastServerFinalRef.current) {
+                      lastServerFinalRef.current = normalized;
+                      setSttText(prev => prev + " " + transcript);
+                      setInterimText("");
+                      if (STT_RUNTIME_DEBUG) {
+                        console.log(`[STT-CHECK][append][server] text="${transcript.slice(0, 60)}"`);
+                      }
                     }
+                  } else {
+                    // ── 중간(interim) 결과: interimText에 실시간 표시 ──
+                    // Deepgram이 아직 확정하지 않은 인식 텍스트를 회색 이탤릭으로 보여줌
+                    setInterimText(transcript);
                   }
                 }
               } else {
