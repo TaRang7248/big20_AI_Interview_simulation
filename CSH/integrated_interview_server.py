@@ -3623,6 +3623,7 @@ class ChatResponse(BaseModel):
     session_id: str
     response: str
     audio_url: Optional[str] = None
+    tts_task_id: Optional[str] = None  # Celery TTS 태스크 ID (비동기 결과 조회용)
     question_number: Optional[int] = None  # 현재 질문 번호 (프론트엔드 동기화용)
 
 
@@ -5594,6 +5595,20 @@ async def create_session(
 
     print(f"✅ 면접 세션 생성: {session_id} (사용자: {request.user_email})")
 
+    # ── Celery TTS 프리페칭: 인사말 + 종료 인사를 미리 생성 ──
+    # 세션 생성 시점에 고정 문구의 TTS를 백그라운드로 생성해두면,
+    # 프론트엔드에서 ttsApi.speak()이 호출될 때 캐싱된 결과를 즉시 반환할 수 있습니다.
+    if TTS_AVAILABLE and CELERY_AVAILABLE:
+        try:
+            closing_msg = "수고하셨습니다. 오늘 면접은 여기서 마치겠습니다. 좋은 결과 있으시길 바랍니다."
+            prefetch_task = prefetch_tts_task.delay(session_id, [greeting, closing_msg])
+            print(
+                f"🔊 [Celery TTS Prefetch] 인사말+종료 인사 프리페칭 태스크 제출됨: "
+                f"{prefetch_task.id[:8]}..."
+            )
+        except Exception as e:
+            print(f"⚠️ [Celery TTS Prefetch] 프리페칭 태스크 제출 실패 (무시): {e}")
+
     # 📤 이벤트 발행: 세션 생성
     if EVENT_BUS_AVAILABLE and event_bus:
         await event_bus.publish(
@@ -5907,21 +5922,52 @@ async def chat(
             except Exception as e:
                 print(f"[GazeTracking] 턴 시작 오류: {e}")
 
-    # TTS 생성 (선택적) — TTS 합성 단계 측정 (REQ-N-001)
+    # ── TTS 생성: Celery 비동기 오프로드 (가용 시) 또는 동기 폴백 ──
+    # Celery가 활성화되면 generate_tts_task.delay()로 fire-and-forget 전송하여
+    # API 응답을 TTS 완료까지 블로킹하지 않습니다 (REQ-N-001 지연 감소).
+    # Celery 미가용 시 기존 동기 방식(await)으로 폴백합니다.
     audio_url = None
+    tts_task_id = None
     if TTS_AVAILABLE and interviewer.tts_service:
-        try:
-            if rid:
-                latency_monitor.start_phase(rid, "tts_synthesis")
-            audio_file = await interviewer.generate_speech(response)
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            if audio_file:
-                audio_url = f"/audio/{os.path.basename(audio_file)}"
-        except Exception as e:
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            print(f"TTS 생성 오류: {e}")
+        if CELERY_AVAILABLE:
+            # ── Celery 비동기 TTS: fire-and-forget ──
+            # 응답 즉시 반환, TTS는 Celery worker에서 백그라운드 생성
+            # 결과는 /api/tts/result/{task_id} 엔드포인트로 조회 가능
+            try:
+                task = generate_tts_task.delay(response)
+                tts_task_id = task.id
+                print(
+                    f"🔊 [Celery TTS] 태스크 제출됨: {task.id[:8]}... (텍스트 {len(response)}자)"
+                )
+            except Exception as e:
+                print(f"⚠️ [Celery TTS] 태스크 제출 실패, 동기 폴백: {e}")
+                # Celery 제출 실패 시 동기 방식으로 폴백
+                try:
+                    if rid:
+                        latency_monitor.start_phase(rid, "tts_synthesis")
+                    audio_file = await interviewer.generate_speech(response)
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    if audio_file:
+                        audio_url = f"/audio/{os.path.basename(audio_file)}"
+                except Exception as tts_err:
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    print(f"TTS 생성 오류: {tts_err}")
+        else:
+            # ── 동기 TTS 폴백: Celery 미가용 환경 ──
+            try:
+                if rid:
+                    latency_monitor.start_phase(rid, "tts_synthesis")
+                audio_file = await interviewer.generate_speech(response)
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                if audio_file:
+                    audio_url = f"/audio/{os.path.basename(audio_file)}"
+            except Exception as e:
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                print(f"TTS 생성 오류: {e}")
 
     # 📤 이벤트 발행: 질문 생성 + 답변 제출
     if EVENT_BUS_AVAILABLE and event_bus:
@@ -5934,7 +5980,10 @@ async def chat(
         await event_bus.publish(
             AppEventType.QUESTION_GENERATED,
             session_id=request.session_id,
-            data={"question": response[:200], "has_audio": audio_url is not None},
+            data={
+                "question": response[:200],
+                "has_audio": audio_url is not None or tts_task_id is not None,
+            },
             source="ai_interviewer",
         )
 
@@ -5946,6 +5995,7 @@ async def chat(
         session_id=request.session_id,
         response=response,
         audio_url=audio_url,
+        tts_task_id=tts_task_id,
         question_number=current_q_num,
     )
 
@@ -6014,26 +6064,50 @@ async def chat_with_intervention(
             except Exception:
                 pass
 
-    # TTS 생성 — TTS 합성 단계 측정 (REQ-N-001)
+    # ── TTS 생성: Celery 비동기 오프로드 (가용 시) 또는 동기 폴백 ──
     audio_url = None
+    tts_task_id = None
     if TTS_AVAILABLE and interviewer.tts_service:
-        try:
-            if rid:
-                latency_monitor.start_phase(rid, "tts_synthesis")
-            audio_file = await interviewer.generate_speech(response)
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            if audio_file:
-                audio_url = f"/audio/{os.path.basename(audio_file)}"
-        except Exception as e:
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            print(f"TTS 생성 오류: {e}")
+        if CELERY_AVAILABLE:
+            try:
+                task = generate_tts_task.delay(response)
+                tts_task_id = task.id
+                print(
+                    f"🔊 [Celery TTS] 태스크 제출됨: {task.id[:8]}... (with-intervention)"
+                )
+            except Exception as e:
+                print(f"⚠️ [Celery TTS] 태스크 제출 실패, 동기 폴백: {e}")
+                try:
+                    if rid:
+                        latency_monitor.start_phase(rid, "tts_synthesis")
+                    audio_file = await interviewer.generate_speech(response)
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    if audio_file:
+                        audio_url = f"/audio/{os.path.basename(audio_file)}"
+                except Exception as tts_err:
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    print(f"TTS 생성 오류: {tts_err}")
+        else:
+            try:
+                if rid:
+                    latency_monitor.start_phase(rid, "tts_synthesis")
+                audio_file = await interviewer.generate_speech(response)
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                if audio_file:
+                    audio_url = f"/audio/{os.path.basename(audio_file)}"
+            except Exception as e:
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                print(f"TTS 생성 오류: {e}")
 
     return {
         "session_id": request.session_id,
         "response": response,
         "audio_url": audio_url,
+        "tts_task_id": tts_task_id,
         "turn_stats": turn_stats,
         "was_interrupted": request.was_interrupted,
         "next_question_keywords": question_keywords,
@@ -6469,11 +6543,29 @@ async def chat_stream(
                     source="ai_interviewer_stream",
                 )
 
+            # ── TTS Celery 비동기 오프로드 (스트리밍 응답과 병렬) ──
+            # 프론트엔드는 스트리밍 중 문장 단위 Web Speech API TTS를 사용하지만,
+            # 서버 측에서도 Celery를 통해 고품질 Hume TTS를 백그라운드로 생성합니다.
+            # 결과는 tts_task_id로 /api/tts/result/{task_id}에서 조회 가능합니다.
+            stream_tts_task_id = None
+            if TTS_AVAILABLE and CELERY_AVAILABLE and interviewer.tts_service:
+                try:
+                    tts_task = generate_tts_task.delay(final_question)
+                    stream_tts_task_id = tts_task.id
+                    print(
+                        f"🔊 [Celery TTS] 스트리밍 응답 TTS 태스크 제출됨: {tts_task.id[:8]}..."
+                    )
+                except Exception as tts_err:
+                    print(f"⚠️ [Celery TTS] 스트리밍 TTS 태스크 제출 실패: {tts_err}")
+
             # ── 최종 완료 이벤트 (프론트엔드에서 전체 텍스트 + 질문 번호 수신) ──
             done_data = {
                 "response": final_question,
                 "question_number": question_count + 1,
             }
+            # Celery TTS 태스크 ID가 있으면 done 이벤트에 포함
+            if stream_tts_task_id:
+                done_data["tts_task_id"] = stream_tts_task_id
             yield f"event: done\ndata: {_json.dumps(done_data, ensure_ascii=False)}\n\n"
 
         except Exception as e:
