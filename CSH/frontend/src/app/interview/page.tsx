@@ -552,51 +552,111 @@ function InterviewPageInner() {
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
-            // ★ STT 정책: Google Web Speech API(브라우저)를 메인 STT로 사용
-            // 서버 stt_available 값에 관계없이 항상 브라우저 SpeechRecognition을 활성화합니다.
-            // Deepgram 서버 STT는 서버 측에서 비활성화되어 항상 false가 수신됩니다.
+            // ★ STT 정책: Deepgram Nova-3를 메인 STT로 사용, 브라우저 SpeechRecognition은 폴백
+            // 서버가 stt_available=true를 보내면 → Deepgram 서버 STT
+            // 서버가 stt_available=false를 보내면 → 브라우저 SpeechRecognition 폴백
             if (data.type === "connected") {
-              // 항상 브라우저 STT 모드로 고정
-              setServerSttAvailable(false);
-              sttSourceModeRef.current = "browser";
-              setBrowserSttEnabled(true);
-              if (STT_RUNTIME_DEBUG) {
-                console.log(
-                  `[STT-CHECK][source-select] session=${targetSid.slice(0, 8)} mode=browser (Google Web Speech API)`,
-                );
-              }
-              // server_pending 타이머가 남아 있다면 정리
-              if (sttPendingFallbackTimerRef.current) {
-                clearTimeout(sttPendingFallbackTimerRef.current);
-                sttPendingFallbackTimerRef.current = null;
-              }
-              // 브라우저 SpeechRecognition 초기화 및 시작
-              if (!recognitionRef.current) {
-                initSpeechRecognition();
+              if (data.stt_available) {
+                // ── Deepgram 서버 STT 활성화 ──
+                // server_pending 상태로 진입: Deepgram 첫 결과를 대기
+                // 5초 내에 서버 STT 결과가 오지 않으면 브라우저 폴백으로 전환
+                setServerSttAvailable(true);
+                sttSourceModeRef.current = "server_pending";
+                setBrowserSttEnabled(true);  // 폴백용으로 브라우저 STT도 준비
+                if (STT_RUNTIME_DEBUG) {
+                  console.log(
+                    `[STT-CHECK][source-select] session=${targetSid.slice(0, 8)} mode=server_pending (Deepgram Nova-3, 브라우저 폴백 대기)`,
+                  );
+                }
+                // 폴백 타이머: 5초 내에 서버 STT 결과가 없으면 브라우저로 전환
+                if (sttPendingFallbackTimerRef.current) {
+                  clearTimeout(sttPendingFallbackTimerRef.current);
+                }
+                sttPendingFallbackTimerRef.current = setTimeout(() => {
+                  if (sttSourceModeRef.current === "server_pending") {
+                    console.warn("[STT-CHECK] server_pending 5초 타임아웃 → 브라우저 폴백");
+                    sttSourceModeRef.current = "browser";
+                    setBrowserSttEnabled(true);
+                  }
+                  sttPendingFallbackTimerRef.current = null;
+                }, 5000);
+                // 브라우저 SpeechRecognition도 폴백용으로 초기화
+                if (!recognitionRef.current) {
+                  initSpeechRecognition();
+                } else {
+                  try { recognitionRef.current.start(); } catch { /* 이미 시작됨 */ }
+                }
               } else {
-                try {
-                  recognitionRef.current.start();
-                } catch {
-                  // 이미 시작된 상태일 수 있으므로 무시
+                // ── Deepgram 불가 → 브라우저 STT 폴백 즉시 활성화 ──
+                setServerSttAvailable(false);
+                sttSourceModeRef.current = "browser";
+                setBrowserSttEnabled(true);
+                if (STT_RUNTIME_DEBUG) {
+                  console.log(
+                    `[STT-CHECK][source-select] session=${targetSid.slice(0, 8)} mode=browser (Deepgram 불가, 브라우저 폴백)`,
+                  );
+                }
+                if (sttPendingFallbackTimerRef.current) {
+                  clearTimeout(sttPendingFallbackTimerRef.current);
+                  sttPendingFallbackTimerRef.current = null;
+                }
+                if (!recognitionRef.current) {
+                  initSpeechRecognition();
+                } else {
+                  try { recognitionRef.current.start(); } catch { /* 이미 시작됨 */ }
                 }
               }
               return;
             }
-            // ★ 서버 STT가 비활성화된 상태에서 stt_status 메시지가 와도
-            // 브라우저 STT 모드를 유지합니다 (방어 코드).
+            // ★ 서버 STT 상태 변경 알림 처리
+            // Deepgram 연결 해제/복구 시 서버에서 stt_status 메시지 전송
             if (data.type === "stt_status") {
-              // 항상 브라우저 모드 유지
-              setServerSttAvailable(false);
-              sttSourceModeRef.current = "browser";
-              setBrowserSttEnabled(true);
+              const available = data.available === true;
+              setServerSttAvailable(available);
+              if (available && sttSourceModeRef.current === "browser") {
+                // 서버 STT 복구됨 → server_pending으로 전환
+                sttSourceModeRef.current = "server_pending";
+              } else if (!available) {
+                // 서버 STT 해제됨 → 브라우저 폴백
+                sttSourceModeRef.current = "browser";
+                setBrowserSttEnabled(true);
+              }
               return;
             }
-            // ★ 서버 STT 비활성화 상태에서 stt_result가 도착하면 무시
-            // (Deepgram이 꺼져 있으므로 이 메시지가 올 일은 없지만 방어 처리)
+            // ★ 서버(Deepgram) STT 결과 수신
+            // server 또는 server_pending 모드일 때만 sttText에 누적
             if (data.type === "stt_result" && data.is_final) {
-              // 서버 STT 결과 무시 — 메인 STT는 브라우저 SpeechRecognition
-              if (STT_RUNTIME_DEBUG) {
-                console.log(`[STT-CHECK][skip][server] 서버 STT 비활성화 상태에서 stt_result 수신 → 무시`);
+              const mode = sttSourceModeRef.current;
+              if (mode === "server" || mode === "server_pending") {
+                const transcript = (data.transcript || "").trim();
+                if (transcript) {
+                  // server_pending → server 확정 전환 (첫 결과 수신)
+                  if (mode === "server_pending") {
+                    sttSourceModeRef.current = "server";
+                    if (sttPendingFallbackTimerRef.current) {
+                      clearTimeout(sttPendingFallbackTimerRef.current);
+                      sttPendingFallbackTimerRef.current = null;
+                    }
+                    if (STT_RUNTIME_DEBUG) {
+                      console.log(`[STT-CHECK] server_pending → server 확정 (Deepgram 첫 결과 수신)`);
+                    }
+                  }
+                  // 중복 방지
+                  const normalized = transcript.toLowerCase().replace(/\s+/g, " ");
+                  if (normalized !== lastServerFinalRef.current) {
+                    lastServerFinalRef.current = normalized;
+                    setSttText(prev => prev + " " + transcript);
+                    setInterimText("");
+                    if (STT_RUNTIME_DEBUG) {
+                      console.log(`[STT-CHECK][append][server] text="${transcript.slice(0, 60)}"`);
+                    }
+                  }
+                }
+              } else {
+                // browser 모드 — 서버 결과 무시
+                if (STT_RUNTIME_DEBUG) {
+                  console.log(`[STT-CHECK][skip][server] mode=${mode}, 서버 STT 결과 무시`);
+                }
               }
               return;
             }

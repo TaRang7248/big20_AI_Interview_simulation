@@ -7898,35 +7898,35 @@ async def websocket_interview(
     deepgram_connect_error: Optional[str] = None
 
     try:
-        # ★ STT 정책 변경: 메인 STT를 Google Web Speech API(브라우저)로 전환
-        # Deepgram 서버 STT 연결을 건너뛰고, 항상 stt_available=false를 전송합니다.
-        # 이렇게 하면 프론트엔드가 브라우저 SpeechRecognition을 메인 엔진으로 사용합니다.
-        # Deepgram으로 복원하려면 이 블록의 주석을 해제하세요.
-        # ── [원본 Deepgram 연결 코드 — 비활성화됨] ──
-        # if DEEPGRAM_AVAILABLE and deepgram_client is not None:
-        #     try:
-        #         ws_dg_connection = dg_stack.enter_context(
-        #             deepgram_client.listen.v1.connect(
-        #                 model="nova-3",
-        #                 language="ko",
-        #                 smart_format=True,
-        #                 encoding="linear16",
-        #                 sample_rate=16000,
-        #                 punctuate=True,
-        #                 interim_results=True,
-        #                 vad_events=True,
-        #                 diarize=False,
-        #                 endpointing=1100,
-        #                 utterance_end_ms=2200,
-        #             )
-        #         )
-        #     except Exception as dg_conn_err:
-        #         deepgram_connect_error = str(dg_conn_err)
-        #         ws_dg_connection = None
+        # ★ STT 정책: Deepgram Nova-3를 메인 STT로 사용
+        # Deepgram 연결 성공 시 stt_available=true → 프론트엔드가 서버 STT 사용
+        # Deepgram 연결 실패 시 stt_available=false → 프론트엔드가 브라우저 STT 폴백
+        if DEEPGRAM_AVAILABLE and deepgram_client is not None:
+            try:
+                ws_dg_connection = dg_stack.enter_context(
+                    deepgram_client.listen.v1.connect(
+                        model="nova-3",
+                        language="ko",
+                        smart_format=True,
+                        encoding="linear16",
+                        sample_rate=16000,
+                        punctuate=True,
+                        interim_results=True,
+                        vad_events=True,
+                        diarize=False,
+                        endpointing=1100,
+                        utterance_end_ms=2200,
+                    )
+                )
+            except Exception as dg_conn_err:
+                deepgram_connect_error = str(dg_conn_err)
+                ws_dg_connection = None
 
-        server_stt_available = False  # ★ 항상 false → 프론트엔드가 브라우저 STT 사용
+        # Deepgram 연결 성공 여부에 따라 서버 STT 가용 플래그 결정
+        server_stt_available = ws_dg_connection is not None
 
-        # WS는 항상 유지하고, STT 가용 여부는 신호로 전달하여 브라우저 STT를 활성화
+        # 클라이언트에게 STT 가용 여부 전달
+        # True → Deepgram 서버 STT 사용 / False → 브라우저 SpeechRecognition 폴백
         await websocket.send_json(
             {
                 "type": "connected",
@@ -7936,9 +7936,9 @@ async def websocket_interview(
             }
         )
 
-        # Deepgram 비활성화 상태이므로 연결 실패 알림도 불필요
-        # if not server_stt_available and deepgram_connect_error:
-        #     await _send_stt_status(False, reason="deepgram_connect_failed")
+        # Deepgram 연결 실패 시 클라이언트에 사유 알림
+        if not server_stt_available and deepgram_connect_error:
+            await _send_stt_status(False, reason="deepgram_connect_failed")
 
         if ws_dg_connection:
 
