@@ -17,7 +17,7 @@ declare global {
     webkitSpeechRecognition: new () => SpeechRecognition;
   }
   interface SpeechRecognition extends EventTarget {
-    lang: string; continuous: boolean; interimResults: boolean;
+    lang: string; continuous: boolean; interimResults: boolean; maxAlternatives: number;
     start(): void; stop(): void; abort(): void;
     onresult: ((ev: SpeechRecognitionEvent) => void) | null;
     onerror: ((ev: Event) => void) | null;
@@ -62,6 +62,7 @@ function InterviewPageInner() {
   // 백엔드 /api/session/create 응답의 max_questions 값을 동적으로 수신 (기본값 10 = 폴백)
   const [totalQuestions, setTotalQuestions] = useState(10);
   const [sttText, setSttText] = useState("");
+  const [interimText, setInterimText] = useState("");  // STT 중간 결과 (확정 전 실시간 표시용)
   const [manualInput, setManualInput] = useState("");  // STT 실패 시 수동 텍스트 입력 (폴백)
   const [sttAvailable, setSttAvailable] = useState(true); // 전체 STT 사용 가능 여부 (서버 STT 또는 브라우저 STT)
   const [serverSttAvailable, setServerSttAvailable] = useState(false); // 서버(WebSocket/Deepgram) STT 가능 여부
@@ -733,12 +734,14 @@ function InterviewPageInner() {
     recognition.lang = "ko-KR";
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;  // ★ 대안 수를 1로 제한 → 처리 속도 향상
 
     // 연속 에러 카운터 — 일정 횟수 이상 에러 시 STT를 비활성화하고 텍스트 입력으로 전환
     let consecutiveErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 3;
 
-    // 음성 인식 결과 핸들러 — 최종(final) 결과만 STT 텍스트에 추가
+    // 음성 인식 결과 핸들러 — 최종(final) + 중간(interim) 결과 모두 처리
+    // ★ 개선: interim 결과를 실시간 표시하여 사용자가 인식 진행 상황을 즉시 확인 가능
     recognition.onresult = (e: SpeechRecognitionEvent) => {
       // browser 모드에서만 누적 (server_pending/server 모드에서는 누적 금지)
       if (sttSourceModeRef.current !== "browser") {
@@ -747,8 +750,15 @@ function InterviewPageInner() {
 
       consecutiveErrors = 0; // 정상 결과 수신 시 에러 카운터 리셋
       let final = "";
+      let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) final += e.results[i][0].transcript;
+        const transcript = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          final += transcript;
+        } else {
+          // ★ interim: 아직 확정되지 않은 중간 인식 결과 (실시간 표시용)
+          interim += transcript;
+        }
       }
       if (final) {
         const finalTrimmed = final.trim();
@@ -760,7 +770,12 @@ function InterviewPageInner() {
           );
           lastBrowserFinalRef.current = normalized;
         }
+        // 확정된 텍스트를 sttText에 누적하고, interim 텍스트는 초기화
         setSttText(prev => prev + " " + final);
+        setInterimText("");
+      } else if (interim) {
+        // ★ 아직 확정 전 — 중간 결과를 interimText에 표시 (사용자에게 실시간 피드백)
+        setInterimText(interim);
       }
     };
 
@@ -800,7 +815,9 @@ function InterviewPageInner() {
         && micEnabledRef.current
         && browserSttEnabledRef.current
       ) {
-        // 디바운스: 빠른 재시작 루프 방지 (300ms 대기 후 재시작)
+        // ★ 디바운스: 50ms로 축소하여 끊김 시간 최소화 (기존 300ms → 50ms)
+        // Chrome의 continuous 모드는 네트워크 타임아웃으로 주기적으로 끊기므로
+        // 재시작 간격을 최소화하여 발화 유실을 방지
         setTimeout(() => {
           try {
             recognition.start();
@@ -808,7 +825,7 @@ function InterviewPageInner() {
             // 이미 시작된 상태에서 start() 호출 시 DOMException 발생 가능 → 무시
             console.warn("[SpeechRecognition] 재시작 실패 (이미 활성):", e);
           }
-        }, 300);
+        }, 50);
       }
     };
 
@@ -1020,6 +1037,7 @@ function InterviewPageInner() {
     const answer = (sttText.trim() || manualInput.trim());
     if (!answer) return;
     setSttText("");
+    setInterimText("");  // interim 텍스트도 초기화
     setManualInput("");  // 수동 입력도 초기화
     setMessages(prev => [...prev, { role: "user", text: answer }]);
 
@@ -1292,7 +1310,14 @@ function InterviewPageInner() {
                   {sttAvailable && (
                     <div className="bg-[rgba(255,193,7,0.08)] border border-[rgba(255,193,7,0.2)] rounded-xl p-3">
                       <p className="text-xs text-[var(--warning)] mb-1">🎤 음성 인식 중...</p>
-                      <p className="text-sm">{sttText || "말씀해주세요..."}</p>
+                      <p className="text-sm">
+                        {/* 확정된 STT 텍스트 */}
+                        {sttText || (!interimText && "말씀해주세요...")}
+                        {/* ★ 중간 인식 결과를 회색 이탤릭으로 실시간 표시 */}
+                        {interimText && (
+                          <span className="text-gray-400 italic ml-1">{interimText}</span>
+                        )}
+                      </p>
                     </div>
                   )}
                   {/* STT 비활성 시: 안내 메시지 */}
