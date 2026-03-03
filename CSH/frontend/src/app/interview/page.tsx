@@ -1072,20 +1072,35 @@ function InterviewPageInner() {
   };
 
   // ========== 개입 체크 ==========
-  // 백엔드의 silence_intervention_given 플래그가 중복 침묵 개입을 차단하므로,
-  // 프론트엔드는 개입 체크 타이머를 유지하여 턴 모니터링을 계속합니다.
+  // 백엔드의 중복 방지 플래그 + 쿨다운이 주된 방어선이며,
+  // 프론트엔드에서도 개입 발생 시 10초간 폴링을 일시정지하여 이중 방어합니다.
   const startInterventionCheck = (sid: string) => {
     if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
     interventionApi.startTurn(sid, currentQuestion).catch(() => { });
+    // 마지막으로 표시한 개입 메시지를 추적하여 동일 메시지 중복 표시 방지
+    let lastInterventionMsg = "";
     interventionTimerRef.current = setInterval(async () => {
       try {
         const res = await interventionApi.check(sid, sttText);
         const interventionMessage = res.intervention?.message;
         if (res.needs_intervention && interventionMessage) {
+          // 동일 메시지 연속 표시 방지 (백엔드 쿨다운 보완)
+          if (interventionMessage === lastInterventionMsg) return;
+          lastInterventionMsg = interventionMessage;
+
           setMessages(prev => [...prev, { role: "ai", text: `💡 ${interventionMessage}` }]);
           await speakQuestion(interventionMessage);
+
+          // 개입 메시지 발화 후 10초간 폴링 일시정지 (사용자 응답 대기)
+          if (interventionTimerRef.current) clearInterval(interventionTimerRef.current);
+          setTimeout(() => {
+            // 10초 후 폴링 재개 (타이머가 이미 정리되지 않은 경우에만)
+            startInterventionCheck(sid);
+          }, 10000);
+
           // 개입 메시지 발화 후에는 다시 사용자 응답 대기 상태로 복귀
           setStatus("listening");
+          return; // setTimeout으로 재개할 것이므로 여기서 종료
         }
       } catch { /* ignore */ }
     }, 3000);

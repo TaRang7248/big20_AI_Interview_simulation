@@ -1659,6 +1659,8 @@ class InterviewInterventionManager:
     SOFT_WARNING_LENGTH = 600  # 부드러운 경고 길이
     SILENCE_THRESHOLD_MS = 5000  # 침묵 감지 임계값 (5초)
     TOPIC_RELEVANCE_THRESHOLD = 0.3  # 주제 관련성 임계값
+    INTERVENTION_COOLDOWN_SECONDS = 15  # 개입 간 최소 쿨다운 (15초)
+    MAX_INTERVENTIONS_PER_TURN = 3  # 턴당 최대 개입 횟수
 
     # 개입 메시지 템플릿
     INTERVENTION_MESSAGES = {
@@ -1704,6 +1706,9 @@ class InterviewInterventionManager:
             "intervention_count": 0,
             "soft_warning_given": False,
             "silence_intervention_given": False,  # 침묵 개입 중복 방지 플래그
+            "off_topic_intervention_given": False,  # 주제 이탈 개입 중복 방지 플래그
+            "hard_limit_intervention_given": False,  # 강제 제한 개입 중복 방지 플래그
+            "last_intervention_time": None,  # 마지막 개입 시각 (쿨다운 계산용)
             "current_question_keywords": [],
             "vad_buffer": [],  # VAD 신호 버퍼
             "turn_state": "ai_speaking",  # ai_speaking, user_speaking, silence
@@ -1726,6 +1731,14 @@ class InterviewInterventionManager:
         state["silence_intervention_given"] = (
             False  # 새 턴 시작 시 침묵 개입 플래그 리셋
         )
+        state["off_topic_intervention_given"] = (
+            False  # 새 턴 시작 시 주제 이탈 개입 플래그 리셋
+        )
+        state["hard_limit_intervention_given"] = (
+            False  # 새 턴 시작 시 강제 제한 플래그 리셋
+        )
+        state["last_intervention_time"] = None  # 쿨다운 타이머 리셋
+        state["intervention_count"] = 0  # 턴 시작 시 개입 카운트 리셋
         state["turn_state"] = "user_speaking"
 
         if question_keywords:
@@ -1788,7 +1801,12 @@ class InterviewInterventionManager:
     def check_intervention_needed(
         self, session_id: str, answer_text: str = None
     ) -> Optional[Dict]:
-        """개입이 필요한지 확인"""
+        """
+        개입이 필요한지 확인
+        - 글로벌 쿨다운: 마지막 개입 후 INTERVENTION_COOLDOWN_SECONDS 동안 추가 개입 차단
+        - 턴당 최대 개입 횟수: MAX_INTERVENTIONS_PER_TURN 초과 시 더 이상 개입하지 않음
+        - 유형별 중복 방지 플래그: off_topic, hard_limit, silence, soft_warning 각각 1회만
+        """
         if session_id not in self.session_states:
             return None
 
@@ -1805,10 +1823,27 @@ class InterviewInterventionManager:
                 datetime.now() - state["answer_start_time"]
             ).total_seconds()
 
+        # ──────────────────────────────────────────────
+        # 글로벌 가드: 쿨다운 + 최대 횟수 제한
+        # ──────────────────────────────────────────────
+
+        # 턴당 최대 개입 횟수 초과 시 더 이상 개입하지 않음
+        if state["intervention_count"] >= self.MAX_INTERVENTIONS_PER_TURN:
+            return None
+
+        # 마지막 개입 후 쿨다운(INTERVENTION_COOLDOWN_SECONDS) 시간 내이면 개입 스킵
+        last_time = state.get("last_intervention_time")
+        if last_time:
+            since_last = (datetime.now() - last_time).total_seconds()
+            if since_last < self.INTERVENTION_COOLDOWN_SECONDS:
+                return None
+
         intervention = None
 
-        # 1. 강제 시간 제한 초과
-        if elapsed_seconds >= self.MAX_ANSWER_TIME_SECONDS:
+        # 1. 강제 시간 제한 초과 — hard_limit_intervention_given 플래그로 1회만
+        if elapsed_seconds >= self.MAX_ANSWER_TIME_SECONDS and not state.get(
+            "hard_limit_intervention_given", False
+        ):
             intervention = {
                 "type": "hard_time_limit",
                 "reason": f"시간 초과 ({elapsed_seconds:.0f}초)",
@@ -1816,6 +1851,7 @@ class InterviewInterventionManager:
                 "action": "force_next_question",
                 "priority": "high",
             }
+            state["hard_limit_intervention_given"] = True
 
         # 2. 소프트 시간 경고
         elif (
@@ -1831,8 +1867,10 @@ class InterviewInterventionManager:
             }
             state["soft_warning_given"] = True
 
-        # 3. 답변 길이 초과
-        elif answer_length >= self.MAX_ANSWER_LENGTH:
+        # 3. 답변 길이 초과 — hard_limit_intervention_given 플래그 공유 (시간/길이 중 먼저 걸린 것 1회)
+        elif answer_length >= self.MAX_ANSWER_LENGTH and not state.get(
+            "hard_limit_intervention_given", False
+        ):
             intervention = {
                 "type": "hard_time_limit",
                 "reason": f"답변 길이 초과 ({answer_length}자)",
@@ -1840,6 +1878,7 @@ class InterviewInterventionManager:
                 "action": "force_next_question",
                 "priority": "high",
             }
+            state["hard_limit_intervention_given"] = True
 
         # 4. 소프트 길이 경고
         elif (
@@ -1855,8 +1894,12 @@ class InterviewInterventionManager:
             }
             state["soft_warning_given"] = True
 
-        # 5. 주제 이탈 감지
-        if intervention is None and answer_length > 100:
+        # 5. 주제 이탈 감지 — off_topic_intervention_given 플래그로 턴당 1회만
+        if (
+            intervention is None
+            and answer_length > 100
+            and not state.get("off_topic_intervention_given", False)
+        ):
             relevance = self._check_topic_relevance(
                 state["current_answer_text"], state["current_question_keywords"]
             )
@@ -1868,17 +1911,19 @@ class InterviewInterventionManager:
                     "action": "redirect",
                     "priority": "medium",
                 }
+                # 동일 턴 내 반복 주제 이탈 개입 차단
+                state["off_topic_intervention_given"] = True
 
         # 6. 장시간 침묵 감지 — 동일 침묵 구간에서 1회만 개입
         # silence_intervention_given 플래그로 중복 방지:
-        #   - False → 첫 침묵 5초 초과 시 개입 메시지 1회 전송 후 True로 설정
+        #   - False → 첫 침묵 8초 초과 시 개입 메시지 1회 전송 후 True로 설정
         #   - True → 사용자가 다시 발화할 때까지 추가 침묵 개입 차단
         #   - update_vad_signal()에서 is_speech=True 수신 시 False로 리셋
         if (
             intervention is None
             and state["silence_duration_ms"] > 8000
             and not state.get("silence_intervention_given", False)
-        ):  # 5초 이상 침묵 & 아직 개입하지 않은 경우
+        ):
             intervention = {
                 "type": "silence_detected",
                 "reason": f"침묵 감지 ({state['silence_duration_ms'] / 1000:.1f}초)",
@@ -1889,8 +1934,12 @@ class InterviewInterventionManager:
             # 동일 침묵 구간 내 반복 개입 차단
             state["silence_intervention_given"] = True
 
+        # ──────────────────────────────────────────────
+        # 개입 발생 시: 카운트 증가, 쿨다운 타이머 기록, 이력 저장
+        # ──────────────────────────────────────────────
         if intervention:
             state["intervention_count"] += 1
+            state["last_intervention_time"] = datetime.now()
             self.intervention_history[session_id].append(
                 {
                     **intervention,
@@ -1900,7 +1949,9 @@ class InterviewInterventionManager:
                 }
             )
             print(
-                f"⚠️ [Intervention] 세션 {session_id[:8]}... {intervention['type']}: {intervention['reason']}"
+                f"⚠️ [Intervention] 세션 {session_id[:8]}... "
+                f"{intervention['type']}: {intervention['reason']} "
+                f"(개입 {state['intervention_count']}/{self.MAX_INTERVENTIONS_PER_TURN})"
             )
 
         return intervention
