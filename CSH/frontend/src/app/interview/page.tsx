@@ -551,108 +551,53 @@ function InterviewPageInner() {
         ws.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
-            // 서버가 초기 연결 시 stt_available을 전달하면 STT 소스를 단일화
-            // - 서버 STT 가능: 브라우저 SpeechRecognition 비활성화
-            // - 서버 STT 불가: 브라우저 SpeechRecognition 활성화(폴백)
+            // ★ STT 정책: Google Web Speech API(브라우저)를 메인 STT로 사용
+            // 서버 stt_available 값에 관계없이 항상 브라우저 SpeechRecognition을 활성화합니다.
+            // Deepgram 서버 STT는 서버 측에서 비활성화되어 항상 false가 수신됩니다.
             if (data.type === "connected") {
-              const serverSttOn = Boolean(data.stt_available);
-              setServerSttAvailable(serverSttOn);
+              // 항상 브라우저 STT 모드로 고정
+              setServerSttAvailable(false);
+              sttSourceModeRef.current = "browser";
+              setBrowserSttEnabled(true);
               if (STT_RUNTIME_DEBUG) {
                 console.log(
-                  `[STT-CHECK][source-select] session=${targetSid.slice(0, 8)} server_stt=${serverSttOn ? "on" : "off"}`,
+                  `[STT-CHECK][source-select] session=${targetSid.slice(0, 8)} mode=browser (Google Web Speech API)`,
                 );
               }
-              if (serverSttOn) {
-                // Deepgram 우선: server_pending 모드로 대기.
-                // 이 구간에서는 브라우저 인식은 동작하되 누적은 하지 않음.
-                sttSourceModeRef.current = "server_pending";
-                setBrowserSttEnabled(true);
-                setSttAvailable(true);
-                if (sttPendingFallbackTimerRef.current) {
-                  clearTimeout(sttPendingFallbackTimerRef.current);
-                }
-                sttPendingFallbackTimerRef.current = setTimeout(() => {
-                  if (sttSourceModeRef.current === "server_pending") {
-                    sttSourceModeRef.current = "browser";
-                    if (STT_RUNTIME_DEBUG) {
-                      console.log(`[STT-CHECK][source-fallback] session=${targetSid.slice(0, 8)} mode=browser reason=server_timeout`);
-                    }
-                  }
-                }, 6000);
-                if (!recognitionRef.current) {
-                  initSpeechRecognition();
-                } else {
-                  try {
-                    recognitionRef.current.start();
-                  } catch {
-                    // 이미 시작된 상태일 수 있으므로 무시
-                  }
-                }
+              // server_pending 타이머가 남아 있다면 정리
+              if (sttPendingFallbackTimerRef.current) {
+                clearTimeout(sttPendingFallbackTimerRef.current);
+                sttPendingFallbackTimerRef.current = null;
+              }
+              // 브라우저 SpeechRecognition 초기화 및 시작
+              if (!recognitionRef.current) {
+                initSpeechRecognition();
               } else {
-                sttSourceModeRef.current = "browser";
-                setBrowserSttEnabled(true);
-                if (!recognitionRef.current) {
-                  initSpeechRecognition();
-                } else {
-                  try {
-                    recognitionRef.current.start();
-                  } catch {
-                    // 이미 시작된 상태일 수 있으므로 무시
-                  }
+                try {
+                  recognitionRef.current.start();
+                } catch {
+                  // 이미 시작된 상태일 수 있으므로 무시
                 }
               }
               return;
             }
+            // ★ 서버 STT가 비활성화된 상태에서 stt_status 메시지가 와도
+            // 브라우저 STT 모드를 유지합니다 (방어 코드).
             if (data.type === "stt_status") {
-              const available = Boolean(data.available);
-              setServerSttAvailable(available);
-              if (!available) {
-                sttSourceModeRef.current = "browser";
-                setBrowserSttEnabled(true);
-                if (sttPendingFallbackTimerRef.current) {
-                  clearTimeout(sttPendingFallbackTimerRef.current);
-                  sttPendingFallbackTimerRef.current = null;
-                }
-                try {
-                  recognitionRef.current?.start();
-                } catch {
-                  // ignore
-                }
-                if (STT_RUNTIME_DEBUG) {
-                  console.log(`[STT-CHECK][source-fallback] session=${targetSid.slice(0, 8)} mode=browser reason=${String(data.reason || "server_unavailable")}`);
-                }
-              }
+              // 항상 브라우저 모드 유지
+              setServerSttAvailable(false);
+              sttSourceModeRef.current = "browser";
+              setBrowserSttEnabled(true);
               return;
             }
+            // ★ 서버 STT 비활성화 상태에서 stt_result가 도착하면 무시
+            // (Deepgram이 꺼져 있으므로 이 메시지가 올 일은 없지만 방어 처리)
             if (data.type === "stt_result" && data.is_final) {
-              const transcript = String(data.transcript || "").trim();
-              // 서버 최종 전사가 한 번이라도 오면 서버 엔진으로 단일 전환
-              // 이후 브라우저 최종 전사는 무시하여 듀얼 누적을 원천 차단
-              if (transcript && sttSourceModeRef.current !== "server") {
-                sttSourceModeRef.current = "server";
-                if (sttPendingFallbackTimerRef.current) {
-                  clearTimeout(sttPendingFallbackTimerRef.current);
-                  sttPendingFallbackTimerRef.current = null;
-                }
-                setBrowserSttEnabled(false);
-                try {
-                  recognitionRef.current?.stop();
-                } catch {
-                  // ignore
-                }
-                if (STT_RUNTIME_DEBUG) {
-                  console.log(`[STT-CHECK][source-lock] session=${targetSid.slice(0, 8)} mode=server`);
-                }
+              // 서버 STT 결과 무시 — 메인 STT는 브라우저 SpeechRecognition
+              if (STT_RUNTIME_DEBUG) {
+                console.log(`[STT-CHECK][skip][server] 서버 STT 비활성화 상태에서 stt_result 수신 → 무시`);
               }
-              if (STT_RUNTIME_DEBUG && transcript) {
-                const normalized = transcript.toLowerCase().replace(/\s+/g, " ");
-                const isDuplicateCandidate = normalized === lastServerFinalRef.current;
-                console.log(
-                  `[STT-CHECK][append][server] session=${targetSid.slice(0, 8)} dup=${isDuplicateCandidate ? "Y" : "N"} text="${transcript.slice(0, 60)}"`,
-                );
-                lastServerFinalRef.current = normalized;
-              }
-              setSttText(prev => prev + " " + data.transcript);
+              return;
             }
             if (data.type === "event" && pushEventRef.current) {
               pushEventRef.current(data);
