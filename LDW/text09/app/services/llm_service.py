@@ -6,6 +6,8 @@ import google.generativeai as genai
 from ..config import GOOGLE_API_KEY, logger
 from ..database import get_db_connection
 from google.api_core.exceptions import ResourceExhausted
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 # Google GenAI FutureWarnings 무시
 warnings.filterwarnings("ignore", category=FutureWarning, module="google.generativeai")
@@ -196,85 +198,72 @@ def summarize_resume(text):
 def generate_next_question(job_title, applicant_name, current_q_count, prev_question, applicant_answer, next_phase, resume_summary=None, ref_questions=None, history_questions=None, audio_analysis=None):
     """
     지원자의 답변 데이터를 바탕으로 다음 번에 질문할 내용을 빠르고 동기적으로 생성합니다.
+    LangChain의 메모리 방식을 활용해 대화 흐름(히스토리)을 컨텍스트로 전달하여
+    이전 질문을 잘 기억하는 꼬리 질문을 생성합니다.
     (답변 평가는 진행하지 않습니다)
     """
-    model = get_model()
-    
     if next_phase == "END":
          return "면접이 종료되었습니다. 수고하셨습니다."
          
+    # LangChain Chat 모델 인스턴스화
+    # temperature를 적절히 조절하여 일관성 있고 맥락에 맞는 면접 진행
+    chat_model = ChatGoogleGenerativeAI(
+        model="gemini-2.0-flash",
+        google_api_key=GOOGLE_API_KEY,
+        temperature=0.7,
+        max_retries=3
+    )
+
     # 프롬프트를 위한 컨텍스트 구성
     resume_context = ""
     if resume_summary:
-        resume_context = f"""
-        [지원자 이력서 요약]
-        {resume_summary}
-        """
+        resume_context = f"\\n[지원자 이력서 요약]\\n{resume_summary}\\n"
         
     ref_context = ""
     if ref_questions:
         ref_questions_list = list(ref_questions)
         ref_q_text = "\\n".join([f"- {str(q)}" for q in ref_questions_list[:5]])
-        ref_context = f"""
-        [직무 관련 참고 질문 (질문 생성 시 참고용)]
-        {ref_q_text}
-        """
+        ref_context = f"\\n[직무 관련 참고 질문 (질문 생성 시 참고용)]\\n{ref_q_text}\\n"
 
-    history_context = ""
+    # 시스템 프롬프트: LangChain의 SystemMessage로 설정
+    system_prompt = f"""당신은 {job_title} 직무의 최고 채용 담당자이자 면접관입니다.
+지원자의 이름은 {applicant_name}입니다.
+현재 {current_q_count}번째 질문 절차를 마쳤으며, 다음 이어지는 절차는 [{next_phase}] 단계입니다.
+다음 생성할 질문은 이 [{next_phase}] 단계에 부합해야 합니다.{resume_context}{ref_context}
+질문은 자연스럽고 예의 바른 구어체(존댓말)로, 이전 답변과 부드럽게 이어지도록 하거나 새로운 관련 주제로 전환되도록 1~2문장으로 짧고 명확하게 작성해주세요.
+중복된 질문을 생성하지 마시고 이전 대화 문맥(History)을 반드시 기억하여 꼬리 질문을 유도하세요.
+
+반드시 오직 JSON 형식으로만 응답을 반환해주세요. 마크다운 코드 블록(```json ... ```)은 절대 사용하지 마세요.
+출력 형식 예시:
+{{
+    "next_question": "다음 질문 내용..."
+}}"""
+
+    messages = [SystemMessage(content=system_prompt)]
+
+    # 이전 질문/답변 히스토리 적용 (LangChain 메모리 방식)
+    # history_questions는 (이전 질문, 이전 답변) 튜플 리스트로 받습니다.
     if history_questions:
-        history_questions_list = list(history_questions)
-        hist_text = "\\n".join([f"- {str(q)}" for q in history_questions_list])
-        history_context = f"""
-        [이미 질문한 내역 (중복 질문 절대 금지)]
-        {hist_text}
-        
-        ※ 주의: 위 [이미 질문한 내역]에 있는 질문들과 의미가 유사하거나 겹치는 질문은 절대로 다시 하지 마세요. 새로운 관점이나 더 깊이 있는 질문을 해주세요.
-        """
+        for q, a in history_questions:
+            if q:
+                messages.append(AIMessage(content=q))
+            if a:
+                messages.append(HumanMessage(content=a))
 
-    prompt = f"""
-    [상황]
-    직무: {job_title}
-    면접자: {applicant_name}
-    현재 진행 단계: {current_q_count}번째 질문 완료. 다음은 {current_q_count + 1}번째 질문인 [{next_phase}] 단계입니다.
-    
-    {resume_context}
-    {ref_context}
-    {history_context}
+    # 마지막 위치에 현재 방금 수행한 질문과 지원자의 답변을 추가
+    if prev_question:
+        messages.append(AIMessage(content=prev_question))
+    if applicant_answer:
+        messages.append(HumanMessage(content=applicant_answer))
 
-    [이전 질문]
-    {prev_question}
-    
-    [지원자 답변]
-    {applicant_answer}
-    
-    [작업] 다음 질문을 생성해주세요.
-    - 다음 단계([{next_phase}])에 맞는 질문이어야 합니다.
-    - [지원자 이력서 요약]이나 [직무 관련 참고 질문]을 참고하되, [이미 질문한 내역]과 겹치지 않게 하세요.
-    - 이전 답변과 자연스럽게 이어지거나, 새로운 주제로 전환하세요.
-    - 질문은 구어체로 정중하게 1~2문장으로 작성해주세요.
-    
-    [출력 형식]
-    JSON 형식으로만 출력해주세요. 마크다운 코드 블록(```json ... ```)은 사용하지 마세요.
-    {{
-        "next_question": "다음 질문 내용..."
-    }}
-    """
-    
     try:
-        response = generate_content_with_retry(
-            model, 
-            prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
-        
-        text_response = clean_json_string(response.text)
+        # LangChain invoke 호출을 통한 LLM 답변 생성
+        response = chat_model.invoke(messages)
+        text_response = clean_json_string(response.content)
         result = json.loads(text_response)
         return result.get("next_question", "다음 질문을 준비하지 못했습니다.")
-    except ResourceExhausted:
-         logger.error("LLM 할당량 초과")
-         return "다음 질문으로 넘어가겠습니다. (잠시 후 다시 시도해주세요)"
     except Exception as e:
-        logger.error(f"질문 생성 오류: {e}")
+        logger.error(f"LangChain 질문 생성 오류: {e}")
         return "다음 질문으로 넘어가겠습니다."
 
 

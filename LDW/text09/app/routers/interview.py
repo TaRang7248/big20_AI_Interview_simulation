@@ -200,11 +200,21 @@ async def submit_answer(
 
         # 6. 평가 및 다음 질문 생성
         # 6. 다음 질문 우선 생성 (빠른 응답을 위해)
-        # 중복을 방지하기 위해 이전의 모든 질문을 가져옵니다.
-        c.execute("SELECT Create_Question FROM Interview_Progress WHERE Interview_Number = %s", (interview_number,))
+        # LangChain 대화 기록(Memory) 구성을 위해 이전의 모든 질문과 답변을 가져옵니다.
+        c.execute("""
+            SELECT id, Create_Question, Question_answer 
+            FROM Interview_Progress 
+            WHERE Interview_Number = %s 
+            ORDER BY id ASC
+        """, (interview_number,))
         history_rows = c.fetchall()
         
-        history_questions = [r[0] for r in history_rows if r[0]]
+        history_questions = []
+        for r in history_rows:
+            # 현재 처리 중인 질문 단계는 히스토리에서 제외 (바로 직전 질문은 개별 파라미터로 처리)
+            if r[0] == current_row_id:
+                continue
+            history_questions.append((r[1], r[2] if r[2] else ""))
 
         next_question = generate_next_question(
             job_title, 
