@@ -14,20 +14,31 @@
 - **CPU Workers**: Vision (MediaPipe), Emotion (DeepFace), Audio (Parselmouth)
 - **SSE Broadcaster**: Real-time Projection push
 - **WebRTC Signaling**: SDP Offer/Answer Endpoint
+- **Capability Gating**: `video_enabled=false`, `webrtc_enabled=false` (Default OFF)
 
 ### Runtime Constraints
 
 - **Hardware**: GTX 1660 Super 6GB
-- **Concurrency**: Max 5 concurrent sessions (due to VRAM limits)
+- **Concurrency**: Max 5 concurrent sessions (GPU Mutex LUA Guard)
+- **GPU 429 Policy**:
+  - Atomic `INCR` via Redis LUA script (Limit=5).
+  - Rollback `DECR` on failure (try/finally).
+  - Header: `Retry-After: 30`, `X-Error-Code: E_GPU_QUEUE_LIMIT`.
+- **Session Terminal (Abort)**:
+  - Terminal Status: `ABORTED`.
+  - Re-entry Guard: `409 Conflict` (E_SESSION_TERMINAL).
+- **Mode Immutability**:
+  - `interview_mode` is immutable after session status leaves `APPLIED`.
+  - Violations: `409 Conflict` (E_MODE_IMMUTABLE).
+- **Evaluation Determinism (C1)**:
+  - `evaluation_input_hash` is the single source of truth for evaluation identity.
+  - Inputs: Context History, stt_snapshot_hash, resume/policy hashes.
+  - STT Rule: Raw transcripts must be disposed immediately after hashing.
 - **Redis Streams**: `MAXLEN ~10,000` per session
 - **Persistence**: 5-min temp TTL for buffers
 - **GPU Mutex**: STT Yield to LLM, Soft Degrade after 3 failures
 - **Neutral Default**: 0.5 for all normalized metrics
 - **STT Privacy**: Raw text excluded from DB (Projection only, masked)
-
-**[위험 요소]**: 
-- Redis 미러링 실패 시 PG로부터의 Hydration 경로가 존재하나, 고부하 상황에서 성능 검증 필요.
-- Multi-modal 분석 결과의 평가 엔진 연동이 일부 Placeholder 상태임.
 
 ---
 

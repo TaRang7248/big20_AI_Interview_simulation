@@ -1208,3 +1208,20 @@ Dual Write 제거는 TASK-027 안정화 이후 수행한다.
     - **Authority**: PostgreSQL이 유일한 권위 저장소임을 유지 (`multimodal_observations`).
     - **No Write-Back**: Redis Projection은 오직 Read-Only 최적화 용도로만 사용됨.
     - **Idempotency**: `signal_id` 기반 멱등 쓰기 정책 준수.
+
+---
+
+### [2026-03-03] Phase 3 Fixpack (C1-E) & DONE LOCK
+- **요약**: Phase 3 검수 후 식별된 결정성(Determinism), 안정성(Stability), 원자성(Atomicity) 결함을 해결하고 Phase 3 "Done Lock" 승인 완료.
+- **주요 구현**:
+    - **[C1] Evaluation Determinism**: `RubricEvaluator`에서 캐노니컬 JSON 및 SHA256을 이용한 `evaluation_input_hash` 산출. STT 원문은 해시 생성 후 즉시 폐기(Hard Rule).
+    - **[C2] Blind Mode Abort**: 오디오/시스템 실패 시 `ABORTED` 터미널 상태 전이 및 409(E_SESSION_TERMINAL) 재진입 차단.
+    - **[C3] Mode Immutability**: 시작된 세션의 `interview_mode` 변경 시도를 서버에서 원천 차단(409 E_MODE_IMMUTABLE).
+    - **[D] Atomic GPU 429**: Redis LUA 스크립트를 도입하여 GPU 큐 카운터 레이스 컨디션 해결 및 Zero-floor 안전 보장.
+    - **[E] Error Standard**: 모든 신규 에러 응답에 `X-Error-Code` 및 `X-Trace-Id` 헤더 필수 포함.
+- **검증 결과**:
+    - `verify_fixpack.py`: **Pass**
+        - C1: 동일 입력/순서 무관 해시 일치 확인.
+        - C2: `ABORTED` 상태 재진입 시 409 차단 확인.
+        - D: 100회 동시성 스트레스 테스트 중 Limit=5 엄격 준수 확인.
+- **상태**: **DONE LOCK** (2026-03-03)

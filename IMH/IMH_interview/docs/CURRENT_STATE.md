@@ -83,7 +83,7 @@
     - No runtime snapshot mutation
     - Deterministic distribution maintained
 
-### 2.9 Multimodal Layer (WebRTC Real-time) - 완료
+### 2.9 Multimodal Layer (WebRTC Real-time) - DONE LOCK
 - Real-time Audio/Video ingestion
 - STT (Faster-Whisper, Resident)
 - Vision (MediaPipe 2-3FPS)
@@ -96,14 +96,13 @@
 - PDF Snapshot Integration
 - GPU Mutex with Cooperative Yield
 - OOM Graceful Degradation
+- **Fixpack Hardening (C1-E)**: Evaluation Determinism (Input Hash), Session Abort (Terminal 409), Mode Immutability, Atomic GPU 429 (LUA).
 
 **Contracts:**
 - Authority = PostgreSQL only
 - Projection = Non-authoritative
-- Evaluation Integration = Flag OFF (default)
-- 잔여 승격 조건:
-  - DB 레벨 Snapshot Immutable 강제 및 UPSERT 갱신 경로 차단 (R-3 제거)
-  - DB 레벨 tag_code 허용 값 제약 강화 (R-2 제거)
+- Evaluation Integration = Deterministic Input Hash (C1)
+- Terminal States = ABORTED (C2)
 
 ---
 
@@ -118,6 +117,9 @@
 | No Write-Back | Redis에서 PG로의 쓰기 경로는 존재하지 않는다. | LOCKED |
 | Track A/B 분리 | 통계(비즈니스)와 관측(운영)은 서로 간섭하지 않는다. | LOCKED |
 | Heavy Query Isolation | 운영에 비중이 큰 쿼리는 별도 경로(MView 등)로 격리한다. | LOCKED |
+| Evaluation Determinism | evaluation_input_hash 기반 결정성 평가 보장. | LOCKED |
+| Session Terminal | ABORTED 상태 진입 시 재진입 원천 차단. | LOCKED |
+| GPU Concurrency | Redis LUA 기반 원자적 동시성 제어. | LOCKED |
 
 ---
 
@@ -140,6 +142,10 @@
 ## 5. 현재 작업 섹션
 
 ### ACTIVE
+- **Phase 4 Plan (Statistical + Audit Hardening)**: [PLANNING]
+  - Goal: PG-authoritative dashboard, result separation, admin audit.
+
+### DONE
 - **TASK-033 (모델 비교 및 평가 취약점 탐지)**: [DONE]
   - 4상황(S1~S4) 기반 LLM 비교 벤치마크 완료 (On-Prem 100%).
   - Llama 3.2 루프 결함 수정 및 `exaone3.5:2.4b` 메인 엔진 확정.

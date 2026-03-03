@@ -310,47 +310,23 @@
   - python scripts/verify_task_032.py Pass
 - Status: BACKLOG
 
----
-## ACTIVE
-
-### TASK-031 Snapshot Immutable DB 강제 및 갱신 차단
-- Goal: 세션 스냅샷 데이터가 생성 이후 어떠한 경로로도 수정되지 않도록 DB 레벨 제약 강화 (R-3 대응)
-- Scope: `PostgreSQLSessionRepository` UPSERT SQL 및 schema 정의
-- Verification: python scripts/verify_task_031.py Pass
-- Status: DONE
-
----
-
-### TASK-034 STT 벤치마크 및 엔진 선정
-- Goal: 실제 사용자 음성 데이터를 기반으로 로컬 STT 엔진(Faster-Whisper vs SenseVoice) 비교 및 최종 확정.
-- Scope: 전문 용어(Foreign Terms) 인식 최적화 및 메트릭 분석.
-- Verification: `docs/STT_ENGINE_SELECTION_REPORT.md` (EXIT 0)
-- Status: DONE
-
----
-
-
-### TASK-M: Multimodal Integration (WebRTC Real-time MVP)
-- Goal: 실시간 멀티모달(WebRTC, STT, Vision, Emotion, Audio) 분석 파이프라인 구축 및 API 연동.
-- Scope: WebRTC Signaling, Redis Streams, GPU Mutex, Analysis Workers, Projection/SSE API.
-- Verification: python scripts/verify_mm_cli.py Pass
-- Status: DONE
-
----
-
-### TASK-M-FIX: Phase 3 Stability & Determinism Fixpack (ACTIVE)
+### TASK-M-FIX: Phase 3 Stability & Determinism Fixpack
 - Goal: Phase 3 감사 결함(C1-C3) 해결 및 GPU 429 원자성 확보.
 - Scope:
     - evaluation_input_hash + STT snapshot hash (Determinism)
     - Blind Mode audio fail Abort 처리 (Authority)
     - interview_mode immutability 409 가드 (Contract)
     - GPU 429 Redis INCR 원자성 개선 (Atomic)
-- Verification: Phase 3 Done Lock 조건 충족 및 회귀 테스트 Pass
-- Status: ACTIVE
+- Verification: scripts/verify_fixpack.py Pass
+- Status: DONE
 
 ---
 
-## BACKLOG
+## ACTIVE
+
+### PHASE-4-PLAN: Statistical + Audit Hardening
+- Goal: PG-authoritative 통계 대시보드 및 관리자 감사 타임라인 설계.
+- Status: ACTIVE
 
 ### TASK-FRONT-001: WebRTC Frontend MVP 구현
 - Goal: 백엔드 멀티모달 API를 소비하는 프론트엔드 연동 개발.

@@ -220,6 +220,11 @@ export default function VideoInterviewSession() {
         } catch (err) {
             setWebrtcState('failed')
             setError({ error_code: ERROR_CODES.E_UNKNOWN, trace_id: traceId, message: `WebRTC 연결 실패: ${err.message}` })
+
+            // Phase 3-FIX-C2: Notify server of terminal failure
+            interviewsApi.abort(interviewId).catch(abortErr => {
+                console.error("Failed to notify server of abort:", abortErr)
+            })
         }
     }, [interviewId, webrtc_enabled, webrtcState])
 

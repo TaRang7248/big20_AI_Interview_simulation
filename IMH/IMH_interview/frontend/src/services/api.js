@@ -166,6 +166,8 @@ export const interviewsApi = {
     getChat: (id) => api.get(`/interviews/${id}/chat`),
     sendChat: (id, content) => api.post(`/interviews/${id}/chat`, { content }),
     getResult: (id) => api.get(`/interviews/${id}/result`),
+    abort: (id) => api.post(`/interviews/${id}/abort`), // Phase 3-FIX-C2
+    update: (id, data) => api.patch(`/interviews/${id}`, data), // Phase 3-FIX-C3
 }
 
 // ─── Resume API ──────────────────────────────────────────────────────────────
