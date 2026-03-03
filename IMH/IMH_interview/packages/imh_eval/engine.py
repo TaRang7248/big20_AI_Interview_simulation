@@ -53,12 +53,54 @@ class EvaluationContext(BaseModel):
     
     # Mock Data for Missing Providers (RAG/LLM)
     # in real implemenation, these would be results from those providers
-    rag_keywords_found: List[str] = Field(default_factory=list)
-    ast_complexity: Optional[float] = None
-    star_structure_detected: bool = False
-    rephrasing_detected: bool = False
+    # Determinism Inputs (Section 1 / Phase 3-FIX-C1)
+    resume_snapshot_hash: Optional[str] = None
+    policy_snapshot_hash: Optional[str] = None
+    stt_snapshot_hash: Optional[str] = None
+    phase_flow: Optional[str] = "MAIN"
+    context_history: List[Dict[str, str]] = Field(default_factory=list)
+    version: int = 1
 
 class RubricEvaluator:
+    def compute_stt_snapshot_hash(self, transcripts: List[Dict[str, Any]]) -> str:
+        """
+        [C1] Hard Rule: Compute hash from (turn_id, final_text) only.
+        Raw transcripts are disposed after this call.
+        """
+        import json
+        import hashlib
+        
+        # Sort by turn_id for ordering consistency - Section 1.4.2
+        sorted_transcripts = sorted(transcripts, key=lambda x: x.get("turn_id", 0))
+        
+        # Map to canonical form - Section 1.4.2
+        canonical_list = [{"id": t.get("turn_id"), "text": t.get("text")} for t in sorted_transcripts]
+        
+        payload = json.dumps(canonical_list, sort_keys=True, separators=(',', ':'))
+        return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+    def compute_input_hash(self, context: EvaluationContext) -> str:
+        """
+        [C1] Single Source of Responsibility for Deterministic Hashing.
+        Canonical Form: JSON sorted keys, separators=(',', ':'), UTF-8.
+        """
+        import json
+        import hashlib
+        
+        # Prepare hashing payload - Section 1.2
+        payload = {
+            "resume_snapshot_hash": context.resume_snapshot_hash or "",
+            "policy_snapshot_hash": context.policy_snapshot_hash or "",
+            "context_history": context.context_history, # Already sorted by created_at in engine
+            "stt_snapshot_hash": context.stt_snapshot_hash or "",
+            "phase_flow": context.phase_flow,
+            "version": context.version
+        }
+        
+        # Canonicalization - Section 1.2
+        canonical_json = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+        return hashlib.sha256(canonical_json.encode('utf-8')).hexdigest()
+
     def evaluate(self, context: EvaluationContext, snapshot_weights: Optional[Dict[str, float]] = None) -> EvaluationResult:
         # ── TASK-035: Weight Sync Wiring ─────────────────────────────────
         # Flag OFF → identical to original behavior (uses legacy get_weights)
@@ -168,5 +210,6 @@ class RubricEvaluator:
             total_score=total_weighted_score,
             details=items,
             job_category=context.job_category,
-            job_id=context.job_id
+            job_id=context.job_id,
+            input_hash=self.compute_input_hash(context)  # Save hash in result
         )

@@ -14,6 +14,7 @@ import CandidateResume from './pages/candidate/CandidateResume'
 import DeviceCheck from './pages/candidate/DeviceCheck'
 import InterviewSession from './pages/candidate/InterviewSession'
 import InterviewResult from './pages/candidate/InterviewResult'
+import VideoInterviewSession from './pages/candidate/VideoInterviewSession'  // Phase 3
 
 // Admin pages
 import AdminPostings from './pages/admin/AdminPostings'
@@ -56,6 +57,8 @@ function AppRoutes() {
             <Route path="/candidate/resume" element={<PrivateRoute><AppLayout><CandidateResume /></AppLayout></PrivateRoute>} />
             <Route path="/candidate/device-check" element={<PrivateRoute><AppLayout><DeviceCheck /></AppLayout></PrivateRoute>} />
             <Route path="/candidate/interview/:interviewId" element={<PrivateRoute><InterviewSession /></PrivateRoute>} />
+            {/* Phase 3: VIDEO mode — capability gate redirect handled in VideoInterviewSession */}
+            <Route path="/candidate/interview/:interviewId/video" element={<PrivateRoute><VideoInterviewSession /></PrivateRoute>} />
             <Route path="/candidate/result/:interviewId" element={<PrivateRoute><AppLayout><InterviewResult /></AppLayout></PrivateRoute>} />
 
             {/* Admin routes */}

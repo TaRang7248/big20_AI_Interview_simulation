@@ -10,6 +10,7 @@ class SessionStatus(str, Enum):
     COMPLETED = "COMPLETED"
     INTERRUPTED = "INTERRUPTED"
     EVALUATED = "EVALUATED"
+    ABORTED = "ABORTED"
 
 class SessionEvent(str, Enum):
     """
@@ -30,3 +31,4 @@ class TerminationReason(str, Enum):
     EARLY_EXIT_SIGNAL = "EARLY_EXIT_SIGNAL"
     INTERRUPTED_BY_USER = "INTERRUPTED_BY_USER"
     INTERRUPTED_BY_ERROR = "INTERRUPTED_BY_ERROR"
+    ABORTED_BY_SYSTEM = "ABORTED_BY_SYSTEM"

@@ -338,6 +338,18 @@
 
 ---
 
+### TASK-M-FIX: Phase 3 Stability & Determinism Fixpack (ACTIVE)
+- Goal: Phase 3 감사 결함(C1-C3) 해결 및 GPU 429 원자성 확보.
+- Scope:
+    - evaluation_input_hash + STT snapshot hash (Determinism)
+    - Blind Mode audio fail Abort 처리 (Authority)
+    - interview_mode immutability 409 가드 (Contract)
+    - GPU 429 Redis INCR 원자성 개선 (Atomic)
+- Verification: Phase 3 Done Lock 조건 충족 및 회귀 테스트 Pass
+- Status: ACTIVE
+
+---
+
 ## BACKLOG
 
 ### TASK-FRONT-001: WebRTC Frontend MVP 구현

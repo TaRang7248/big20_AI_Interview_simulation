@@ -95,41 +95,66 @@ async def webrtc_offer(session_id: str, req: WebRTCOfferRequest):
             detail="WebRTC not enabled. Set MM_ENABLE=true and MM_ENABLE_WEBRTC=true.",
         )
 
-    # Session concurrency gate (plan §11)
+    # Session concurrency gate (Section 11 / Phase 3-FIX-D)
     r = _get_redis()
-    active = int(r.get(ACTIVE_SESSIONS_KEY) or 0)
-    if active >= MMFlags.MM_WEBRTC_MAX_SESSIONS:
+    import uuid as _uuid
+    _trace = f"tr-{_uuid.uuid4().hex[:16]}"
+    
+    # LUA: atomic check and increment - Section 4.1
+    lua_incr = """
+    local current = redis.call('GET', KEYS[1]) or '0'
+    if tonumber(current) >= tonumber(ARGV[1]) then
+        return -1
+    else
+        return redis.call('INCR', KEYS[1])
+    end
+    """
+    active = r.register_script(lua_incr)(keys=[ACTIVE_SESSIONS_KEY], args=[MMFlags.MM_WEBRTC_MAX_SESSIONS])
+    
+    if active == -1:
         raise HTTPException(
             status_code=429,
-            detail=f"WebRTC session limit reached ({MMFlags.MM_WEBRTC_MAX_SESSIONS} max). "
-                   "Retry when a session slot is free.",
+            detail=f"WebRTC session limit reached ({MMFlags.MM_WEBRTC_MAX_SESSIONS} max). Retry when a session slot is free.",
+            headers={
+                "X-Error-Code": "E_GPU_QUEUE_LIMIT",
+                "X-Trace-Id": _trace,
+                "Retry-After": "30",
+            },
         )
-
+    
+    # Standard header for 503 - Phase 3-FIX-E
     try:
         from aiortc import RTCPeerConnection, RTCSessionDescription  # type: ignore
     except ImportError:
+        # Atomic rollback of the counter on failure
+        r.decr(ACTIVE_SESSIONS_KEY)
         raise HTTPException(
             status_code=503,
             detail="aiortc not installed. WebRTC unavailable.",
+            headers={
+                "X-Error-Code": "E_WEBRTC_DISABLED",
+                "X-Trace-Id": _trace,
+            }
         )
-
+    
     pc = RTCPeerConnection()
-    offer = RTCSessionDescription(sdp=req.sdp, type=req.type)
-    await pc.setRemoteDescription(offer)
-    answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-
-    # Increment active session counter
-    r.incr(ACTIVE_SESSIONS_KEY)
-
-    # Register cleanup on ICE disconnection
-    @pc.on("connectionstatechange")
-    async def on_state_change():
-        if pc.connectionState in ("failed", "closed", "disconnected"):
-            r.decr(ACTIVE_SESSIONS_KEY)
-            logger.info("WebRTC session closed for session_id=%s state=%s",
-                        session_id, pc.connectionState)
-            await pc.close()
+    try:
+        offer = RTCSessionDescription(sdp=req.sdp, type=req.type)
+        await pc.setRemoteDescription(offer)
+        answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+    except Exception as e:
+        logger.error("WebRTC offer processing failed session_id=%s trace=%s: %s", session_id, _trace, e)
+        # Atomic rollback of the counter on failure
+        r.decr(ACTIVE_SESSIONS_KEY)
+        raise HTTPException(
+            status_code=500,
+            detail=f"WebRTC Signaling Failed: {str(e)}",
+            headers={
+                "X-Error-Code": "E_WEBRTC_FAILED",
+                "X-Trace-Id": _trace,
+            }
+        )
 
     logger.info("WebRTC offer processed for session_id=%s", session_id)
     return WebRTCAnswerResponse(

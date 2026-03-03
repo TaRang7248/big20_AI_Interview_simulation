@@ -21,10 +21,22 @@ const MVP_DEFAULTS = {
     DEBUG_PANEL: false,     // Dev-only toggle (Section 67)
 }
 
+// Phase 3: Session-level VIDEO capability state (from policy_snapshot)
+const VIDEO_DEFAULTS = {
+    interview_mode: 'TEXT',          // TEXT | VIDEO — from server policy_snapshot
+    video_enabled: false,
+    webrtc_enabled: false,
+    tts_enabled: false,
+    blind_mode: false,               // ai_question_text_visible === false
+    ai_question_text_visible: true,
+}
+
 export const useCapabilityStore = create((set, get) => ({
     capabilities: { ...MVP_DEFAULTS },
     isLoaded: false,
     loadError: null,
+    // Phase 3: session-level video caps
+    ...VIDEO_DEFAULTS,
 
     // Check if a feature/capability is enabled
     isEnabled: (featureKey) => {
@@ -40,4 +52,33 @@ export const useCapabilityStore = create((set, get) => ({
     setDefaults: () => {
         set({ capabilities: { ...MVP_DEFAULTS }, isLoaded: true, loadError: 'LOAD_FAILED_USE_DEFAULTS' })
     },
+
+    /**
+     * Phase 3: Hydrate session-level video caps from server policy_snapshot.
+     * Called once on session authority pull. Source: server only.
+     * DOM removal (not hidden) for video components when video_enabled=false.
+     */
+    hydrateFromSession: (sessionData) => {
+        const mode = sessionData?.interview_mode || sessionData?.mode || 'TEXT'
+        const textVisible = sessionData?.ai_question_text_visible ?? true
+        const isVideo = mode === 'VIDEO'
+        set({
+            interview_mode: mode,
+            video_enabled: isVideo,
+            webrtc_enabled: isVideo,
+            tts_enabled: isVideo,
+            blind_mode: isVideo && !textVisible,
+            ai_question_text_visible: textVisible,
+            capabilities: {
+                ...get().capabilities,
+                VIDEO_MODE: isVideo,
+                BLIND_MODE: isVideo && !textVisible,
+                MULTIMODAL: isVideo,
+            },
+        })
+    },
+
+    /** Reset session-level caps on teardown */
+    resetSession: () => set({ ...VIDEO_DEFAULTS }),
 }))
+

@@ -382,6 +382,23 @@ class InterviewSessionEngine:
         self._finalize_persistence()
         self._atomic_commit()
 
+    def abort_session(self, reason: TerminationReason):
+        """
+        Final Terminal State for system/audio failures. (Phase 3-FIX-C2)
+        Does NOT trigger evaluation.
+        """
+        logger.error("Aborting session %s. Reason: %s", self.session_id, reason)
+        self._update_status(SessionStatus.ABORTED)
+        
+        # Save aggregated results without evaluation
+        self.history_repo.save_interview_result(self.session_id, {
+            "final_status": SessionStatus.ABORTED,
+            "completed_questions": self.context.completed_questions_count,
+            "abort_reason": reason
+        })
+        
+        self._atomic_commit()
+
     def resume_session(self):
         """
         Attempt to resume an INTERRUPTED session.

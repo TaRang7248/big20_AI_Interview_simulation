@@ -222,6 +222,45 @@ class SessionService:
                     self.concurrency_manager.idempotency.release(request_id)
                 raise
 
+    def abort_session(self, session_id: str, reason: str = "AUDIO_FAIL") -> SessionResponseDTO:
+        """
+        Orchestrates terminal session abort (Section 2.1).
+        Transitions to ABORTED state.
+        """
+        from packages.imh_session.state import TerminationReason
+        
+        # 1. Acquire Lock
+        with self.concurrency_manager.acquire_lock(session_id):
+            # 2. Load context
+            context = self._load_session_context(session_id)
+            if not context:
+                raise ValueError(f"Session {session_id} not found")
+                
+            # 3. Instantiate Engine
+            # Recreate config from Immutable Job
+            job = self.job_repo.find_by_id(context.job_id)
+            config = job.create_session_config()
+            
+            engine = InterviewSessionEngine(
+                session_id=session_id,
+                config=config,
+                state_repo=self.state_repo,
+                history_repo=self.history_repo,
+                question_generator=self.question_generator,
+                qbank_service=self.qbank_service,
+                pg_state_repo=self.postgres_state_repo
+            )
+            
+            # 4. Abort
+            term_reason = TerminationReason.ABORTED_BY_SYSTEM if reason == "AUDIO_FAIL" else TerminationReason.INTERRUPTED_BY_ERROR
+            engine.abort_session(term_reason)
+            
+            # 5. Mirror & Invalidate
+            self._sync_runtime_mirror(session_id, engine.context)
+            self.projection_repo.delete(session_id)
+            
+            return SessionMapper.to_dto(engine.context)
+
     def get_session(self, session_id: str) -> Optional[SessionResponseDTO]:
         """
         Read-Only operation. Bypasses Lock.
