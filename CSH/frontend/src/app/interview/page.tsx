@@ -99,7 +99,11 @@ function InterviewPageInner() {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const vadIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const vadSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const sttProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  // STT 오디오 처리 노드:
+  //  - 우선: AudioWorkletNode (별도 오디오 스레드에서 처리 → 프레임 드롭 방지)
+  //  - 폴백: ScriptProcessorNode (AudioWorklet 미지원 브라우저)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sttProcessorRef = useRef<AudioWorkletNode | any>(null);
   const sttMuteGainRef = useRef<GainNode | null>(null);
   const sttPendingFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -246,11 +250,81 @@ function InterviewPageInner() {
    *
    * @param stream - getUserMedia()로 얻은 마이크 포함 MediaStream
    */
-  const startVAD = (stream: MediaStream) => {
+  const startVAD = async (stream: MediaStream) => {
     try {
+      // ── Anti-aliasing FIR Low-Pass Filter 커널 캐시 ──
+      // toPcm16k()가 오디오 콜백(onaudioprocess)에서 매 프레임 호출되므로,
+      // 커널 생성은 클로저 레벨에서 한 번만 수행하여 성능을 보장합니다.
+      // Map<srcRate, Float32Array> 형태로 샘플레이트별 커널을 캐싱합니다.
+      const lpfKernelCache = new Map<number, Float32Array>();
+
+      /**
+       * 주어진 소스 샘플레이트에 대한 Anti-aliasing FIR LPF 커널을 생성합니다.
+       *
+       * 알고리즘: Hamming-windowed sinc filter
+       *  - 컷오프 주파수: 8000Hz (16kHz 타겟의 Nyquist 주파수)
+       *  - 탭 수: 31 (홀수 — 대칭 FIR 필터의 선형 위상 특성 보장)
+       *  - Hamming 윈도우: sinc 함수의 사이드로브(side lobe)를 억제하여
+       *    스톱밴드 감쇠(≈-40dB)를 확보
+       *
+       * 왜 필요한가:
+       *  기존 선형 보간 다운샘플링은 Nyquist 이론을 위반합니다.
+       *  48kHz → 16kHz 변환 시 8kHz 이상의 고주파 성분이 접혀 들어와(aliasing)
+       *  ㅂ/ㅍ, ㅈ/ㅊ 같은 고주파 자음의 구별력이 떨어집니다.
+       *  LPF로 8kHz 이상을 미리 제거하면 이 문제가 해결됩니다.
+       *
+       * @param srcRate - 소스 오디오의 샘플레이트 (예: 48000, 44100)
+       * @returns 정규화된 FIR 필터 커널 (합 = 1.0)
+       */
+      const buildLpfKernel = (srcRate: number): Float32Array => {
+        const cached = lpfKernelCache.get(srcRate);
+        if (cached) return cached;
+
+        const TARGET_RATE = 16000;
+        const FILTER_LEN = 31;              // FIR 탭 수 (홀수)
+        const halfLen = Math.floor(FILTER_LEN / 2);
+        const cutoff = (TARGET_RATE / 2) / (srcRate / 2); // 정규화 컷오프 (0~1)
+
+        const kernel = new Float32Array(FILTER_LEN);
+        let sum = 0;
+
+        for (let i = 0; i < FILTER_LEN; i++) {
+          const n = i - halfLen;
+          // windowed sinc: sinc(fc * n) * hamming(n)
+          const sinc = n === 0
+            ? cutoff
+            : Math.sin(Math.PI * cutoff * n) / (Math.PI * n);
+          const hamming = 0.54 - 0.46 * Math.cos(2 * Math.PI * i / (FILTER_LEN - 1));
+          kernel[i] = sinc * hamming;
+          sum += kernel[i];
+        }
+
+        // DC 게인을 1.0으로 정규화 — 필터 적용 후 음량 변화 방지
+        for (let i = 0; i < FILTER_LEN; i++) kernel[i] /= sum;
+
+        lpfKernelCache.set(srcRate, kernel);
+        return kernel;
+      };
+
+      /**
+       * Float32 PCM을 16kHz/PCM16으로 변환합니다.
+       *
+       * 개선된 파이프라인:
+       *  1. Anti-aliasing LPF 적용 (FIR 컨볼루션)
+       *  2. 선형 보간 다운샘플링
+       *  3. Float32 → Int16 변환
+       *
+       * 성능: 4096 샘플 × 31탭 ≈ 127K multiply-add
+       * → 일반 PC에서 < 1ms 처리 (실시간 오디오 콜백에 안전)
+       *
+       * @param input  - Float32 PCM 데이터 (-1.0 ~ 1.0)
+       * @param srcRate - 소스 샘플레이트
+       * @returns 16kHz PCM16 (Int16Array)
+       */
       const toPcm16k = (input: Float32Array, srcRate: number): Int16Array => {
         if (input.length === 0) return new Int16Array(0);
 
+        // 이미 16kHz면 LPF 불필요 — 바로 PCM16 변환
         if (srcRate === 16000) {
           const direct = new Int16Array(input.length);
           for (let i = 0; i < input.length; i++) {
@@ -260,6 +334,27 @@ function InterviewPageInner() {
           return direct;
         }
 
+        // ── Step 1: Anti-aliasing LPF (FIR 컨볼루션) ──
+        // 8kHz(= 16kHz Nyquist) 이상의 고주파 성분을 제거하여
+        // 다운샘플링 시 앨리어싱(고주파 접힘 왜곡)을 방지합니다.
+        const kernel = buildLpfKernel(srcRate);
+        const halfLen = Math.floor(kernel.length / 2);
+        const filtered = new Float32Array(input.length);
+
+        for (let i = 0; i < input.length; i++) {
+          let acc = 0;
+          for (let j = 0; j < kernel.length; j++) {
+            const idx = i - halfLen + j;
+            // 경계 처리: 배열 범위 밖은 0으로 패딩 (zero-padding)
+            if (idx >= 0 && idx < input.length) {
+              acc += input[idx] * kernel[j];
+            }
+          }
+          filtered[i] = acc;
+        }
+
+        // ── Step 2: 다운샘플링 (선형 보간) ──
+        // LPF 적용된 신호에서 선형 보간으로 정확한 타겟 샘플 위치를 계산
         const targetLen = Math.max(1, Math.round(input.length * 16000 / srcRate));
         const output = new Int16Array(targetLen);
         const ratio = srcRate / 16000;
@@ -267,9 +362,10 @@ function InterviewPageInner() {
         for (let i = 0; i < targetLen; i++) {
           const index = i * ratio;
           const left = Math.floor(index);
-          const right = Math.min(left + 1, input.length - 1);
+          const right = Math.min(left + 1, filtered.length - 1);
           const frac = index - left;
-          const sample = input[left] + (input[right] - input[left]) * frac;
+          // LPF 적용된 filtered 배열에서 보간 (기존: 원본 input에서 보간)
+          const sample = filtered[left] + (filtered[right] - filtered[left]) * frac;
           const clamped = Math.max(-1, Math.min(1, sample));
           output[i] = clamped < 0 ? clamped * 32768 : clamped * 32767;
         }
@@ -299,28 +395,27 @@ function InterviewPageInner() {
       // 소스 → 분석기 연결 (출력은 연결하지 않아 스피커로 소리가 나지 않음)
       source.connect(analyser);
 
-      // 서버 STT(Deepgram)용 오디오 전송 노드
-      // - 입력: 마이크 PCM float32
-      // - 처리: 16kHz/PCM16 변환
-      // - 전송: WebSocket binary frame
-      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
-      const muteGain = audioCtx.createGain();
-      muteGain.gain.value = 0;
-      sttProcessorRef.current = processor;
-      sttMuteGainRef.current = muteGain;
+      // ── 서버 STT(Deepgram)용 오디오 전송 노드 ──
+      // 우선: AudioWorkletNode (별도 오디오 렌더링 스레드에서 처리)
+      //  - 메인 스레드의 UI 렌더링/GC와 독립적으로 동작하여 프레임 드롭 방지
+      //  - 모든 음성 데이터를 빠짐없이 캐프쳐하여 STT 인식 출력 향상
+      // 폴백: ScriptProcessorNode (deprecated, AudioWorklet 미지원 브라우저)
+      //
+      // 【처리 흐름】
+      //  AudioWorklet 스레드: 마이크 → 128샘플씩 버퍼링 → 4096샘플 단위로 postMessage
+      //  메인 스레드: onmessage → toPcm16k() LPF+리샘플링 → WebSocket 전송
 
-      source.connect(processor);
-      processor.connect(muteGain);
-      muteGain.connect(audioCtx.destination);
-
-      processor.onaudioprocess = (event: AudioProcessingEvent) => {
+      /**
+       * 오디오 데이터 처리 콜백 — AudioWorklet/ScriptProcessor 공통
+       * Worklet의 port.onmessage 또는 ScriptProcessor의 onaudioprocess에서 호출
+       */
+      const handleAudioData = (channelData: Float32Array) => {
         if (!interviewStartedRef.current || !micEnabledRef.current) return;
         if (!serverSttAvailableRef.current) return;
 
         const ws = wsRef.current;
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
 
-        const channelData = event.inputBuffer.getChannelData(0);
         const pcm16 = toPcm16k(channelData, audioCtx.sampleRate);
         if (pcm16.length === 0) return;
 
@@ -330,6 +425,69 @@ function InterviewPageInner() {
           // 전송 실패는 치명적 오류가 아니므로 무시 (브라우저 STT 폴백 유지)
         }
       };
+
+      // AudioWorklet 지원 여부 확인 후 초기화
+      let workletInitialized = false;
+
+      if (audioCtx.audioWorklet) {
+        try {
+          // AudioWorklet 모듈 등록 — public/ 디렉토리의 stt-processor.js
+          // addModule()은 비동기이므로 await로 완료를 보장
+          await audioCtx.audioWorklet.addModule("/stt-processor.js");
+
+          // AudioWorkletNode 생성 — "stt-processor" 이름은
+          // stt-processor.js의 registerProcessor()에서 등록한 이름과 일치해야 함
+          const workletNode = new AudioWorkletNode(audioCtx, "stt-processor", {
+            // 채널 수 설정: mono 입력
+            channelCount: 1,
+            channelCountMode: "explicit",
+            numberOfInputs: 1,
+            numberOfOutputs: 0, // 출력 없음 — 스피커로 소리 안 나감
+          });
+
+          // Worklet에서 전송한 오디오 데이터 수신
+          workletNode.port.onmessage = (event: MessageEvent) => {
+            if (event.data?.type === "AUDIO_DATA" && event.data.audioData) {
+              handleAudioData(event.data.audioData as Float32Array);
+            }
+          };
+
+          // 소스 → AudioWorkletNode 연결
+          // (numberOfOutputs: 0이므로 destination 연결 불필요 — muteGain 해킹 제거)
+          source.connect(workletNode);
+          sttProcessorRef.current = workletNode;
+          workletInitialized = true;
+
+          console.log("🎵 [STT] AudioWorkletNode 초기화 완료 (오디오 스레드 처리)");
+        } catch (workletErr) {
+          // AudioWorklet 로드 실패 — ScriptProcessor 폴백으로 전환
+          console.warn(
+            "⚠️ [STT] AudioWorklet 로드 실패, ScriptProcessor 폴백 사용:",
+            workletErr
+          );
+        }
+      }
+
+      // ── ScriptProcessorNode 폴백 (AudioWorklet 미지원/실패 시) ──
+      // deprecated이지만, AudioWorklet 사용 불가 시 기능은 유지되도록
+      // Graceful Degradation 원칙에 따라 폴백을 제공합니다.
+      if (!workletInitialized) {
+        const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+        const muteGain = audioCtx.createGain();
+        muteGain.gain.value = 0;
+        sttProcessorRef.current = processor;
+        sttMuteGainRef.current = muteGain;
+
+        source.connect(processor);
+        processor.connect(muteGain);
+        muteGain.connect(audioCtx.destination);
+
+        processor.onaudioprocess = (event: AudioProcessingEvent) => {
+          handleAudioData(event.inputBuffer.getChannelData(0));
+        };
+
+        console.warn("⚠️ [STT] ScriptProcessorNode 폴백 사용 (메인 스레드 처리)");
+      }
 
       // 주파수 데이터를 저장할 버퍼 (0~255 범위의 바이트 값)
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -393,7 +551,15 @@ function InterviewPageInner() {
 
     if (sttProcessorRef.current) {
       try {
-        sttProcessorRef.current.onaudioprocess = null;
+        // AudioWorkletNode인 경우 port로 비활성화 신호 전송 후 연결 해제
+        if (sttProcessorRef.current.port) {
+          sttProcessorRef.current.port.postMessage({ type: "SET_ACTIVE", active: false });
+          sttProcessorRef.current.port.onmessage = null;
+        }
+        // ScriptProcessorNode 폴백인 경우 onaudioprocess 정리
+        if ("onaudioprocess" in sttProcessorRef.current) {
+          (sttProcessorRef.current as ScriptProcessorNode).onaudioprocess = null;
+        }
         sttProcessorRef.current.disconnect();
       } catch {
         // ignore
@@ -432,9 +598,27 @@ function InterviewPageInner() {
   const startInterview = async () => {
     if (!user) return;
     try {
-      // 카메라 초기화 — setup useEffect에서 이미 스트림이 있으면 재사용
+      // 카메라 + 마이크 초기화 — setup useEffect에서 이미 스트림이 있으면 재사용
+      // STT 음성 인식 품질 향상을 위해 오디오 제약 조건을 명시적으로 설정:
+      //  - echoCancellation: TTS 스피커 출력이 마이크로 재수음되는 에코를 제거
+      //    → Deepgram이 TTS 음성을 사용자 발화로 오인식하는 문제 방지
+      //  - noiseSuppression: 배경 소음(키보드, 에어컨 등)을 억제하여
+      //    유사 발음 혼동("비즈니스" ↔ "피트니스") 감소
+      //  - autoGainControl: 마이크 입력 음량을 자동 조절하여
+      //    소리가 너무 작거나 클리핑되는 현상 방지
+      //  - sampleRate: 16000Hz로 지정하여 Deepgram 서버 전송 시
+      //    불필요한 다운샘플링(48kHz→16kHz) 과정에서 발생하는
+      //    앨리어싱(고주파 왜곡)을 원천 차단
       if (!streamRef.current) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: {
+            echoCancellation: true,    // 에코 제거 (TTS 재수음 방지)
+            noiseSuppression: true,    // 배경 소음 억제
+            autoGainControl: true,     // 자동 음량 조절
+            sampleRate: 16000,         // 16kHz — Deepgram 네이티브 샘플레이트
+          },
+        });
         streamRef.current = stream;
       }
 
@@ -479,8 +663,17 @@ function InterviewPageInner() {
 
 
       // 카메라가 아직 초기화되지 않은 경우 (경고 모달에서 이력서 업로드 후 재진행)
+      // STT 품질 향상을 위한 오디오 제약 조건 — startInterview()와 동일한 설정 유지
       if (!streamRef.current) {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: {
+            echoCancellation: true,    // 에코 제거 (TTS 재수음 방지)
+            noiseSuppression: true,    // 배경 소음 억제
+            autoGainControl: true,     // 자동 음량 조절
+            sampleRate: 16000,         // 16kHz — Deepgram 네이티브 샘플레이트
+          },
+        });
         streamRef.current = stream;
       }
 

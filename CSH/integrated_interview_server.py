@@ -7185,13 +7185,80 @@ async def _analyze_prosody_from_audio(session_id: str, raw_pcm: bytes, transcrip
         print(f"[Prosody] 분석 오류 (세션 {session_id[:8]}): {e}")
 
 
+# ── Anti-aliasing FIR LPF 커널 캐시 (모듈 레벨) ──
+# _convert_frame_to_pcm16_mono_16k()가 매 오디오 프레임마다 호출되므로,
+# 동일 sample_rate에 대한 FIR 커널을 한 번만 생성하여 재사용합니다.
+_lpf_kernel_cache: dict[int, "np.ndarray"] = {}
+
+
+def _build_lpf_kernel(src_rate: int, target_rate: int = 16000) -> "np.ndarray":
+    """
+    Anti-aliasing용 Hamming-windowed sinc FIR 저역 통과 필터 커널을 생성합니다.
+
+    왜 필요한가:
+      기존 선형 보간(np.interp) 다운샘플링은 Nyquist 정리를 위반합니다.
+      예: 48kHz → 16kHz 변환 시, 8kHz 이상의 고주파 성분이 접혀 들어와(aliasing)
+      ㅂ/ㅍ, ㅈ/ㅊ 같은 고주파 자음의 구별력이 저하됩니다.
+      LPF로 타겟 Nyquist(8kHz) 이상의 주파수를 미리 제거하면 이 문제가 해결됩니다.
+
+    알고리즘:
+      - Hamming-windowed sinc filter
+      - 컷오프: target_rate / 2 (= 8000Hz)
+      - 탭 수: 63 (서버는 프론트엔드보다 연산 여유가 있으므로 더 높은 감쇠를 확보)
+      - 정규화: DC 게인 = 1.0 (음량 변화 방지)
+
+    Args:
+        src_rate: 입력 오디오 샘플레이트 (예: 48000, 44100)
+        target_rate: 타겟 샘플레이트 (기본 16000)
+
+    Returns:
+        정규화된 FIR 필터 커널 (numpy float64 array)
+    """
+    import numpy as np
+
+    if src_rate in _lpf_kernel_cache:
+        return _lpf_kernel_cache[src_rate]
+
+    filter_len = 63  # FIR 탭 수 (홀수 — 대칭 선형 위상 보장)
+    half_len = filter_len // 2
+    n = np.arange(filter_len) - half_len
+
+    # 정규화 컷오프 주파수: (target_rate/2) / (src_rate/2) = target_rate / src_rate
+    fc = target_rate / src_rate
+
+    # Windowed sinc 커널 생성
+    # - n == 0 일 때 sinc(0) = fc (L'Hôpital 규칙)
+    # - n != 0 일 때 sinc(fc * n) = sin(π * fc * n) / (π * n)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kernel = np.where(n == 0, fc, np.sin(np.pi * fc * n) / (np.pi * n))
+
+    # Hamming 윈도우: sinc의 사이드로브를 억제하여 스톱밴드 감쇠 ≈ -53dB 확보
+    hamming = 0.54 - 0.46 * np.cos(2 * np.pi * np.arange(filter_len) / (filter_len - 1))
+    kernel = kernel * hamming
+
+    # DC 게인 정규화 (합 = 1.0) — 필터 적용 후 음량 변화 방지
+    kernel = kernel / kernel.sum()
+
+    _lpf_kernel_cache[src_rate] = kernel
+    return kernel
+
+
 def _convert_frame_to_pcm16_mono_16k(frame) -> bytes:
     """
     aiortc AudioFrame을 Deepgram 권장 포맷(16kHz, mono, PCM16)으로 변환.
 
-    - 다운믹스(Downmix): 다채널 입력을 mono로 평균 결합
-    - 리샘플링(Resampling): 입력 sample_rate를 16kHz로 선형 보간
-    - 출력 포맷: little-endian PCM16 bytes
+    개선된 리샘플링 파이프라인:
+      1. 다운믹스(Downmix): 다채널 입력을 mono로 평균 결합
+      2. Anti-aliasing LPF: Hamming-windowed sinc FIR 필터로
+         타겟 Nyquist(8kHz) 이상의 고주파 성분을 제거
+      3. 리샘플링(Resampling): LPF 적용된 신호를 16kHz로 선형 보간
+      4. 출력 포맷: little-endian PCM16 bytes
+
+    왜 LPF가 필요한가:
+      기존 선형 보간만으로는 Nyquist 주파수(8kHz) 이상의 고주파가
+      저주파 대역으로 접혀 들어오는 앨리어싱이 발생합니다.
+      이로 인해 ㅂ/ㅍ, ㅈ/ㅊ 같은 고주파 자음 구별력이 저하되어
+      Deepgram STT의 인식 정확도가 떨어집니다.
 
     변환 실패 시 빈 바이트를 반환하여 상위 루프가 Graceful Degradation으로
     다음 프레임을 계속 처리할 수 있도록 합니다.
@@ -7226,12 +7293,21 @@ def _convert_frame_to_pcm16_mono_16k(frame) -> bytes:
         src_rate = int(getattr(frame, "sample_rate", 16000) or 16000)
         target_rate = 16000
 
-        # 명시적 리샘플링: src_rate != 16kHz 인 경우 선형 보간 적용
+        # 리샘플링: src_rate != 16kHz인 경우 LPF + 선형 보간 적용
         if src_rate != target_rate and mono.size > 1:
+            # ── Step 1: Anti-aliasing LPF (FIR 컨볼루션) ──
+            # 타겟 Nyquist(8kHz) 이상의 고주파 성분을 제거하여
+            # 다운샘플링 시 앨리어싱(고주파 접힘 왜곡)을 방지합니다.
+            lpf_kernel = _build_lpf_kernel(src_rate, target_rate)
+            # mode='same': 출력 길이 = 입력 길이 (양쪽 zero-padding)
+            filtered = np.convolve(mono, lpf_kernel, mode="same")
+
+            # ── Step 2: 다운샘플링 (선형 보간) ──
+            # LPF 적용된 신호에서 선형 보간으로 정확한 타겟 샘플 위치를 계산
             target_len = max(1, int(round(mono.size * target_rate / src_rate)))
-            x_old = np.linspace(0.0, 1.0, num=mono.size, endpoint=False)
+            x_old = np.linspace(0.0, 1.0, num=filtered.size, endpoint=False)
             x_new = np.linspace(0.0, 1.0, num=target_len, endpoint=False)
-            mono = np.interp(x_new, x_old, mono)
+            mono = np.interp(x_new, x_old, filtered)
 
         pcm16 = np.clip(mono, -32768, 32767).astype(np.int16)
         return pcm16.tobytes()
