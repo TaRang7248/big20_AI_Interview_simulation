@@ -7,24 +7,26 @@ Text-to-Speech(TTS), Speech-to-Text(STT), LLM 기반 질문생성 및 답변 평
 ### ✨ 주요 특징
 
 - **화상 면접 중심**
-- **LLM**: Qwen3-4B 모델 기반 AI 면접 두뇌 역할. 질문을 생성하고 답변을 평가 (컨텍스트 윈도우 16384)
+- **LLM**: EXAONE 3.5 7.8B 모델 기반 AI 면접 두뇌 역할. 질문을 생성하고 답변을 평가 (컨텍스트 윈도우 8192)
+- **코딩 테스트 LLM**: Qwen3-Coder-30B-A3B (Q3_K_M 양자화) — 코딩 문제 생성 및 코드 분석 전용
 - **LangGraph 워크플로우**: 조건부 분기 + 루프 제어 + 체크포인트 기반 면접 상태머신
 - **이력서 RAG**: PDF 이력서 업로드 → 맞춤형 면접 평가
 - **통합 평가 시스템**: 언어 평가(5축) 60% + 비언어 평가(발화/시선/감정/Prosody) 40% → 합격/불합격 이진 판정
 - **비언어 분석**: 발화 속도/발음 등급, 시선 추적 집중도, 감정 안정성, 음성 감정(Prosody) 분석
 - **PDF 리포트**: ReportLab 기반 PDF 종합 리포트 자동 생성 (커버 + 평가 + 비언어 차트)
 - **Celery 비동기 처리**: 무거운 작업(LLM 평가, 감정 분석, 리포트 생성, 미디어 트랜스코딩)을 백그라운드에서 처리
-- **회원가입/로그인**: 이메일 기반 회원가입 및 소셜 로그인 (카카오, 구글, 네이버) 지원
-- **보안 시스템**: bcrypt 비밀번호 해싱, JWT 인증, CORS 제한, WebSocket JWT 인증, TLS 지원
+- **회원가입/로그인**: 이메일 기반 회원가입 및 소셜 로그인 (카카오, 구글, 네이버) 지원, 회원 탈퇴 및 GDPR 데이터 삭제
+- **보안 시스템**: bcrypt 비밀번호 해싱, AES-256-GCM 파일 암호화, JWT 인증, CORS 제한, WebSocket JWT 인증, TLS 지원
 - **종합 리포트**: STAR 기법 분석, 키워드 추출, 합격/불합격 추천 포함
 - **Recharts 리포트 시각화**: 7종 인터랙티브 차트 (레이더, 바, 파이, 영역) + 비언어 평가 카드로 면접 결과 시각 대시보드
 - **지연 시간 모니터링 (SLA)**: 모든 API 요청 자동 측정, 1.5초 SLA 위반 감지, 단계별(LLM/TTS) Phase 측정
 - **미디어 녹화/트랜스코딩**: aiortc + GStreamer/FFmpeg 하이브리드 아키텍처 기반 면접 영상 녹화 및 자동 트랜스코딩
 - **코딩 테스트**: Python, JavaScript, Java, C/C++ 지원하는 웹 IDE 통합 + Docker 샌드박스 보안
 - **화이트보드 면접**: Claude 3.5 Sonnet Vision을 활용한 시스템 아키텍처 다이어그램 분석
-- **AI 아바타**: D-ID WebRTC 스트리밍으로 실시간 AI 면접관 영상 생성
-- **Next.js 프론트엔드**: TypeScript + Tailwind CSS + Recharts 기반 현대적 UI (App Router)
-- **원클릭 시작**: 배치/PowerShell 스크립트로 전체 시스템 한 번에 실행
+- **채용공고 관리**: 인사담당자(recruiter)용 공고 CRUD + 지원자용 공고 열람
+- **AI 답변 스트리밍**: SSE(Server-Sent Events) 기반 실시간 AI 답변 스트리밍
+- **Next.js 프론트엔드**: TypeScript + Tailwind CSS + Recharts 기반 현대적 UI (App Router, 10개 페이지)
+- **원클릭 시작**: 배치/PowerShell 스크립트 + VS Code Tasks로 전체 시스템 한 번에 실행
 
 ---
 
@@ -42,14 +44,27 @@ pip install -r requirements_integrated.txt
 
 ```env
 # LLM 설정 (Ollama)
-LLM_MODEL=qwen3:4b
-LLM_TEMPERATURE=0.3
-LLM_NUM_CTX=16384
+LLM_MODEL=exaone3.5:7.8b
+LLM_TEMPERATURE=0.7
+LLM_NUM_CTX=8192
+LLM_TIMEOUT_SEC=60
+
+# 코딩 테스트 전용 LLM
+CODING_LLM_MODEL=hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q3_K_M
+CODING_CELERY_LLM_MODEL=hf.co/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF:Q3_K_M
+
+# Ollama 최적화
+OLLAMA_FLASH_ATTENTION=1
+OLLAMA_KV_CACHE_TYPE=q8_0
+OLLAMA_NUM_PARALLEL=2
 
 # JWT 인증
 JWT_SECRET_KEY=your_jwt_secret_key
 JWT_ALGORITHM=HS256
 JWT_EXPIRE_MINUTES=120
+
+# 암호화 (AES-256-GCM)
+ENCRYPTION_KEY=your_encryption_key
 
 # TLS (선택)
 TLS_CERTFILE=path/to/cert.pem
@@ -68,8 +83,6 @@ POSTGRES_CONNECTION_STRING=postgresql://user:password@localhost:5432/interview_d
 
 # Redis (Celery 브로커 및 감정 데이터 저장)
 REDIS_URL=redis://localhost:6379/0
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/0
 
 # 소셜 로그인
 KAKAO_CLIENT_ID=your_kakao_client_id
@@ -83,7 +96,7 @@ OAUTH_REDIRECT_BASE=http://localhost:8000
 # Claude API (화이트보드 분석용)
 ANTHROPIC_API_KEY=your_anthropic_api_key
 
-# D-ID API (AI 아바타용)
+# D-ID API (AI 아바타용, 선택)
 DID_API_KEY=your_did_api_key
 
 # RAG 임베딩 모델 (선택, 기본값 제공)
@@ -97,7 +110,7 @@ CHUNK_OVERLAP=300
 ```bash
 # Ollama 실행
 ollama serve
-ollama pull qwen3:4b
+ollama pull exaone3.5:7.8b
 
 # Redis 실행 (Celery 브로커 + 감정 데이터 저장)
 docker run -d -p 6379:6379 redis:alpine
@@ -134,10 +147,15 @@ uvicorn integrated_interview_server:app --host 0.0.0.0 --port 8000 --reload
 ### 6. 접속
 
 브라우저에서 다음 URL로 접속:
-- **메인 페이지**: http://localhost:8000
-- **화상 면접**: http://localhost:8000/static/integrated_interview.html
-- **코딩 테스트**: http://localhost:8000/coding-test
-- **감정 대시보드**: http://localhost:8000/static/dashboard.html
+- **메인 페이지 (Next.js)**: http://localhost:3000
+- **화상 면접**: http://localhost:3000/interview
+- **코딩 테스트**: http://localhost:3000/coding
+- **화이트보드**: http://localhost:3000/whiteboard
+- **대시보드**: http://localhost:3000/dashboard
+- **감정 분석**: http://localhost:3000/emotion
+- **채용공고**: http://localhost:3000/jobs
+- **인사담당자**: http://localhost:3000/recruiter
+- **FastAPI 백엔드**: http://localhost:8000
 - **API 문서**: http://localhost:8000/docs
 - **Celery 모니터링** (Flower 실행 시): http://localhost:5555
 
@@ -202,12 +220,12 @@ CSH/
 ├── text_interview.py               # 텍스트 면접 모듈 (STAR 분석, 리포트)
 ├── hume_tts_service.py             # Hume AI TTS 서비스 (OAuth2 토큰 인증)
 ├── stt_engine.py                   # Deepgram STT 서비스 (Nova-3 모델)
-├── resume_rag.py                   # 이력서 RAG (PostgreSQL + PGVector)
-├── code_execution_service.py       # 코딩 테스트 서비스 (샌드박스 실행, AI 분석)
+├── resume_rag.py                   # 이력서 RAG (PostgreSQL + PGVector + Redis 캐싱)
+├── code_execution_service.py       # 코딩 테스트 서비스 (샌드박스 실행, AI 분석, LLM 문제 생성)
 ├── whiteboard_service.py           # 화이트보드 다이어그램 분석 (Claude Vision)
-├── did_avatar_service.py           # D-ID AI 아바타 영상 생성 (WebRTC 스트리밍)
 ├── media_recording_service.py      # 미디어 녹화/트랜스코딩 서비스 (aiortc + GStreamer/FFmpeg 하이브리드)
 ├── interview_workflow.py           # LangGraph 기반 면접 상태머신 (조건부 분기, 체크포인트)
+├── prompt_templates.py             # 면접관/평가 프롬프트 템플릿 (INTERVIEWER_PROMPT, EVALUATION_PROMPT)
 ├── speech_analysis_service.py      # 발화 속도/발음 분석 서비스 (SPM, 등급 판정)
 ├── gaze_tracking_service.py        # 시선 추적 분석 서비스 (눈 접촉 비율, 등급)
 ├── hume_prosody_service.py         # 음성 감정 Prosody 분석 서비스 (Hume AI, 10개 지표)
@@ -215,33 +233,33 @@ CSH/
 ├── latency_monitor.py              # 지연 시간 측정 및 SLA 모니터링 (REQ-N-001)
 ├── whisper_stt_service.py          # Whisper 기반 로컬 STT 서비스 (오프라인 폴백)
 ├── json_utils.py                   # LLM JSON 안정적 추출/파싱 방어 로직 (6단계)
-├── security.py                     # 보안 유틸리티 (bcrypt, JWT, TLS, CORS)
+├── security.py                     # 보안 유틸리티 (bcrypt, JWT, AES-256-GCM 암호화, TLS, CORS)
 ├── events.py                       # 이벤트 타입 정의 (30+ EventType, Pydantic 모델)
 ├── event_bus.py                    # Redis Pub/Sub EventBus (싱글턴, WebSocket 브로드캐스트)
 ├── event_handlers.py               # 도메인별 이벤트 핸들러 등록 (9개 도메인)
-├── video_interview_server.py       # 화상 면접 서버 (레거시)
+├── Dockerfile                      # 컨테이너 빌드 설정 (python:3.11-slim + FFmpeg)
 ├── start_interview.bat             # 원클릭 시작 스크립트 (Windows Batch)
 ├── start_all.ps1                   # 원클릭 시작 스크립트 (PowerShell)
 ├── start_prerequisites.bat         # 사전 서비스 실행 스크립트
-├── requirements_integrated.txt     # 의존성 패키지
+├── .env.example                    # 환경변수 예시 파일
 ├── uploads/                        # 이력서 업로드 디렉토리
+│   ├── recordings/                 # 면접 녹화 파일
+│   ├── thumbnails/                 # 녹화 썸네일
+│   └── transcoded/                 # 트랜스코딩된 동영상
 ├── documents/                      # 설계 문서 및 보고서
 │   ├── 소프트웨어 아키텍처 설계서 (SAD).md
 │   ├── 시스템 요구사항 명세서 (SRS).md
 │   ├── 시스템 보안 종합 리뷰 보고서.md
 │   ├── RAG 시스템 DB 구조.md
-│   └── TODO.md                     # SAD/SRS Gap 분석 및 태스크 추적
-├── frontend/                       # Next.js 프론트엔드 (신규)
-│   ├── src/app/                    # App Router 페이지
+│   └── requirements_integrated.txt # 통합 의존성 패키지 목록
+├── frontend/                       # Next.js 프론트엔드
+│   ├── src/app/                    # App Router 페이지 (10개)
 │   ├── src/components/             # 재사용 컴포넌트
-│   ├── src/contexts/               # 인증 + 이벤트 컨텍스트
-│   └── src/lib/                    # API 유틸리티
-└── static/
-    ├── integrated_interview.html   # 통합 화상 면접 UI
-    ├── coding_test.html            # 코딩 테스트 UI
-    ├── my_dashboard.html           # 마이 대시보드 (개인별 면접 결과)
-    ├── video.html                  # 기존 화상 면접 UI
-    └── dashboard.html              # 감정 대시보드
+│   ├── src/contexts/               # 인증 + 이벤트 + 토스트 컨텍스트
+│   ├── src/lib/                    # API 유틸리티
+│   └── public/                     # 정적 자산 (stt-processor.js 등)
+├── nginx/                          # NGINX 설정 (리버스 프록시, SSL)
+└── sandbox/                        # 코딩 테스트 Docker 샌드박스
 ```
 
 ---
@@ -250,11 +268,11 @@ CSH/
 
 ### 1. LLM 기반 답변 평가 시스템
 
-LLM은 **질문 생성이 아닌 답변 평가**에 사용됩니다. Ollama의 **Qwen3-4B** 모델 (Llama3에서 변경)을 활용하여 지원자 답변을 5가지 기준으로 평가합니다.
+LLM은 **질문 생성이 아닌 답변 평가**에 사용됩니다. Ollama의 **EXAONE 3.5 7.8B** 모델을 활용하여 지원자 답변을 5가지 기준으로 평가합니다.
 
-> **변경 이력**: Llama3 → Qwen3-4B 전환, 컨텍스트 윈도우 8192 → 16384 확장
+> **변경 이력**: Llama3 → Qwen3-4B → exaone-deep:2.4b → **EXAONE 3.5 7.8B** 전환, 컨텍스트 윈도우 16384 → 8192 조정 (VRAM 6GB 환경 최적화)
 
-> **JSON 파싱**: `json_utils.py` 모듈을 통한 6단계 다층 파싱 전략 적용 — Qwen3의 `<think>` 블록 자동 제거, Markdown 코드블록 추출, 괄호 매칭, 구문 오류 자동 수정, 정규식 추출, fallback 기본값 반환
+> **JSON 파싱**: `json_utils.py` 모듈을 통한 6단계 다층 파싱 전략 적용 — EXAONE Deep의 `<thought>` 블록 및 Qwen3의 `<think>` 블록 자동 제거, Markdown 코드블록 추출, 괄호 매칭, 구문 오류 자동 수정, 정규식 추출, fallback 기본값 반환
 
 | 평가 항목 | 설명 | 점수 |
 |-----------|------|------|
@@ -281,7 +299,7 @@ LLM 응답에서 JSON을 안정적으로 추출하고 파싱하기 위한 방어
 | 5단계 | 정규식 추출 | greedy 패턴 매칭 |
 | 6단계 | fallback | 기본값 반환 |
 
-- **Qwen3 `<think>...</think>` 사고 블록** 자동 제거
+- **Qwen3 `<think>...</think>` 사고 블록** 및 **EXAONE Deep `<thought>...</thought>` 블록** 자동 제거
 - 제어문자 정리 및 타입 검증 기능 내장
 
 ### 3. 이력서 RAG 시스템
@@ -331,11 +349,12 @@ LLM 응답에서 JSON을 안정적으로 추출하고 파싱하기 위한 방어
 | `save_session_to_redis_task` | 세션 데이터 Redis 저장 | default |
 
 **추가 태스크 (celery_tasks.py 기준 총 16개):**
-- `analyze_code_task` — AI 코드 분석
-- `analyze_whiteboard_task` — 화이트보드 다이어그램 분석
-- `complete_session_analysis_task` — 세션 종합 분석
+- `retrieve_resume_context_task` — RAG 컨텍스트 검색
+- `prefetch_tts_task` — TTS 사전 생성 (지연 최소화)
+- `save_session_to_redis_task` — 세션 데이터 Redis 저장
 - `transcode_recording_task` — 미디어 트랜스코딩 (GStreamer/FFmpeg, 비디오+오디오 합성, H.264+AAC)
 - `cleanup_recording_task` — 만료/삭제된 녹화 파일 정리
+- `pre_generate_coding_problem_task` — 코딩 문제 LLM 사전 생성
 
 **주기적 작업 (Celery Beat):**
 - `cleanup_sessions_task`: 5분마다 만료 세션 정리
@@ -343,12 +362,13 @@ LLM 응답에서 JSON을 안정적으로 추출하고 파싱하기 위한 방어
 
 ### 8. 회원가입 및 소셜 로그인
 
-- **이메일 회원가입**: 이메일, 비밀번호, 이름, 생년월일, 주소, 성별
+- **이메일 회원가입**: 이메일, 비밀번호, 이름, 생년월일, 주소, 성별, 역할(user/recruiter)
 - **소셜 로그인 지원**:
   - 카카오 로그인
   - 구글 로그인
   - 네이버 로그인
 - **세션 관리**: localStorage 기반 클라이언트 세션
+- **회원 탈퇴**: 계정 삭제 및 GDPR 데이터 전체 삭제 지원
 
 ### 8-1. 보안 시스템 (security.py)
 
@@ -357,6 +377,7 @@ LLM 응답에서 JSON을 안정적으로 추출하고 파싱하기 위한 방어
 | 기능 | 설명 |
 |------|------|
 | **비밀번호 해싱** | bcrypt (rounds=12) 기반, SHA-256 하위 호환 및 자동 마이그레이션 (`needs_rehash()`) |
+| **AES-256-GCM 암호화** | 파일/바이트 단위 암호화/복호화 (`encrypt_file`, `decrypt_file`, `encrypt_bytes`, `decrypt_bytes`) |
 | **JWT 인증** | HS256 알고리즘, python-jose 라이브러리, 120분 만료 |
 | **FastAPI 인증** | `get_current_user()` / `get_current_user_optional()` — `Depends()` 기반 미들웨어 |
 | **TLS 지원** | `get_ssl_context()` — 환경변수 기반 SSL 컨텍스트 생성 |
@@ -408,9 +429,9 @@ LLM 응답에서 JSON을 안정적으로 추출하고 파싱하기 위한 방어
 | **컴포넌트 분석** | 각 구성요소의 역할 및 연결 관계 평가 |
 | **피드백 제공** | 강점, 약점, 개선 제안 자동 생성 |
 
-### 12. D-ID AI 아바타 (did_avatar_service.py)
+### 12. D-ID AI 아바타 (미구현 — 환경변수 예약됨)
 
-D-ID API를 활용한 실시간 AI 면접관 영상 생성 서비스입니다.
+D-ID API를 활용한 실시간 AI 면접관 영상 생성 서비스입니다. 현재 `did_avatar_service.py` 파일은 제거되었으며, `.env.example`에 `DID_API_KEY` 환경변수만 예약되어 있습니다.
 
 | 기능 | 설명 |
 |------|------|
@@ -655,19 +676,27 @@ interface ReportData {
 
 ## 📡 API 엔드포인트
 
-### 페이지 라우팅
-- `GET /` - 홈페이지 (HTML)
-- `GET /coding-test` - 코딩 테스트 페이지
+### 페이지 라우팅 (Next.js 프록시)
+- `GET /` - 홈페이지 (Next.js → localhost:3000)
 - `GET /interview` - 면접 페이지
+- `GET /coding` - 코딩 테스트 페이지
+- `GET /coding-test` - 코딩 테스트 페이지 (레거시 경로)
 - `GET /dashboard` - 대시보드 페이지
+- `GET /emotion` - 감정 분석 페이지
+- `GET /whiteboard` - 화이트보드 페이지
+- `GET /profile` - 프로필 페이지
+- `GET /settings` - 설정 페이지
+- `GET /_next/{path}` - Next.js 정적 자산 프록시
 
 ### 세션 관리
 - `POST /api/session` - 새 면접 세션 생성
+- `POST /api/session/create` - 새 면접 세션 생성 (동일)
 - `GET /api/session/{session_id}` - 세션 정보 조회
 
 ### 채팅
 - `POST /api/chat` - 메시지 전송 및 다음 질문 받기
 - `POST /api/chat/with-intervention` - 개입(인터벤션) 포함 채팅
+- `POST /api/chat/stream` - SSE 기반 실시간 AI 답변 스트리밍
 
 ### 면접 개입 (Intervention)
 - `POST /api/intervention/start-turn` - 사용자 답변 턴 시작
@@ -681,7 +710,13 @@ interface ReportData {
 ### 이력서 업로드
 - `POST /api/resume/upload` - PDF 이력서 업로드 및 RAG 인덱싱
 - `GET /api/resume/status/{session_id}` - 업로드 상태 확인
+- `GET /api/resume/user/{user_email}` - 사용자별 이력서 조회
 - `DELETE /api/resume/{session_id}` - 이력서 삭제
+
+### QA 데이터 RAG
+- `POST /api/qa-data/index` - QA 데이터 RAG 인덱싱
+- `GET /api/qa-data/status` - QA RAG 인덱싱 상태
+- `GET /api/qa-data/search` - QA RAG 검색
 
 ### LLM 평가
 - `POST /api/evaluate` - 개별 답변 평가 (5가지 항목)
@@ -692,6 +727,7 @@ interface ReportData {
 - `GET /api/report/{session_id}/pdf` - PDF 종합 리포트 다운로드 (ReportLab 생성)
 
 ### 면접 이력
+- `GET /api/interviews` - 면접 목록 조회
 - `GET /api/interview/history` - 면접 이력 목록 조회
 - `GET /api/interview/{session_id}/workflow-status` - 워크플로우 상태 조회
 - `POST /api/interview/{session_id}/collect-evaluations` - 평가 수집
@@ -704,13 +740,19 @@ interface ReportData {
 - `WS /ws/interview/{session_id}` - 실시간 면접 WebSocket 연결 (JWT 인증)
 
 ### 감정 분석
-- `GET /emotion` - 현재 감정 상태
+- `GET /api/emotion/current` - 현재 감정 상태
 - `GET /emotion/sessions` - 세션 목록
 - `GET /emotion/timeseries` - 시계열 데이터
 - `GET /emotion/stats` - 통계
 
-### TTS
-- `GET /tts/status` - TTS 서비스 상태
+### TTS (hume_tts_service.py 라우터)
+- `POST /api/tts/speak` - TTS 음성 생성
+- `POST /api/tts/question` - 질문 TTS 생성
+- `GET /api/tts/greeting` - 인사말 TTS
+- `GET /api/tts/status` - TTS 서비스 상태
+- `GET /api/tts/test-token` - TTS 토큰 테스트
+- `GET /api/tts/result/{task_id}` - TTS 결과 조회
+- `POST /api/tts/prefetch` - TTS 사전 생성
 
 ### 회원 인증
 - `POST /api/auth/register` - 회원가입
@@ -720,10 +762,23 @@ interface ReportData {
 - `POST /api/auth/reset-password` - 비밀번호 재설정
 - `GET /api/auth/user/{email}` - 사용자 정보 조회
 - `PUT /api/auth/user/update` - 사용자 정보 수정
+- `POST /api/auth/user/delete` - 회원 탈퇴
+- `GET /api/user` - 현재 로그인 사용자 정보 조회
+- `PUT /api/user` - 현재 로그인 사용자 정보 수정
 - `GET /api/auth/social/{provider}` - 소셜 로그인 (kakao/google/naver)
 - `GET /api/auth/social/{provider}/callback` - 소셜 로그인 콜백
 - `GET /api/auth/social/verify` - 소셜 로그인 토큰 검증
 - `GET /api/auth/social/status` - 소셜 로그인 설정 상태
+
+### GDPR 데이터 삭제
+- `POST /api/gdpr/delete-all-data` - GDPR 규정 준수 전체 데이터 삭제
+
+### 채용공고 관리
+- `GET /api/job-postings` - 채용공고 목록 조회
+- `GET /api/job-postings/{posting_id}` - 채용공고 상세 조회
+- `POST /api/job-postings` - 채용공고 등록 (recruiter 전용)
+- `PUT /api/job-postings/{posting_id}` - 채용공고 수정
+- `DELETE /api/job-postings/{posting_id}` - 채용공고 삭제
 
 ### Celery 비동기 작업
 - `POST /api/async/evaluate` - 비동기 답변 평가
@@ -739,7 +794,10 @@ interface ReportData {
 - `GET /api/celery/queues` - Celery 큐 정보 조회
 
 ### 시스템
+- `GET /health` - 헬스 체크 (Docker/로드밸런서)
 - `GET /api/status` - 전체 서비스 상태 확인
+- `GET /api/stt/status` - STT 서비스 상태 확인
+- `GET /api/debug/db` - DB 연결 디버그
 
 ### 지연 시간 모니터링 (SLA)
 - `GET /api/monitoring/latency` - 지연 시간 대시보드 (SLA 위반 횟수, 엔드포인트별 통계, 최근 위반 내역)
@@ -750,21 +808,34 @@ interface ReportData {
 - `GET /api/events/history` - 최근 이벤트 히스토리 (타입 필터 지원)
 - `GET /api/events/registered` - 등록된 이벤트 타입 및 핸들러 수
 
-### 코딩 테스트
-- `POST /api/coding/execute` - 코드 실행 (샌드박스)
-- `POST /api/coding/analyze` - AI 코드 분석
-- `GET /api/coding/problems` - 코딩 문제 목록
+### 코딩 테스트 (code_execution_service.py 라우터)
+- `GET /api/coding/generate` - LLM 기반 코딩 문제 동적 생성
 - `GET /api/coding/problems/{problem_id}` - 문제 상세 조회
+- `POST /api/coding/execute` - 코드 실행 (샌드박스)
+- `POST /api/coding/run` - 코드 실행 (execute 별칭)
+- `POST /api/coding/submit` - 코드 제출 및 AI 분석
+- `GET /api/coding/templates/{language}` - 언어별 코드 템플릿 조회
 
-### 화이트보드 (시스템 설계)
-- `POST /api/whiteboard/analyze` - 다이어그램 분석
+### 화이트보드 (whiteboard_service.py 라우터)
 - `GET /api/whiteboard/problems` - 아키텍처 문제 목록
-- `POST /api/whiteboard/generate-problem` - AI 문제 동적 생성
+- `GET /api/whiteboard/problems/{problem_id}` - 문제 상세 조회
+- `POST /api/whiteboard/generate` - AI 문제 동적 생성
+- `GET /api/whiteboard/categories` - 문제 카테고리 목록
+- `POST /api/whiteboard/analyze` - 다이어그램 분석
+- `GET /api/whiteboard/results/{session_id}` - 분석 결과 조회
+- `GET /api/whiteboard/status` - 화이트보드 서비스 상태
 
-### D-ID 아바타
-- `POST /api/avatar/stream/create` - 스트림 세션 생성
-- `POST /api/avatar/stream/{stream_id}/speak` - 텍스트로 아바타 말하기
-- `DELETE /api/avatar/stream/{stream_id}` - 스트림 종료
+### 워크플로우 모니터링 (LangGraph)
+- `GET /api/workflow/status` - 워크플로우 상태
+- `GET /api/workflow/graph` - 워크플로우 그래프 시각화
+- `GET /api/workflow/graph-definition` - 그래프 정의 조회
+- `GET /api/workflow/{session_id}/trace` - 세션 워크플로우 트레이스
+- `GET /api/workflow/{session_id}/state` - 세션 상태 조회
+- `GET /api/workflow/{session_id}/checkpoint` - 세션 체크포인트
+- `GET /api/workflow/{session_id}/checkpoints` - 세션 체크포인트 목록
+
+### D-ID 아바타 (미구현 — 환경변수 예약)
+- _현재 `did_avatar_service.py`가 제거되어 아바타 API 엔드포인트는 비활성 상태_
 
 ### 미디어 녹화
 - `POST /api/recording/{session_id}/start` - 녹화 시작 (GStreamer/FFmpeg 파이프라인 생성)
@@ -784,7 +855,7 @@ Next.js 기반 프론트엔드 애플리케이션
 
 | 기술 | 설명 |
 |------|------|
-| **Next.js 15** | App Router 기반 React 풀스택 프레임워크 |
+| **Next.js 16** | App Router 기반 React 풀스택 프레임워크 |
 | **TypeScript** | 타입 안전성 보장 |
 | **Tailwind CSS** | 유틸리티 기반 CSS (다크 네이비 테마) |
 | **Recharts** | 면접 리포트 시각화 (레이더, 바, 파이, 영역 차트) |
@@ -803,20 +874,25 @@ CSH/frontend/
 ├── package.json             # 의존성 관리
 └── src/
     ├── app/
-    │   ├── layout.tsx       # 루트 레이아웃 (AuthProvider 래핑)
+    │   ├── layout.tsx       # 루트 레이아웃 (AuthProvider + ToastProvider 래핑)
     │   ├── globals.css      # 다크 네이비 테마 전역 CSS
     │   ├── page.tsx         # 랜딩 페이지
+    │   ├── error.tsx        # 전역 에러 바운더리 (Next.js Error Boundary)
     │   ├── dashboard/       # 대시보드 페이지
     │   ├── interview/       # 면접 페이지
     │   ├── coding/          # 코딩 테스트 페이지 (Monaco Editor)
     │   ├── whiteboard/      # 화이트보드 시스템 설계 페이지
+    │   ├── jobs/            # 채용공고 목록/상세 페이지
+    │   ├── recruiter/       # 인사담당자 전용 대시보드 (공고 관리)
     │   ├── profile/         # 프로필/마이페이지
+    │   ├── settings/        # 회원정보 수정 + 비밀번호 변경
     │   └── emotion/         # 감정 분석 페이지
     ├── components/
     │   ├── common/
     │   │   ├── Header.tsx   # 공통 네비게이션 헤더
     │   │   ├── Modal.tsx    # 재사용 가능한 모달 컴포넌트
-    │   │   └── EventToast.tsx # 실시간 이벤트 토스트 알림
+    │   │   ├── Toast.tsx    # 커스텀 토스트 알림 (success/error/warning/info)
+    │   │   └── EventToast.tsx # WebSocket 실시간 이벤트 토스트 알림
     │   ├── auth/
     │   │   ├── LoginModal.tsx         # 로그인 모달
     │   │   ├── RegisterModal.tsx      # 회원가입 모달
@@ -827,6 +903,7 @@ CSH/frontend/
     │       └── EmotionCharts.tsx      # Chart.js 차트 컴포넌트
     ├── contexts/
     │   ├── AuthContext.tsx  # JWT 세션 관리, 자동 로그아웃 (60분/유효 30분)
+    │   ├── ToastContext.tsx # 전역 토스트 상태 관리 (success/error/warning/info + confirm)
     │   └── EventBusContext.tsx # WebSocket 이벤트 컨텍스트 Provider (useEventBus 훅)
     └── lib/
         └── api.ts           # API 통신 라이브러리
@@ -841,7 +918,10 @@ CSH/frontend/
 | `/interview` | 면접 | 화상 면접 인터페이스 |
 | `/coding` | 코딩 테스트 | Monaco Editor, 문제 선택, 코드 실행/제출 |
 | `/whiteboard` | 화이트보드 | 시스템 아키텍처 설계 |
-| `/profile` | 프로필 | 마이페이지, 정보 수정 |
+| `/jobs` | 채용공고 | 공고 목록 열람, 카테고리/경력 필터, 검색 |
+| `/recruiter` | 인사담당자 | 공고 등록/수정/마감/삭제, 통계 요약 |
+| `/profile` | 프로필 | 마이페이지, 정보 조회 |
+| `/settings` | 설정 | 회원정보 수정 (이름/생년월일/성별/주소/전화번호/역할), 비밀번호 변경 |
 | `/emotion` | 감정 분석 | 시계열/도넛/레이더 차트 시각화 |
 
 ---
@@ -856,7 +936,7 @@ CSH/frontend/
 
 | 서비스 | 필수 조건 | 역할 |
 |--------|----------|------|
-| LLM | Ollama 실행 + qwen3:4b 모델 |
+| LLM | Ollama 실행 + exaone3.5:7.8b 모델 |
 | TTS | HUME_API_KEY + HUME_SECRET_KEY 설정 | 음성 출력 |
 | STT | DEEPGRAM_API_KEY 설정 + pyaudio | 음성 인식 |
 | RAG | POSTGRES_CONNECTION_STRING 설정 + pgvector | 이력서 맞춤 평가 |
@@ -930,11 +1010,11 @@ start_prerequisites.bat
 ```bash
 # Ollama 서비스 확인
 ollama serve
-curl http://localhost:11434/api/generate -d '{"model":"qwen3:4b","prompt":"hello"}'
+curl http://localhost:11434/api/generate -d '{"model":"exaone3.5:7.8b","prompt":"hello"}'
 
 # 모델 다운로드 확인
 ollama list
-ollama pull qwen3:4b
+ollama pull exaone3.5:7.8b
 ```
 
 ### WebRTC 연결 실패
@@ -1004,44 +1084,42 @@ curl -X POST https://api.hume.ai/oauth2-cc/token \
 
 | 파일 | 설명 |
 |------|------|
-| `integrated_interview_server.py` | **통합 FastAPI 서버** (5530+ lines) - 질문 은행, LLM 평가 (5축 + 비언어 통합 + 합격/불합격), 회원 인증, 소셜 로그인, WebRTC, WebSocket, 감정 분석, 면접 개입(인터벤션), 지연 시간 미들웨어, Celery 워크플로우, 미디어 녹화 통합 |
-| `celery_app.py` | **Celery 애플리케이션 설정(설계도)** (120+ lines) - Celery 앱 생성, Redis 브로커 연결, 큐 정의 & 라우팅 (media_processing 큐 포함), Beat 스케줄 정의 |
-| `celery_tasks.py` | **Celery 비동기 태스크** (1280+ lines) - 16개 태스크 정의: LLM 평가 (5축 + 합격/불합격), 감정 분석, 리포트 생성, TTS, RAG, 세션 정리, 통계, 워크플로우, 미디어 트랜스코딩 |
-| `text_interview.py` | **텍스트 면접 모듈** (510+ lines) - STAR 기법 분석, 키워드 추출, 리포트 생성 클래스 |
-| `hume_tts_service.py` | **Hume AI TTS 클라이언트** (440+ lines) - OAuth2 토큰 인증, EVI 음성 생성, 스트리밍 지원 |
-| `stt_engine.py` | **Deepgram STT 클라이언트** (320+ lines) - Nova-3 모델, 실시간 마이크 입력, VAD 지원, 한국어 띄어쓰기 보정 (pykospacing) |
-| `resume_rag.py` | **이력서 RAG 모듈** (120+ lines) - PDF 로딩, 청킹, PGVector 벡터 저장, nomic-embed-text 임베딩 (768차원, 8192 토큰) |
-| `code_execution_service.py` | **코딩 테스트 서비스** (1180+ lines) - 샌드박스 코드 실행, AI 코드 분석, 문제 은행 |
-| `whiteboard_service.py` | **화이트보드 분석 서비스** (850+ lines) - Claude 3.5 Sonnet Vision (메인) + Qwen3-VL (폴백), 아키텍처 평가, 동적 문제 생성 |
-| `did_avatar_service.py` | **D-ID 아바타 서비스** (520+ lines) - Talks API + Streams API (WebRTC), 실시간 아바타 영상 생성 |
-| `media_recording_service.py` | **미디어 녹화/트랜스코딩 서비스** (430+ lines) - aiortc + GStreamer/FFmpeg 하이브리드, stdin pipe 실시간 인코딩, 썸네일 생성, 메타데이터 관리, Graceful Degradation |
-| `interview_workflow.py` | **LangGraph 면접 상태머신** (1000+ lines) - 조건부 분기 + 루프 제어 + 체크포인트 기반 면접 흐름 제어, StateGraph |
-| `speech_analysis_service.py` | **발화 속도/발음 분석 서비스** - SPM(분당 음절 수) 계산, 등급 판정 (S/A/B/C/D), 5점 척도 변환 |
-| `gaze_tracking_service.py` | **시선 추적 분석 서비스** - 눈 접촉 비율 측정, 집중도 등급 판정, OpenCV 기반 |
-| `hume_prosody_service.py` | **음성 감정 Prosody 분석 서비스** - Hume AI API, 10개 감정 지표 (confidence, joy, sadness 등), 평균 점수 산출 |
-| `pdf_report_service.py` | **PDF 종합 리포트 생성** (490+ lines) - ReportLab 기반, 커버페이지(합격/불합격 + 통합 점수) + 평가표 + 비언어 바 차트 + 키워드 + STAR 각 섹션 |
-| `latency_monitor.py` | **지연 시간 모니터링** (240+ lines) - Thread-safe LatencyMonitor 클래스, SLA 1.5초 임계값, Phase 측정 (LLM/TTS), 위반 내역 deque, 대시보드 API 데이터 |
-| `whisper_stt_service.py` | **Whisper 기반 로컬 STT** - 오프라인 폴백용and 음성 인식 서비스, Deepgram 불가 시 자동 전환 |
-| `video_interview_server.py` | WebRTC + 감정 분석 서버 (350 lines, 레거시 — integrated에 통합됨) |
+| `integrated_interview_server.py` | **통합 FastAPI 서버** (7,987 lines) - 질문 은행, LLM 평가 (5축 + 비언어 통합 + 합격/불합격), 회원 인증 (GDPR 포함), 소셜 로그인, WebRTC, WebSocket, 감정 분석, 면접 개입(인터벤션), 지연 시간 미들웨어, Celery 워크플로우, 미디어 녹화 통합, 채용공고 CRUD, 워크플로우 모니터링 |
+| `celery_app.py` | **Celery 애플리케이션 설정(설계도)** (111 lines) - Celery 앱 생성, Redis 브로커 연결, 큐 정의 & 라우팅 (media_processing 큐 포함), Beat 스케줄 정의 |
+| `celery_tasks.py` | **Celery 비동기 태스크** (1,132 lines) - 16개 태스크 정의: LLM 평가 (5축 + 합격/불합격), 감정 분석, 리포트 생성, TTS prefetch, RAG 이력서 컨텍스트, 세션 정리, 통계, 워크플로우, 미디어 트랜스코딩, 코딩 문제 사전 생성 |
+| `text_interview.py` | **텍스트 면접 모듈** (605 lines) - STAR 기법 분석, 키워드 추출, 리포트 생성 클래스 |
+| `hume_tts_service.py` | **Hume AI TTS 클라이언트** (479 lines) - OAuth2 토큰 인증, EVI 음성 생성, 스트리밍 지원 |
+| `stt_engine.py` | **Deepgram STT 클라이언트** (303 lines) - Nova-3 모델, 실시간 마이크 입력, VAD 지원, 한국어 띄어쓰기 보정 (pykospacing) |
+| `resume_rag.py` | **이력서 RAG 모듈** (311 lines) - PDF 로딩, 청킹, PGVector 벡터 저장, nomic-embed-text 임베딩 (768차원, 8192 토큰) |
+| `code_execution_service.py` | **코딩 테스트 서비스** (2,242 lines) - Docker 샌드박스 코드 실행, AI 코드 분석 (Qwen3-Coder-30B), 문제 은행, 동적 문제 생성, 실행 이력 관리 |
+| `whiteboard_service.py` | **화이트보드 분석 서비스** (785 lines) - Claude 3.5 Sonnet Vision (메인) + Qwen3-VL (폴백), 아키텍처 평가, 동적 문제 생성 |
+| `media_recording_service.py` | **미디어 녹화/트랜스코딩 서비스** (534 lines) - aiortc + GStreamer/FFmpeg 하이브리드, stdin pipe 실시간 인코딩, 썸네일 생성, 메타데이터 관리, Graceful Degradation |
+| `interview_workflow.py` | **LangGraph 면접 상태머신** (1,053 lines) - 조건부 분기 + 루프 제어 + 체크포인트 기반 면접 흐름 제어, StateGraph |
+| `speech_analysis_service.py` | **발화 속도/발음 분석 서비스** (324 lines) - SPM(분당 음절 수) 계산, 등급 판정, 5점 척도 변환 |
+| `gaze_tracking_service.py` | **시선 추적 분석 서비스** (286 lines) - 눈 접촉 비율 측정, 집중도 등급 판정, OpenCV 기반 |
+| `hume_prosody_service.py` | **음성 감정 Prosody 분석 서비스** (699 lines) - Hume AI API, 10개 감정 지표 (confidence, joy, sadness 등), 평균 점수 산출 |
+| `pdf_report_service.py` | **PDF 종합 리포트 생성** (473 lines) - ReportLab 기반, 커버페이지(합격/불합격 + 통합 점수) + 평가표 + 비언어 바 차트 + 키워드 + STAR 각 섹션 |
+| `latency_monitor.py` | **지연 시간 모니터링** (202 lines) - Thread-safe LatencyMonitor 클래스, SLA 1.5초 임계값, Phase 측정 (LLM/TTS), 위반 내역 deque, 대시보드 API 데이터 |
+| `whisper_stt_service.py` | **Whisper 기반 로컬 STT** (501 lines) - 오프라인 폴백용 음성 인식 서비스, Deepgram 불가 시 자동 전환 |
+| `prompt_templates.py` | **프롬프트 템플릿 모듈** (89 lines) - INTERVIEWER_PROMPT, EVALUATION_PROMPT, build_question_prompt() 함수, 면접관 역할/평가 기준 정의 |
+| `Dockerfile` | **Docker 컨테이너 설정** (57 lines) - python:3.11-slim 기반, FFmpeg 포함, uvicorn 워커 실행 |
 | `data_entry.ipynb` | 데이터 입력용 Jupyter Notebook |
 | `start_interview.bat` | **원클릭 시작 스크립트** (Windows Batch) - 전체 시스템 실행 |
 | `start_all.ps1` | **원클릭 시작 스크립트** (PowerShell) - 컬러 출력, 상세 로그 |
 | `start_prerequisites.bat` | **사전 서비스 스크립트** - Redis, Ollama만 실행 |
-| `json_utils.py` | **JSON 안정적 파싱 모듈** (330+ lines) - 6단계 다층 파싱, Qwen3 `<think>` 블록 제거, 구문 오류 자동 수정 |
-| `security.py` | **보안 유틸리티 모듈** (330+ lines) - bcrypt 해싱, JWT 인증, CORS, WebSocket JWT, TLS, 보호 API 16개 |
-| `events.py` | **이벤트 정의 모듈** (230+ lines) - EventType enum (30+), 도메인별 Pydantic 이벤트 모델, EventFactory |
-| `event_bus.py` | **이벤트 버스 모듈** (310+ lines) - Redis Pub/Sub + 로컬 비동기 디스패치 + WebSocket 브로드캐스트 (싱글턴) |
-| `event_handlers.py` | **이벤트 핸들러 모듈** (250+ lines) - 9개 도메인별 핸들러 등록, 감정 경고 자동 발행 |
-| `requirements_integrated.txt` | 통합 의존성 목록 (FastAPI, LangChain, Celery, DeepFace, anthropic 등) |
+| `json_utils.py` | **JSON 안정적 파싱 모듈** (307 lines) - 6단계 다층 파싱, EXAONE `<think>` / `</think>` Deep Thought 블록 제거, 구문 오류 자동 수정 |
+| `security.py` | **보안 유틸리티 모듈** (551 lines) - bcrypt 해싱, JWT 인증, AES-256-GCM 민감정보 암호화, CORS, WebSocket JWT, TLS, 보호 API 16개, GDPR 데이터 삭제 지원 |
+| `events.py` | **이벤트 정의 모듈** (199 lines) - EventType enum (30+), 도메인별 Pydantic 이벤트 모델, EventFactory |
+| `event_bus.py` | **이벤트 버스 모듈** (346 lines) - Redis Pub/Sub + 로컬 비동기 디스패치 + WebSocket 브로드캐스트 (싱글턴) |
+| `event_handlers.py` | **이벤트 핸들러 모듈** (272 lines) - 9개 도메인별 핸들러 등록, 감정 경고 자동 발행 |
+| `.env.example` | **환경변수 템플릿** (60 lines) - 모든 필수/선택 환경변수 목록 및 기본값 안내 |
+| `requirements_integrated.txt` | 통합 의존성 목록 (FastAPI, LangChain, Celery, DeepFace, anthropic, cryptography 등) |
 | `__init__.py` | 패키지 초기화 파일 |
-| `static/integrated_interview.html` | **통합 화상 면접 UI** - 실시간 평가 패널, 감정 분석 포함 |
-| `static/coding_test.html` | **코딩 테스트 UI** - Monaco Editor 기반 웹 IDE |
-| `static/my_dashboard.html` | 마이 대시보드 - 개인별 면접 결과 확인 |
-| `static/dashboard.html` | 감정 분석 대시보드 - 시계열 차트, 통계 시각화 |
-| `static/video.html` | 기존 화상 면접 UI (레거시) |
 | `uploads/` | 이력서 PDF 업로드 디렉토리 |
+| `sandbox/` | **Docker 샌드박스** - 코딩 테스트 격리 실행 환경 (Dockerfile + 보안 설정) |
+| `nginx/` | **NGINX 리버스 프록시 설정** - 라우팅 및 로드 밸런싱 |
 | `documents/` | **설계 문서 디렉토리** - SAD, SRS, 보안 리뷰 보고서, RAG DB 구조, TODO |
-| `frontend/` | **Next.js 프론트엔드** - TypeScript + Tailwind CSS + Recharts, 7개 페이지, 인증 시스템, Chart.js, Recharts 리포트 시각화 (7종 차트 + 비언어 평가 카드 + 통합 점수 + 합격/불합격 배지), 실시간 이벤트 알림 |
+| `frontend/` | **Next.js 16 프론트엔드** - TypeScript + Tailwind CSS + Recharts, 10개 페이지, 인증 시스템 (JWT + GDPR), Chart.js, Recharts 리포트 시각화 (7종 차트 + 비언어 평가 카드 + 통합 점수 + 합격/불합격 배지), 실시간 이벤트 알림, 채용공고 관리, 인사담당자 대시보드 |
 
 ---
 
@@ -1132,6 +1210,112 @@ async def get_my_result(task_id: str):
 ---
 
 ## 📝 변경 이력 (Changelog)
+
+### 2026-03-04
+
+#### 📄 문서 및 품질 개선
+- **배포 가이드 문서** 신규 작성
+- **STT 성능 개선**: Deepgram Nova-3 최적화, 음성 인식 품질 향상 작업 수행 및 방안 문서화
+- **SAD/SRS 대비 실제 구현 상태 점검** 후 결과 문서화
+- **Latency 해결 방안** 정리 및 문서화
+
+### 2026-03-03
+
+#### 🎙️ STT 엔진 및 TTS 개선
+- **STT 엔진 교체 테스트**: Google Web Speech ↔ Deepgram Nova-3 간 전환 테스트, 최종 **Deepgram Nova-3** 확정
+- **Deepgram 서버 STT**: 중간 인식 결과를 회색 이탤릭(interimText)으로 실시간 표시, 확정되면 검은 글씨(sttText)로 전환하는 UX 구현
+- **SSE와 TTS 발화 동시 진행**: AI 답변 스트리밍과 음성 합성 병렬 처리
+- **Celery에 TTS prefetch 태스크 추가**: `prefetch_tts_task` 비동기 음성 사전 생성
+- **VAD 시스템 오작동 수정**: 면접 개입(인터벤션) 안정화
+- **AI 영어 답변 버그 수정**: 프롬프트 엔지니어링으로 한국어 응답 강제
+
+### 2026-02-26
+
+#### 🔧 STT 품질 및 시스템 안정화
+- **듀얼 STT 충돌 해결**: 프론트엔드에서 Deepgram 사용 시 브라우저 STT 비활성화하여 동시 누적 충돌 방지
+- **AI 면접 종료 멘트**: 마지막 멘트 출력으로 사용자 경험 향상
+- **AI 영어 질문 버그 수정**: 프롬프트 엔지니어링 적용
+- **PowerShell 원클릭 실행 스크립트** (`start_all.ps1`) 작성
+- **STT 미작동 버그 해결**
+- **VAD 설정값 조정**: 실시간 면접 개입 시스템 파라미터 최적화
+
+### 2026-02-25
+
+#### 🤖 AI 답변 품질 및 안정성 대규모 개선
+- **AI 답변 스트리밍 방식 구현**: SSE 기반 실시간 토큰 출력으로 사용자 경험 향상
+- **LLM 문맥 기반 질문 생성 개선** (3가지 근본 원인 해결):
+  1. RAG 컨텍스트 메시지 순서 재배치 (대화 흐름 단절 방지)
+  2. `build_question_prompt()`에 `user_answer` 파라미터 추가 (직전 답변 기반 후속 질문)
+  3. 대화 이력 `max_messages` 증가 (6→10, 3턴→5턴)
+- **LLM 무한 반복/무한 꼬리 질문 버그 해결**
+- **RAG 타임아웃 문제 해결**
+- **VAD 개입 메시지 템플릿 변경** 및 프론트엔드 연동
+- **Deepgram 파라미터 추가**: 인식 정확도 향상
+- **환경 테스트 피드백 개선**: 면접 시작 전 정확한 피드백 제공
+- **AI 개입 후 시스템 정지 버그 수정**
+
+### 2026-02-24
+
+#### 🧠 LLM 모델 전환 및 아키텍처 최적화
+- **LLM 모델 전환**: exaone-deep:2.4b-q8_0 → **EXAONE 3.5 7.8B** (exaone3.5:7.8b)
+- **VRAM 6GB 환경 최적화**: 컨텍스트 윈도우 16384 → 8192 조정
+- **코딩 테스트 전용 LLM 변경**: Qwen3-Coder-30B-A3B (Q3_K_M) 설정
+- **LangGraph 아키텍처 개선**: 노드 간 독립적 상태 변환 활용
+- **Celery RAG 컨텍스트 조회 추가**: `retrieve_resume_context_task` 및 토픽 추적 기능 보완
+- **대화 이력 이중 관리 버그 해결**
+- **Thinking Mode 추론 블록 중복 제거 버그 수정**
+- **프롬프트 엔지니어링**: 질문 품질 지속 개선
+- **DB 구조 변경 사항** 면접 시스템 반영 및 문서화
+- **질문 개수 UI 반영**: 백엔드에서 확인 후 프론트엔드에 표시
+
+### 2026-02-23
+
+#### 🔧 LLM 엔진 교체 및 안정화
+- **LLM 엔진 교체**: Qwen3 → EXAONE (엑사원) 전환 시작
+- **LLM 폴백 답변 제거**: 불필요한 기본 응답 삭제
+- **LLM 응답 지연/오류 수정**: 답변 생성 성능 개선
+- **Hume TTS 토큰 인증 에러 해결**
+- **자동 새로고침 방지**: 서버 reload 기능 비활성화
+- **면접 진행 중 LLM 무응답 버그 해결**
+
+### 2026-02-19
+
+#### 🚀 코딩 테스트 개선 및 D-ID 제거
+- **D-ID 아바타 완전 제거**: `did_avatar_service.py` 파일 삭제, AI 면접관 아바타 기능 미구현 상태로 전환
+- **코딩 테스트 최적화**: 문제 생성 시간 단축, 병목현상 해결, "다음 단계로 건너뛰기" 버튼 추가
+- **면접 자동 새로고침 버그 수정** (3건)
+- **질문 생성 안 되던 문제 해결**
+- **UI 개선**: 전반적 인터페이스 정비
+
+### 2026-02-13
+
+#### 🏗️ Docker/NGINX 인프라 및 프롬프트 체계화
+- **NGINX API Gateway 설정**: SSL 종단, 리버스 프록시, Rate Limiting, 보안 헤더, 로드 밸런싱
+- **개발용 자체서명 SSL 인증서** 생성 스크립트 (OpenSSL 기반)
+- **Docker 컨테이너화**: FastAPI 백엔드 + Next.js 프론트엔드 이미지 생성
+- **Trusted Proxy 미들웨어** 추가 (X-Real-IP, X-Forwarded-For, X-Request-ID)
+- **Docker Gateway 모드 원샷 시작 안정화** 및 컨테이너 헬스체크 수정
+- **프롬프트 템플릿화**: `prompt_templates.py` 모듈로 공통 프롬프트 분리
+- **카메라/마이크 테스트 페이지 삭제**: 면접 페이지 내 환경 테스트로 통합
+- **SAD/SRS 실제 구현 점검 결과** 업데이트
+- **Celery Worker, Next.js dev 서버** PowerShell 창 실행 수정
+
+### 2026-02-12
+
+#### 🎨 UX 대규모 개선 및 신규 페이지
+- **채용공고 시스템**: `/jobs` 지원 공고 페이지 생성, LLM이 공고 내용 기반 지능적 질문 가능
+- **인사담당자 대시보드**: `/recruiter` 전용 페이지 생성 (공고 CRUD)
+- **채용 공고 등록/수정/삭제 버그 수정** 및 성공 시 토스트 피드백 추가
+- **커스텀 Toast 알림 시스템**: 네이티브 `alert()`/`confirm()` → 커스텀 토스트 + 확인 모달 교체 (`Toast.tsx`, `ToastContext.tsx`)
+- **모바일 반응형 헤더**: Drawer 메뉴 + 햄버거 토글
+- **모달 접근성(a11y) 전면 개선**: ARIA 속성, 키보드 탐색
+- **회원 탈퇴 기능 구현** (GDPR 대응)
+- **회원 유형 선택 항목** 추가 및 DB 저장 검증
+- **이력서 DB 연동**: 업로드된 이력서 파일 DB 기억
+- **면접 기록 열람**: 내 정보 페이지에서 과거 면접 기록 접근 가능
+- **WebRTC 영상 버그 수정**: 면접 진행 시 AI/본인 영상 미표시 및 환경 테스트 카메라 스트림 문제 해결
+- **시스템 아키텍처 다이어그램** 생성 및 수정
+- **로그인/대시보드 이동 버그 수정**
 
 ### 2026-02-11 (후반)
 

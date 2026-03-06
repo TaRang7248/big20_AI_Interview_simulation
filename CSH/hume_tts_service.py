@@ -83,10 +83,15 @@ async def get_hume_access_token() -> Optional[str]:
 
 @dataclass  # 데이터 클래스 사용
 class HumeVoiceConfig:
-    """Hume AI 음성 설정"""
+    """Hume AI 음성 설정
 
-    voice_name: str = "ITO"  # Hume 기본 음성
-    language: str = "ko"  # 한국어 지원 (EVI 4-mini)
+    Octave 2 (version="2") 사용 시 한국어 포함 11개 언어 지원.
+    ITO는 Hume AI Voice Library의 기본 음성으로,
+    Octave 1/2 모두 호환됩니다.
+    """
+
+    voice_name: str = "ITO"  # Hume 기본 음성 (Octave 1/2 호환)
+    language: str = "ko"  # 한국어 지원 (Octave 2 필수)
     speaking_rate: float = 1.0
     emotion_style: str = "professional"  # professional, friendly, empathetic
 
@@ -229,10 +234,17 @@ class HumeTTSService:
         # ========== 전송 데이터(Payload) 구성 — Octave utterances 형식 ==========
         # Hume Octave TTS API는 'utterances' 배열 형식을 사용
         # 각 utterance에는 text, voice(name + provider), description(선택) 등이 포함됨
+        #
+        # ⚠️ 중요: "version": "2" (Octave 2) 필수!
+        # - Octave 1 (기본값): 영어, 스페인어만 지원 → 한국어 텍스트를 영어 발음으로 읽어버림
+        # - Octave 2: 한국어 포함 11개 언어 지원 (English, Japanese, Korean, Spanish,
+        #   French, Portuguese, Italian, German, Russian, Hindi, Arabic)
+        # - Octave 1 음성(ITO 등)은 Octave 2에서도 호환 사용 가능
         voice_name = (
             self.voice_config.voice_name if hasattr(self, "voice_config") else "ITO"
         )
         payload = {
+            "version": "2",  # ★ Octave 2 사용 — 한국어 TTS 지원 필수 설정
             "utterances": [
                 {
                     "text": text,
@@ -455,5 +467,110 @@ def create_tts_router():
             }
         else:
             raise HTTPException(status_code=500, detail="토큰 인증 실패")
+
+    # ── Celery TTS 비동기 결과 조회 엔드포인트 ──
+    # generate_tts_task.delay()로 제출된 TTS 태스크의 결과를 조회합니다.
+    # 프론트엔드에서 tts_task_id로 폴링하여 고품질 Hume TTS 오디오를 가져올 수 있습니다.
+    @router.get("/result/{task_id}")
+    async def get_tts_result(task_id: str):
+        """
+        Celery TTS 태스크 결과 조회
+
+        - PENDING: 태스크가 아직 처리 대기 중
+        - STARTED: 태스크 처리 시작됨
+        - SUCCESS: 완료 → audio_url 반환
+        - FAILURE: 생성 실패
+        """
+        try:
+            from celery.result import AsyncResult
+            from celery_app import celery_app as _celery_app
+
+            result = AsyncResult(task_id, app=_celery_app)
+            state = result.state  # PENDING, STARTED, SUCCESS, FAILURE
+
+            if state == "SUCCESS":
+                # generate_tts_task 반환: {"audio_url": ..., "text_length": ..., ...}
+                task_result = result.result
+                audio_url = (
+                    task_result.get("audio_url")
+                    if isinstance(task_result, dict)
+                    else None
+                )
+                if audio_url:
+                    return {
+                        "status": "completed",
+                        "audio_url": audio_url,
+                        "task_id": task_id,
+                    }
+                else:
+                    return {
+                        "status": "completed",
+                        "audio_url": None,
+                        "detail": "TTS 생성 완료했으나 오디오 파일 없음",
+                        "task_id": task_id,
+                    }
+            elif state == "FAILURE":
+                return {
+                    "status": "failed",
+                    "detail": str(result.info) if result.info else "TTS 생성 실패",
+                    "task_id": task_id,
+                }
+            elif state == "STARTED":
+                return {
+                    "status": "processing",
+                    "detail": "TTS 생성 처리 중",
+                    "task_id": task_id,
+                }
+            else:
+                # PENDING 또는 기타
+                return {
+                    "status": "pending",
+                    "detail": "태스크 대기 중",
+                    "task_id": task_id,
+                }
+        except ImportError:
+            raise HTTPException(
+                status_code=503,
+                detail="Celery가 사용 불가능합니다. Celery worker가 실행 중인지 확인하세요.",
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"태스크 조회 오류: {str(e)}",
+            )
+
+    # ── Celery TTS 프리페칭 엔드포인트 ──
+    # 여러 텍스트에 대한 TTS를 한번에 백그라운드 생성 요청합니다.
+    class PrefetchRequest(BaseModel):
+        session_id: str
+        texts: list[str]
+
+    @router.post("/prefetch")
+    async def prefetch_tts(request: PrefetchRequest):
+        """
+        여러 텍스트에 대한 TTS 프리페칭 (Celery 비동기)
+
+        세션 생성 시 인사말, 종료 인사 등 고정 문구를 미리 생성합니다.
+        """
+        try:
+            from celery_tasks import prefetch_tts_task
+
+            task = prefetch_tts_task.delay(request.session_id, request.texts)
+            return {
+                "status": "submitted",
+                "task_id": task.id,
+                "text_count": len(request.texts),
+                "session_id": request.session_id,
+            }
+        except ImportError:
+            raise HTTPException(
+                status_code=503,
+                detail="Celery가 사용 불가능합니다.",
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"프리페칭 태스크 제출 오류: {str(e)}",
+            )
 
     return router

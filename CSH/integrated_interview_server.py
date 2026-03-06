@@ -1659,6 +1659,8 @@ class InterviewInterventionManager:
     SOFT_WARNING_LENGTH = 600  # 부드러운 경고 길이
     SILENCE_THRESHOLD_MS = 5000  # 침묵 감지 임계값 (5초)
     TOPIC_RELEVANCE_THRESHOLD = 0.3  # 주제 관련성 임계값
+    INTERVENTION_COOLDOWN_SECONDS = 15  # 개입 간 최소 쿨다운 (15초)
+    MAX_INTERVENTIONS_PER_TURN = 3  # 턴당 최대 개입 횟수
 
     # 개입 메시지 템플릿
     INTERVENTION_MESSAGES = {
@@ -1704,6 +1706,9 @@ class InterviewInterventionManager:
             "intervention_count": 0,
             "soft_warning_given": False,
             "silence_intervention_given": False,  # 침묵 개입 중복 방지 플래그
+            "off_topic_intervention_given": False,  # 주제 이탈 개입 중복 방지 플래그
+            "hard_limit_intervention_given": False,  # 강제 제한 개입 중복 방지 플래그
+            "last_intervention_time": None,  # 마지막 개입 시각 (쿨다운 계산용)
             "current_question_keywords": [],
             "vad_buffer": [],  # VAD 신호 버퍼
             "turn_state": "ai_speaking",  # ai_speaking, user_speaking, silence
@@ -1726,6 +1731,14 @@ class InterviewInterventionManager:
         state["silence_intervention_given"] = (
             False  # 새 턴 시작 시 침묵 개입 플래그 리셋
         )
+        state["off_topic_intervention_given"] = (
+            False  # 새 턴 시작 시 주제 이탈 개입 플래그 리셋
+        )
+        state["hard_limit_intervention_given"] = (
+            False  # 새 턴 시작 시 강제 제한 플래그 리셋
+        )
+        state["last_intervention_time"] = None  # 쿨다운 타이머 리셋
+        state["intervention_count"] = 0  # 턴 시작 시 개입 카운트 리셋
         state["turn_state"] = "user_speaking"
 
         if question_keywords:
@@ -1788,7 +1801,12 @@ class InterviewInterventionManager:
     def check_intervention_needed(
         self, session_id: str, answer_text: str = None
     ) -> Optional[Dict]:
-        """개입이 필요한지 확인"""
+        """
+        개입이 필요한지 확인
+        - 글로벌 쿨다운: 마지막 개입 후 INTERVENTION_COOLDOWN_SECONDS 동안 추가 개입 차단
+        - 턴당 최대 개입 횟수: MAX_INTERVENTIONS_PER_TURN 초과 시 더 이상 개입하지 않음
+        - 유형별 중복 방지 플래그: off_topic, hard_limit, silence, soft_warning 각각 1회만
+        """
         if session_id not in self.session_states:
             return None
 
@@ -1805,10 +1823,27 @@ class InterviewInterventionManager:
                 datetime.now() - state["answer_start_time"]
             ).total_seconds()
 
+        # ──────────────────────────────────────────────
+        # 글로벌 가드: 쿨다운 + 최대 횟수 제한
+        # ──────────────────────────────────────────────
+
+        # 턴당 최대 개입 횟수 초과 시 더 이상 개입하지 않음
+        if state["intervention_count"] >= self.MAX_INTERVENTIONS_PER_TURN:
+            return None
+
+        # 마지막 개입 후 쿨다운(INTERVENTION_COOLDOWN_SECONDS) 시간 내이면 개입 스킵
+        last_time = state.get("last_intervention_time")
+        if last_time:
+            since_last = (datetime.now() - last_time).total_seconds()
+            if since_last < self.INTERVENTION_COOLDOWN_SECONDS:
+                return None
+
         intervention = None
 
-        # 1. 강제 시간 제한 초과
-        if elapsed_seconds >= self.MAX_ANSWER_TIME_SECONDS:
+        # 1. 강제 시간 제한 초과 — hard_limit_intervention_given 플래그로 1회만
+        if elapsed_seconds >= self.MAX_ANSWER_TIME_SECONDS and not state.get(
+            "hard_limit_intervention_given", False
+        ):
             intervention = {
                 "type": "hard_time_limit",
                 "reason": f"시간 초과 ({elapsed_seconds:.0f}초)",
@@ -1816,6 +1851,7 @@ class InterviewInterventionManager:
                 "action": "force_next_question",
                 "priority": "high",
             }
+            state["hard_limit_intervention_given"] = True
 
         # 2. 소프트 시간 경고
         elif (
@@ -1831,8 +1867,10 @@ class InterviewInterventionManager:
             }
             state["soft_warning_given"] = True
 
-        # 3. 답변 길이 초과
-        elif answer_length >= self.MAX_ANSWER_LENGTH:
+        # 3. 답변 길이 초과 — hard_limit_intervention_given 플래그 공유 (시간/길이 중 먼저 걸린 것 1회)
+        elif answer_length >= self.MAX_ANSWER_LENGTH and not state.get(
+            "hard_limit_intervention_given", False
+        ):
             intervention = {
                 "type": "hard_time_limit",
                 "reason": f"답변 길이 초과 ({answer_length}자)",
@@ -1840,6 +1878,7 @@ class InterviewInterventionManager:
                 "action": "force_next_question",
                 "priority": "high",
             }
+            state["hard_limit_intervention_given"] = True
 
         # 4. 소프트 길이 경고
         elif (
@@ -1855,8 +1894,12 @@ class InterviewInterventionManager:
             }
             state["soft_warning_given"] = True
 
-        # 5. 주제 이탈 감지
-        if intervention is None and answer_length > 100:
+        # 5. 주제 이탈 감지 — off_topic_intervention_given 플래그로 턴당 1회만
+        if (
+            intervention is None
+            and answer_length > 100
+            and not state.get("off_topic_intervention_given", False)
+        ):
             relevance = self._check_topic_relevance(
                 state["current_answer_text"], state["current_question_keywords"]
             )
@@ -1868,17 +1911,19 @@ class InterviewInterventionManager:
                     "action": "redirect",
                     "priority": "medium",
                 }
+                # 동일 턴 내 반복 주제 이탈 개입 차단
+                state["off_topic_intervention_given"] = True
 
         # 6. 장시간 침묵 감지 — 동일 침묵 구간에서 1회만 개입
         # silence_intervention_given 플래그로 중복 방지:
-        #   - False → 첫 침묵 5초 초과 시 개입 메시지 1회 전송 후 True로 설정
+        #   - False → 첫 침묵 8초 초과 시 개입 메시지 1회 전송 후 True로 설정
         #   - True → 사용자가 다시 발화할 때까지 추가 침묵 개입 차단
         #   - update_vad_signal()에서 is_speech=True 수신 시 False로 리셋
         if (
             intervention is None
             and state["silence_duration_ms"] > 8000
             and not state.get("silence_intervention_given", False)
-        ):  # 5초 이상 침묵 & 아직 개입하지 않은 경우
+        ):
             intervention = {
                 "type": "silence_detected",
                 "reason": f"침묵 감지 ({state['silence_duration_ms'] / 1000:.1f}초)",
@@ -1889,8 +1934,12 @@ class InterviewInterventionManager:
             # 동일 침묵 구간 내 반복 개입 차단
             state["silence_intervention_given"] = True
 
+        # ──────────────────────────────────────────────
+        # 개입 발생 시: 카운트 증가, 쿨다운 타이머 기록, 이력 저장
+        # ──────────────────────────────────────────────
         if intervention:
             state["intervention_count"] += 1
+            state["last_intervention_time"] = datetime.now()
             self.intervention_history[session_id].append(
                 {
                     **intervention,
@@ -1900,7 +1949,9 @@ class InterviewInterventionManager:
                 }
             )
             print(
-                f"⚠️ [Intervention] 세션 {session_id[:8]}... {intervention['type']}: {intervention['reason']}"
+                f"⚠️ [Intervention] 세션 {session_id[:8]}... "
+                f"{intervention['type']}: {intervention['reason']} "
+                f"(개입 {state['intervention_count']}/{self.MAX_INTERVENTIONS_PER_TURN})"
             )
 
         return intervention
@@ -3572,6 +3623,7 @@ class ChatResponse(BaseModel):
     session_id: str
     response: str
     audio_url: Optional[str] = None
+    tts_task_id: Optional[str] = None  # Celery TTS 태스크 ID (비동기 결과 조회용)
     question_number: Optional[int] = None  # 현재 질문 번호 (프론트엔드 동기화용)
 
 
@@ -5543,6 +5595,20 @@ async def create_session(
 
     print(f"✅ 면접 세션 생성: {session_id} (사용자: {request.user_email})")
 
+    # ── Celery TTS 프리페칭: 인사말 + 종료 인사를 미리 생성 ──
+    # 세션 생성 시점에 고정 문구의 TTS를 백그라운드로 생성해두면,
+    # 프론트엔드에서 ttsApi.speak()이 호출될 때 캐싱된 결과를 즉시 반환할 수 있습니다.
+    if TTS_AVAILABLE and CELERY_AVAILABLE:
+        try:
+            closing_msg = "수고하셨습니다. 오늘 면접은 여기서 마치겠습니다. 좋은 결과 있으시길 바랍니다."
+            prefetch_task = prefetch_tts_task.delay(session_id, [greeting, closing_msg])
+            print(
+                f"🔊 [Celery TTS Prefetch] 인사말+종료 인사 프리페칭 태스크 제출됨: "
+                f"{prefetch_task.id[:8]}..."
+            )
+        except Exception as e:
+            print(f"⚠️ [Celery TTS Prefetch] 프리페칭 태스크 제출 실패 (무시): {e}")
+
     # 📤 이벤트 발행: 세션 생성
     if EVENT_BUS_AVAILABLE and event_bus:
         await event_bus.publish(
@@ -5856,21 +5922,52 @@ async def chat(
             except Exception as e:
                 print(f"[GazeTracking] 턴 시작 오류: {e}")
 
-    # TTS 생성 (선택적) — TTS 합성 단계 측정 (REQ-N-001)
+    # ── TTS 생성: Celery 비동기 오프로드 (가용 시) 또는 동기 폴백 ──
+    # Celery가 활성화되면 generate_tts_task.delay()로 fire-and-forget 전송하여
+    # API 응답을 TTS 완료까지 블로킹하지 않습니다 (REQ-N-001 지연 감소).
+    # Celery 미가용 시 기존 동기 방식(await)으로 폴백합니다.
     audio_url = None
+    tts_task_id = None
     if TTS_AVAILABLE and interviewer.tts_service:
-        try:
-            if rid:
-                latency_monitor.start_phase(rid, "tts_synthesis")
-            audio_file = await interviewer.generate_speech(response)
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            if audio_file:
-                audio_url = f"/audio/{os.path.basename(audio_file)}"
-        except Exception as e:
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            print(f"TTS 생성 오류: {e}")
+        if CELERY_AVAILABLE:
+            # ── Celery 비동기 TTS: fire-and-forget ──
+            # 응답 즉시 반환, TTS는 Celery worker에서 백그라운드 생성
+            # 결과는 /api/tts/result/{task_id} 엔드포인트로 조회 가능
+            try:
+                task = generate_tts_task.delay(response)
+                tts_task_id = task.id
+                print(
+                    f"🔊 [Celery TTS] 태스크 제출됨: {task.id[:8]}... (텍스트 {len(response)}자)"
+                )
+            except Exception as e:
+                print(f"⚠️ [Celery TTS] 태스크 제출 실패, 동기 폴백: {e}")
+                # Celery 제출 실패 시 동기 방식으로 폴백
+                try:
+                    if rid:
+                        latency_monitor.start_phase(rid, "tts_synthesis")
+                    audio_file = await interviewer.generate_speech(response)
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    if audio_file:
+                        audio_url = f"/audio/{os.path.basename(audio_file)}"
+                except Exception as tts_err:
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    print(f"TTS 생성 오류: {tts_err}")
+        else:
+            # ── 동기 TTS 폴백: Celery 미가용 환경 ──
+            try:
+                if rid:
+                    latency_monitor.start_phase(rid, "tts_synthesis")
+                audio_file = await interviewer.generate_speech(response)
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                if audio_file:
+                    audio_url = f"/audio/{os.path.basename(audio_file)}"
+            except Exception as e:
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                print(f"TTS 생성 오류: {e}")
 
     # 📤 이벤트 발행: 질문 생성 + 답변 제출
     if EVENT_BUS_AVAILABLE and event_bus:
@@ -5883,7 +5980,10 @@ async def chat(
         await event_bus.publish(
             AppEventType.QUESTION_GENERATED,
             session_id=request.session_id,
-            data={"question": response[:200], "has_audio": audio_url is not None},
+            data={
+                "question": response[:200],
+                "has_audio": audio_url is not None or tts_task_id is not None,
+            },
             source="ai_interviewer",
         )
 
@@ -5895,6 +5995,7 @@ async def chat(
         session_id=request.session_id,
         response=response,
         audio_url=audio_url,
+        tts_task_id=tts_task_id,
         question_number=current_q_num,
     )
 
@@ -5963,26 +6064,50 @@ async def chat_with_intervention(
             except Exception:
                 pass
 
-    # TTS 생성 — TTS 합성 단계 측정 (REQ-N-001)
+    # ── TTS 생성: Celery 비동기 오프로드 (가용 시) 또는 동기 폴백 ──
     audio_url = None
+    tts_task_id = None
     if TTS_AVAILABLE and interviewer.tts_service:
-        try:
-            if rid:
-                latency_monitor.start_phase(rid, "tts_synthesis")
-            audio_file = await interviewer.generate_speech(response)
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            if audio_file:
-                audio_url = f"/audio/{os.path.basename(audio_file)}"
-        except Exception as e:
-            if rid:
-                latency_monitor.end_phase(rid, "tts_synthesis")
-            print(f"TTS 생성 오류: {e}")
+        if CELERY_AVAILABLE:
+            try:
+                task = generate_tts_task.delay(response)
+                tts_task_id = task.id
+                print(
+                    f"🔊 [Celery TTS] 태스크 제출됨: {task.id[:8]}... (with-intervention)"
+                )
+            except Exception as e:
+                print(f"⚠️ [Celery TTS] 태스크 제출 실패, 동기 폴백: {e}")
+                try:
+                    if rid:
+                        latency_monitor.start_phase(rid, "tts_synthesis")
+                    audio_file = await interviewer.generate_speech(response)
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    if audio_file:
+                        audio_url = f"/audio/{os.path.basename(audio_file)}"
+                except Exception as tts_err:
+                    if rid:
+                        latency_monitor.end_phase(rid, "tts_synthesis")
+                    print(f"TTS 생성 오류: {tts_err}")
+        else:
+            try:
+                if rid:
+                    latency_monitor.start_phase(rid, "tts_synthesis")
+                audio_file = await interviewer.generate_speech(response)
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                if audio_file:
+                    audio_url = f"/audio/{os.path.basename(audio_file)}"
+            except Exception as e:
+                if rid:
+                    latency_monitor.end_phase(rid, "tts_synthesis")
+                print(f"TTS 생성 오류: {e}")
 
     return {
         "session_id": request.session_id,
         "response": response,
         "audio_url": audio_url,
+        "tts_task_id": tts_task_id,
         "turn_stats": turn_stats,
         "was_interrupted": request.was_interrupted,
         "next_question_keywords": question_keywords,
@@ -6418,11 +6543,29 @@ async def chat_stream(
                     source="ai_interviewer_stream",
                 )
 
+            # ── TTS Celery 비동기 오프로드 (스트리밍 응답과 병렬) ──
+            # 프론트엔드는 스트리밍 중 문장 단위 Web Speech API TTS를 사용하지만,
+            # 서버 측에서도 Celery를 통해 고품질 Hume TTS를 백그라운드로 생성합니다.
+            # 결과는 tts_task_id로 /api/tts/result/{task_id}에서 조회 가능합니다.
+            stream_tts_task_id = None
+            if TTS_AVAILABLE and CELERY_AVAILABLE and interviewer.tts_service:
+                try:
+                    tts_task = generate_tts_task.delay(final_question)
+                    stream_tts_task_id = tts_task.id
+                    print(
+                        f"🔊 [Celery TTS] 스트리밍 응답 TTS 태스크 제출됨: {tts_task.id[:8]}..."
+                    )
+                except Exception as tts_err:
+                    print(f"⚠️ [Celery TTS] 스트리밍 TTS 태스크 제출 실패: {tts_err}")
+
             # ── 최종 완료 이벤트 (프론트엔드에서 전체 텍스트 + 질문 번호 수신) ──
             done_data = {
                 "response": final_question,
                 "question_number": question_count + 1,
             }
+            # Celery TTS 태스크 ID가 있으면 done 이벤트에 포함
+            if stream_tts_task_id:
+                done_data["tts_task_id"] = stream_tts_task_id
             yield f"event: done\ndata: {_json.dumps(done_data, ensure_ascii=False)}\n\n"
 
         except Exception as e:
@@ -7042,13 +7185,80 @@ async def _analyze_prosody_from_audio(session_id: str, raw_pcm: bytes, transcrip
         print(f"[Prosody] 분석 오류 (세션 {session_id[:8]}): {e}")
 
 
+# ── Anti-aliasing FIR LPF 커널 캐시 (모듈 레벨) ──
+# _convert_frame_to_pcm16_mono_16k()가 매 오디오 프레임마다 호출되므로,
+# 동일 sample_rate에 대한 FIR 커널을 한 번만 생성하여 재사용합니다.
+_lpf_kernel_cache: dict[int, "np.ndarray"] = {}
+
+
+def _build_lpf_kernel(src_rate: int, target_rate: int = 16000) -> "np.ndarray":
+    """
+    Anti-aliasing용 Hamming-windowed sinc FIR 저역 통과 필터 커널을 생성합니다.
+
+    왜 필요한가:
+      기존 선형 보간(np.interp) 다운샘플링은 Nyquist 정리를 위반합니다.
+      예: 48kHz → 16kHz 변환 시, 8kHz 이상의 고주파 성분이 접혀 들어와(aliasing)
+      ㅂ/ㅍ, ㅈ/ㅊ 같은 고주파 자음의 구별력이 저하됩니다.
+      LPF로 타겟 Nyquist(8kHz) 이상의 주파수를 미리 제거하면 이 문제가 해결됩니다.
+
+    알고리즘:
+      - Hamming-windowed sinc filter
+      - 컷오프: target_rate / 2 (= 8000Hz)
+      - 탭 수: 63 (서버는 프론트엔드보다 연산 여유가 있으므로 더 높은 감쇠를 확보)
+      - 정규화: DC 게인 = 1.0 (음량 변화 방지)
+
+    Args:
+        src_rate: 입력 오디오 샘플레이트 (예: 48000, 44100)
+        target_rate: 타겟 샘플레이트 (기본 16000)
+
+    Returns:
+        정규화된 FIR 필터 커널 (numpy float64 array)
+    """
+    import numpy as np
+
+    if src_rate in _lpf_kernel_cache:
+        return _lpf_kernel_cache[src_rate]
+
+    filter_len = 63  # FIR 탭 수 (홀수 — 대칭 선형 위상 보장)
+    half_len = filter_len // 2
+    n = np.arange(filter_len) - half_len
+
+    # 정규화 컷오프 주파수: (target_rate/2) / (src_rate/2) = target_rate / src_rate
+    fc = target_rate / src_rate
+
+    # Windowed sinc 커널 생성
+    # - n == 0 일 때 sinc(0) = fc (L'Hôpital 규칙)
+    # - n != 0 일 때 sinc(fc * n) = sin(π * fc * n) / (π * n)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kernel = np.where(n == 0, fc, np.sin(np.pi * fc * n) / (np.pi * n))
+
+    # Hamming 윈도우: sinc의 사이드로브를 억제하여 스톱밴드 감쇠 ≈ -53dB 확보
+    hamming = 0.54 - 0.46 * np.cos(2 * np.pi * np.arange(filter_len) / (filter_len - 1))
+    kernel = kernel * hamming
+
+    # DC 게인 정규화 (합 = 1.0) — 필터 적용 후 음량 변화 방지
+    kernel = kernel / kernel.sum()
+
+    _lpf_kernel_cache[src_rate] = kernel
+    return kernel
+
+
 def _convert_frame_to_pcm16_mono_16k(frame) -> bytes:
     """
     aiortc AudioFrame을 Deepgram 권장 포맷(16kHz, mono, PCM16)으로 변환.
 
-    - 다운믹스(Downmix): 다채널 입력을 mono로 평균 결합
-    - 리샘플링(Resampling): 입력 sample_rate를 16kHz로 선형 보간
-    - 출력 포맷: little-endian PCM16 bytes
+    개선된 리샘플링 파이프라인:
+      1. 다운믹스(Downmix): 다채널 입력을 mono로 평균 결합
+      2. Anti-aliasing LPF: Hamming-windowed sinc FIR 필터로
+         타겟 Nyquist(8kHz) 이상의 고주파 성분을 제거
+      3. 리샘플링(Resampling): LPF 적용된 신호를 16kHz로 선형 보간
+      4. 출력 포맷: little-endian PCM16 bytes
+
+    왜 LPF가 필요한가:
+      기존 선형 보간만으로는 Nyquist 주파수(8kHz) 이상의 고주파가
+      저주파 대역으로 접혀 들어오는 앨리어싱이 발생합니다.
+      이로 인해 ㅂ/ㅍ, ㅈ/ㅊ 같은 고주파 자음 구별력이 저하되어
+      Deepgram STT의 인식 정확도가 떨어집니다.
 
     변환 실패 시 빈 바이트를 반환하여 상위 루프가 Graceful Degradation으로
     다음 프레임을 계속 처리할 수 있도록 합니다.
@@ -7083,12 +7293,21 @@ def _convert_frame_to_pcm16_mono_16k(frame) -> bytes:
         src_rate = int(getattr(frame, "sample_rate", 16000) or 16000)
         target_rate = 16000
 
-        # 명시적 리샘플링: src_rate != 16kHz 인 경우 선형 보간 적용
+        # 리샘플링: src_rate != 16kHz인 경우 LPF + 선형 보간 적용
         if src_rate != target_rate and mono.size > 1:
+            # ── Step 1: Anti-aliasing LPF (FIR 컨볼루션) ──
+            # 타겟 Nyquist(8kHz) 이상의 고주파 성분을 제거하여
+            # 다운샘플링 시 앨리어싱(고주파 접힘 왜곡)을 방지합니다.
+            lpf_kernel = _build_lpf_kernel(src_rate, target_rate)
+            # mode='same': 출력 길이 = 입력 길이 (양쪽 zero-padding)
+            filtered = np.convolve(mono, lpf_kernel, mode="same")
+
+            # ── Step 2: 다운샘플링 (선형 보간) ──
+            # LPF 적용된 신호에서 선형 보간으로 정확한 타겟 샘플 위치를 계산
             target_len = max(1, int(round(mono.size * target_rate / src_rate)))
-            x_old = np.linspace(0.0, 1.0, num=mono.size, endpoint=False)
+            x_old = np.linspace(0.0, 1.0, num=filtered.size, endpoint=False)
             x_new = np.linspace(0.0, 1.0, num=target_len, endpoint=False)
-            mono = np.interp(x_new, x_old, mono)
+            mono = np.interp(x_new, x_old, filtered)
 
         pcm16 = np.clip(mono, -32768, 32767).astype(np.int16)
         return pcm16.tobytes()
@@ -7898,6 +8117,9 @@ async def websocket_interview(
     deepgram_connect_error: Optional[str] = None
 
     try:
+        # ★ STT 정책: Deepgram Nova-3를 메인 STT로 사용
+        # Deepgram 연결 성공 시 stt_available=true → 프론트엔드가 서버 STT 사용
+        # Deepgram 연결 실패 시 stt_available=false → 프론트엔드가 브라우저 STT 폴백
         if DEEPGRAM_AVAILABLE and deepgram_client is not None:
             try:
                 ws_dg_connection = dg_stack.enter_context(
@@ -7918,13 +8140,12 @@ async def websocket_interview(
             except Exception as dg_conn_err:
                 deepgram_connect_error = str(dg_conn_err)
                 ws_dg_connection = None
-                print(
-                    f"⚠️ [WS-STT] 세션 {session_id[:8]} Deepgram 연결 실패: {dg_conn_err}"
-                )
 
+        # Deepgram 연결 성공 여부에 따라 서버 STT 가용 플래그 결정
         server_stt_available = ws_dg_connection is not None
 
-        # WS는 항상 유지하고, STT 가용 여부는 신호로 전달하여 브라우저 폴백을 보장
+        # 클라이언트에게 STT 가용 여부 전달
+        # True → Deepgram 서버 STT 사용 / False → 브라우저 SpeechRecognition 폴백
         await websocket.send_json(
             {
                 "type": "connected",
@@ -7934,6 +8155,7 @@ async def websocket_interview(
             }
         )
 
+        # Deepgram 연결 실패 시 클라이언트에 사유 알림
         if not server_stt_available and deepgram_connect_error:
             await _send_stt_status(False, reason="deepgram_connect_failed")
 
@@ -8031,7 +8253,9 @@ async def websocket_interview(
                                     "corrected_transcript": spacing_result[
                                         "corrected_transcript"
                                     ],
-                                    "spacing_applied": spacing_result["spacing_applied"],
+                                    "spacing_applied": spacing_result[
+                                        "spacing_applied"
+                                    ],
                                     "spacing_mode": spacing_result["spacing_mode"],
                                     "is_final": is_final,
                                     "source": "deepgram",
