@@ -13,6 +13,17 @@ import datetime
 
 Base = declarative_base()
 
+# User: 회원 정보
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    name = Column(String, nullable=True)
+    role = Column(String, default="user")  # "user" | "admin"
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 # InterviewSession: 면접 세션 정보 (누가, 언제)
 class InterviewSession(Base):
     __tablename__ = "interview_sessions"

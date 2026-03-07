@@ -21,7 +21,7 @@ from YYR.services.tts_service import generate_audio
 from YYR.database import get_db, SessionLocal
 # [수정] EvaluationReport 모델 추가 임포트
 from YYR.models import InterviewSession, Transcript, EvaluationReport
-# [수정] 리포트 생성 서비스 추가 임포트
+# [수정] 리포트 생성 서비스 추가 임포트ㄹ
 from YYR.services.report_service import generate_interview_report
 # [추가] 비디오 면접(Video Interview)
 from YYR.services.vision_service import analyze_face_emotion
@@ -29,6 +29,18 @@ from YYR.services.vision_service import analyze_face_emotion
 from YYR.services.rag_service import process_resume_pdf, get_relevant_context
 # 이전 세션이 준 새로운 import
 from sqlalchemy import text
+from YYR.models import User
+
+from passlib.context import CryptContext
+import bcrypt as _bcrypt
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return _bcrypt.checkpw(plain.encode(), hashed.encode())
 
 # 1. FastAPI 앱 초기화
 app = FastAPI(
@@ -148,6 +160,50 @@ def save_transcript(db, thread_id: str, sender: str, content: str):
         print(f"❌ [DB 저장 실패] {e}")
         db.rollback()
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+@app.post("/auth/signup")
+def signup(req: SignupRequest):
+    db = SessionLocal()
+    try:
+        # 이미 있는 이메일인지 확인
+        existing = db.query(User).filter(User.email == req.email).first()
+        if existing:
+            raise HTTPException(status_code=400, detail="이미 사용 중인 이메일이에요.")
+        
+        hashed_pw = hash_password(req.password)
+        user = User(email=req.email, hashed_password=hashed_pw, name=req.name)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return {"status": "success", "user_id": user.id, "email": user.email}
+    finally:
+        db.close()
+
+@app.post("/auth/login")
+def login(req: LoginRequest):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == req.email).first()
+        if not verify_password(req.password, user.hashed_password):
+            raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 틀렸어요.")
+        
+        return {
+            "status": "success",
+            "user_id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "role": user.role
+        }
+    finally:
+        db.close()
 
 # 3. 헬스 체크
 @app.get("/")
