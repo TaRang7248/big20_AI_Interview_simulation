@@ -183,7 +183,7 @@ def signup(req: SignupRequest):
         db.add(user)
         db.commit()
         db.refresh(user)
-        return {"status": "success", "user_id": user.id, "email": user.email}
+        return {"status": "success", "user_id": user.id, "email": user.email, "name": user.name}
     finally:
         db.close()
 

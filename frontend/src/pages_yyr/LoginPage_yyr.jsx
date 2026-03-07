@@ -48,6 +48,7 @@ export default function LoginPage_yyr() {
             localStorage.setItem("email", data.email);
             localStorage.setItem("role", data.role || "user");
             localStorage.setItem("auth_token", "loggedin");
+            localStorage.setItem("name", data.name || "");
 
             if (data.role === "admin") {
                 nav("/admin");

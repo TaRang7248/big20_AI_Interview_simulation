@@ -11,6 +11,7 @@ export default function UserHomePage_yyr({
     onResetSession,   // ✅ 추가: 세션 리셋(새 면접 시작)
     onLogout,
 }) {
+    const userName = localStorage.getItem("name") || localStorage.getItem("email") || "사용자";
     const glass =
         "bg-white/55 backdrop-blur-xl border border-white/60 shadow-[0_20px_40px_-20px_rgba(0,0,0,0.15)] rounded-3xl";
 
@@ -32,6 +33,9 @@ export default function UserHomePage_yyr({
                     </div>
 
                     <div className="flex items-center gap-3">
+                        <span className="text-sm font-semibold text-slate-700">
+                            👋 {userName}님
+                        </span>
                         <span className="text-xs font-semibold text-slate-700">
                             Phase: {String(interviewPhase).toUpperCase()}
                         </span>
