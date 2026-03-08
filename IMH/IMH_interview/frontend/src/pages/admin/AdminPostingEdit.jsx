@@ -11,6 +11,7 @@ export default function AdminPostingEdit() {
     const [loading, setLoading] = useState(true)
     const [saving, setSaving] = useState(false)
     const [error, setError] = useState('')
+    const [confirmAction, setConfirmAction] = useState(null)  // null | 'PUBLISH' | 'CLOSE'
 
     // Policy is Frozen at Publish: PUBLISHED / CLOSED → lock all AI policy fields
     const isPolicyFrozen = jobStatus === 'PUBLISHED' || jobStatus === 'CLOSED'
@@ -74,13 +75,22 @@ export default function AdminPostingEdit() {
     }
 
     async function handleAction(action) {
-        if (!window.confirm(action === 'PUBLISH' ? '공고를 게시하시겠습니까?' : '공고를 조기 마감하시겠습니까?')) return
+        // 2-step inline confirmation: first click sets confirmAction, second click executes
+        if (confirmAction !== action) {
+            setConfirmAction(action)
+            return
+        }
+        setConfirmAction(null)
         setSaving(true)
         try {
-            await jobsApi.update(postingId, { action })
+            if (action === 'PUBLISH') {
+                await jobsApi.publish(postingId)
+            } else if (action === 'CLOSE') {
+                await jobsApi.close(postingId)
+            }
             navigate(`/admin/postings/${postingId}`)
         } catch (err) {
-            setError(err.response?.data?.detail || '오류가 발생했습니다.')
+            setError(err.message || err.response?.data?.detail || '오류가 발생했습니다.')
         } finally {
             setSaving(false)
         }
@@ -190,15 +200,17 @@ export default function AdminPostingEdit() {
                             className="btn btn-success flex-1"
                             onClick={() => handleAction('PUBLISH')}
                             disabled={saving || jobStatus !== 'DRAFT'}
+                            style={confirmAction === 'PUBLISH' ? { background: '#f59e0b', borderColor: '#f59e0b' } : {}}
                         >
-                            ✅ 게시 (PUBLISH)
+                            {confirmAction === 'PUBLISH' ? '⚠️ 정말 게시합니까? (다시 클릭)' : '✅ 게시 (PUBLISH)'}
                         </button>
                         <button
                             className="btn btn-danger flex-1"
                             onClick={() => handleAction('CLOSE')}
                             disabled={saving || jobStatus !== 'PUBLISHED'}
+                            style={confirmAction === 'CLOSE' ? { background: '#f59e0b', borderColor: '#f59e0b' } : {}}
                         >
-                            🔒 조기 마감 (CLOSE)
+                            {confirmAction === 'CLOSE' ? '⚠️ 정말 마감합니까? (다시 클릭)' : '🔒 조기 마감 (CLOSE)'}
                         </button>
                     </div>
                 </div>

@@ -43,14 +43,19 @@ class PostgreSQLSessionRepository(SessionStateRepository):
         """
         self.conn_config = conn_config
     
-    def _get_event_loop(self):
-        """Get or create event loop for async operations"""
+    def _run_sync(self, coro_func, *args, **kwargs):
+        """Safely execute a coroutine synchronously, even if an event loop is already running."""
+        import concurrent.futures
         try:
-            return asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop
+            loop = None
+            
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(lambda: asyncio.run(coro_func(*args, **kwargs))).result()
+        else:
+            return asyncio.run(coro_func(*args, **kwargs))
     
     async def _get_connection(self):
         """Create database connection"""
@@ -76,8 +81,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
             session_id: Session identifier
             context: SessionContext DTO containing all session data
         """
-        loop = self._get_event_loop()
-        loop.run_until_complete(self._async_save_state(session_id, context))
+        self._run_sync(self._async_save_state, session_id, context)
     
     async def _async_save_state(self, session_id: str, context: SessionContext) -> None:
         """Async implementation of save_state"""
@@ -185,8 +189,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
         Returns:
             SessionContext if found, None otherwise
         """
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._async_get_state(session_id))
+        return self._run_sync(self._async_get_state, session_id)
     
     async def _async_get_state(self, session_id: str) -> Optional[SessionContext]:
         """Async implementation of get_state"""
@@ -280,8 +283,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
             session_id: Session identifier
             status: New SessionStatus value
         """
-        loop = self._get_event_loop()
-        loop.run_until_complete(self._async_update_status(session_id, status))
+        self._run_sync(self._async_update_status, session_id, status)
     
     async def _async_update_status(self, session_id: str, status: SessionStatus) -> None:
         """Async implementation of update_status"""
@@ -320,8 +322,7 @@ class PostgreSQLSessionRepository(SessionStateRepository):
         Returns:
             List of SessionContext
         """
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._async_find_by_job_id(job_id))
+        return self._run_sync(self._async_find_by_job_id, job_id)
     
     async def _async_find_by_job_id(self, job_id: str) -> List[SessionContext]:
         """Async implementation of find_by_job_id"""

@@ -5,6 +5,7 @@ from packages.imh_service.canary import CanaryManager
 
 from packages.imh_core.config import IMHConfig
 from packages.imh_job.repository import JobPostingRepository, MemoryJobPostingRepository
+from packages.imh_job.postgresql_repository import PostgreSQLJobRepository
 from packages.imh_session.infrastructure.memory_repo import MemorySessionRepository
 from packages.imh_session.infrastructure.dual_repo import DualSessionStateRepository
 from packages.imh_session.repository import SessionStateRepository, SessionHistoryRepository
@@ -65,11 +66,19 @@ def get_question_generator() -> QuestionGenerator:
 @lru_cache
 def get_job_posting_repository() -> JobPostingRepository:
     """
-    Singleton Job Repository (Memory).
-    Preloaded with dummy data for verification if empty.
+    Singleton Job Repository (PostgreSQL).
+    Uses DB-backed repository so jobs created via the API are visible to SessionService.
     """
-    repo = MemoryJobPostingRepository()
-    return repo
+    config = get_config()
+    import re
+    cs = config.POSTGRES_CONNECTION_STRING or ""
+    m = re.match(r"postgresql(?:\+asyncpg)?://([^:]+):([^@]+)@([^:]+):(\d+)/(.+)", cs)
+    if m:
+        u, p, h, port, db = m.groups()
+        conn_config = dict(host=h, port=int(port), user=u, password=p, database=db)
+    else:
+        conn_config = dict(host="localhost", port=5432, user="postgres", password="postgres", database="imh_db")
+    return PostgreSQLJobRepository(conn_config=conn_config)
 
 @lru_cache
 def get_memory_session_state_repository() -> SessionStateRepository:

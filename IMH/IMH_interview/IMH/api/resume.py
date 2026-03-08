@@ -210,24 +210,28 @@ async def upload_resume(
 @router.get("")
 async def get_resume(user_id: str = Depends(require_user)):
     """Get current user's latest resume info (metadata only, no file path)."""
-    params = _get_conn_params()
-    conn = await asyncpg.connect(**params)
     try:
-        row = await conn.fetchrow(
-            """SELECT resume_id, file_name, file_size, parse_status, resume_summary_snapshot, uploaded_at
-               FROM resumes WHERE user_id=$1 ORDER BY uploaded_at DESC LIMIT 1""",
-            user_id
-        )
-    finally:
-        await conn.close()
+        params = _get_conn_params()
+        conn = await asyncpg.connect(**params)
+        try:
+            row = await conn.fetchrow(
+                """SELECT resume_id, file_name, file_size, parse_status, resume_summary_snapshot, uploaded_at
+                   FROM resumes WHERE user_id=$1 ORDER BY uploaded_at DESC LIMIT 1""",
+                user_id
+            )
+        finally:
+            await conn.close()
 
-    if not row:
-        raise HTTPException(status_code=404, detail="No resume found")
+        if not row:
+            return None
 
-    data = dict(row)
-    if data.get("uploaded_at"):
-        data["uploaded_at"] = data["uploaded_at"].isoformat()
-    return data
+        data = dict(row)
+        if data.get("uploaded_at"):
+            data["uploaded_at"] = data["uploaded_at"].isoformat()
+        return data
+    except Exception as e:
+        logger.error("Resume fetch failed for user %s: %s", user_id, e)
+        return None
 
 
 @router.get("/download")

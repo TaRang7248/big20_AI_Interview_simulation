@@ -43,14 +43,19 @@ class PostgreSQLJobRepository(JobPostingRepository):
         """
         self.conn_config = conn_config
     
-    def _get_event_loop(self):
-        """Get or create event loop for async operations"""
+    def _run_sync(self, coro_func, *args, **kwargs):
+        """Safely execute a coroutine synchronously, even if an event loop is already running."""
+        import concurrent.futures
         try:
-            return asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop
+            loop = None
+            
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(lambda: asyncio.run(coro_func(*args, **kwargs))).result()
+        else:
+            return asyncio.run(coro_func(*args, **kwargs))
     
     async def _get_connection(self):
         """Create database connection"""
@@ -70,8 +75,7 @@ class PostgreSQLJobRepository(JobPostingRepository):
         Args:
             job: Job domain object
         """
-        loop = self._get_event_loop()
-        loop.run_until_complete(self._async_save(job))
+        self._run_sync(self._async_save, job)
     
     async def _async_save(self, job: Job) -> None:
         """Async implementation of save"""
@@ -143,8 +147,7 @@ class PostgreSQLJobRepository(JobPostingRepository):
         Returns:
             Job if found, None otherwise
         """
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._async_find_by_id(job_id))
+        return self._run_sync(self._async_find_by_id, job_id)
     
     async def _async_find_by_id(self, job_id: str) -> Optional[Job]:
         """Async implementation of find_by_id"""
@@ -203,8 +206,7 @@ class PostgreSQLJobRepository(JobPostingRepository):
         Returns:
             List of published Jobs
         """
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._async_find_published())
+        return self._run_sync(self._async_find_published)
     
     async def _async_find_published(self) -> List[Job]:
         """Async implementation of find_published"""

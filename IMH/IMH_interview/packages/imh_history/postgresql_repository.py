@@ -46,14 +46,19 @@ class PostgreSQLHistoryRepository(HistoryRepository):
         self.conn_config = conn_config
         self._loop = None  # Lazy initialization for event loop
     
-    def _get_event_loop(self):
-        """Get or create event loop for async operations"""
+    def _run_sync(self, coro_func, *args, **kwargs):
+        """Safely execute a coroutine synchronously, even if an event loop is already running."""
+        import concurrent.futures
         try:
-            return asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            return loop
+            loop = None
+            
+        if loop and loop.is_running():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(lambda: asyncio.run(coro_func(*args, **kwargs))).result()
+        else:
+            return asyncio.run(coro_func(*args, **kwargs))
     
     async def _get_connection(self):
         """Create database connection"""
@@ -72,8 +77,7 @@ class PostgreSQLHistoryRepository(HistoryRepository):
         Returns:
             interview_id: UUID string
         """
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._async_save(report))
+        return self._run_sync(self._async_save, report)
     
     async def _async_save(self, report: InterviewReport) -> str:
         """Async implementation of save"""
@@ -150,8 +154,7 @@ class PostgreSQLHistoryRepository(HistoryRepository):
         Returns:
             InterviewReport if found, None otherwise
         """
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._async_find_by_id(interview_id))
+        return self._run_sync(self._async_find_by_id, interview_id)
     
     async def _async_find_by_id(self, interview_id: str) -> Optional[InterviewReport]:
         """Async implementation of find_by_id"""
@@ -185,8 +188,7 @@ class PostgreSQLHistoryRepository(HistoryRepository):
         Returns:
             List of HistoryMetadata (sorted by created_at DESC)
         """
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._async_find_all())
+        return self._run_sync(self._async_find_all)
     
     async def _async_find_all(self) -> List[HistoryMetadata]:
         """Async implementation of find_all"""
@@ -237,8 +239,7 @@ class PostgreSQLHistoryRepository(HistoryRepository):
         import asyncio
         # Convert Enum to string if needed
         status_value = status.value if hasattr(status, 'value') else str(status)
-        loop = self._get_event_loop()
-        loop.run_until_complete(self._async_update_interview_status(session_id, status_value))
+        self._run_sync(self._async_update_interview_status, session_id, status_value)
 
     async def _async_update_interview_status(self, session_id: str, status_value: str) -> None:
         """Async implementation of update_interview_status."""

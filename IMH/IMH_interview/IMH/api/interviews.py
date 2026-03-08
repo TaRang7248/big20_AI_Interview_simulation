@@ -163,7 +163,8 @@ async def create_interview(
         async with conn.transaction():
             # 1. Pre-check: job must be PUBLISHED (duplicates service check for atomicity)
             job_row = await conn.fetchrow(
-                "SELECT job_id, status FROM jobs WHERE job_id=$1", req.job_id
+                """SELECT job_id, status, description, immutable_snapshot
+                   FROM jobs WHERE job_id=$1""", req.job_id
             )
             if not job_row:
                 raise HTTPException(
@@ -178,9 +179,27 @@ async def create_interview(
                     headers={"X-Error-Code": "E_JOB_NOT_PUBLISHED", "X-Trace-Id": trace_id},
                 )
 
-            # 2. Delegate to SessionService (internal PG commit during start_session)
+            # 2. Build policy_snapshot from immutable_snapshot JSON
+            import json
+            snap_raw = job_row.get("immutable_snapshot")
+            if isinstance(snap_raw, str):
+                try:
+                    snap = json.loads(snap_raw)
+                except Exception:
+                    snap = {}
+            elif isinstance(snap_raw, dict):
+                snap = snap_raw
+            else:
+                snap = {}
+
+            # immutable_snapshot already contains SessionConfig-compatible fields
+            # (total_question_limit, question_timeout_sec, mode, etc.)
+            # Just ensure job_id is included
+            policy_snapshot = dict(snap)
+            policy_snapshot["job_id"] = req.job_id
+
             try:
-                dto = service.create_session_from_job(req.job_id, user_id)
+                dto = service.create_session(policy_snapshot, user_id)
             except ValueError as e:
                 code = 404 if "not found" in str(e).lower() else 400
                 raise HTTPException(

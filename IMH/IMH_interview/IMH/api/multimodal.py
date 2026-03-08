@@ -246,12 +246,14 @@ async def projection_stream(
         except (TypeError, ValueError):
             pass
 
-    async def event_generator() -> AsyncGenerator[str, None]:
+    async def event_generator():
         import json as _json
+        import asyncio
         event_seq = start_seq
         try:
-            for message in pubsub.listen():
-                if message["type"] == "message":
+            while True:
+                message = pubsub.get_message(ignore_subscribe_messages=True)
+                if message and message["type"] == "message":
                     event_seq += 1
                     raw = message["data"]
 
@@ -267,6 +269,8 @@ async def projection_stream(
                     data_str = _json.dumps(payload)
                     # SSE id: field = event_seq (enables Last-Event-ID)
                     yield f"id: {event_seq}\nevent: projection\ndata: {data_str}\n\n"
+                else:
+                    await asyncio.sleep(0.1)
         except GeneratorExit:
             pass
         finally:
