@@ -112,12 +112,13 @@ class SessionService:
         return self.create_session(policy_snapshot, user_id)
 
     def create_session(self, job_policy_snapshot: dict, user_id: str) -> SessionResponseDTO:
+        import uuid
         # No lock needed for creation as it's a new resource
         # Phase 5 Contract: Use Job Policy Snapshot
         
         # 1. Prepare Config
         config = SessionConfig(**job_policy_snapshot)
-        session_id = f"sess_{user_id}_{int(os.times().elapsed)}" # Simple ID generation for now
+        session_id = f"sess_{user_id}_{uuid.uuid4().hex[:8]}" # UUID-based unique ID generation
 
         # 2. Create Engine Instance (Loads or Inits context)
         engine = InterviewSessionEngine(

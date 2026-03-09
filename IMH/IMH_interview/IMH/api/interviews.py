@@ -20,6 +20,7 @@ from typing import Optional
 import asyncpg  # type: ignore
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from IMH.api.auth import require_user
 from IMH.api.dependencies import get_session_service
@@ -199,7 +200,7 @@ async def create_interview(
             policy_snapshot["job_id"] = req.job_id
 
             try:
-                dto = service.create_session(policy_snapshot, user_id)
+                dto = await run_in_threadpool(service.create_session, policy_snapshot, user_id)
             except ValueError as e:
                 code = 404 if "not found" in str(e).lower() else 400
                 raise HTTPException(
@@ -442,7 +443,7 @@ async def submit_chat(
     # 1. Answer Submission via Engine (Phase increment implicitly handled)
     submit_dto = AnswerSubmissionDTO(type="TEXT", content=req.content, duration_seconds=10.0)
     try:
-         updated_session = service.submit_answer(interview_id, submit_dto)
+         updated_session = await run_in_threadpool(service.submit_answer, interview_id, submit_dto)
     except Exception as e:
          logger.error(f"Error submitting chat for {interview_id}: {e}")
          raise HTTPException(status_code=500, detail=str(e))
