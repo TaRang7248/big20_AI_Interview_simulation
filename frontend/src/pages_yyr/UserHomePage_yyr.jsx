@@ -1,6 +1,7 @@
 // src/pages_yyr/UserHomePage_yyr.jsx
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { FaFileUpload, FaCheckCircle, FaPlay, FaTools, FaRedoAlt } from "react-icons/fa";
+import axios from "axios";
 
 export default function UserHomePage_yyr({
     sessionId,
@@ -11,6 +12,14 @@ export default function UserHomePage_yyr({
     onResetSession,   // ✅ 추가: 세션 리셋(새 면접 시작)
     onLogout,
 }) {
+    const [jobs, setJobs] = useState([]);
+    const [selectedJob, setSelectedJob] = useState(null);
+
+    useEffect(() => {
+        axios.get("http://127.0.0.1:8001/admin/jobs")
+            .then(res => setJobs(res.data?.jobs ?? []))
+            .catch(err => console.error(err));
+    }, []);
     const userName = localStorage.getItem("name") || localStorage.getItem("email") || "사용자";
     const glass =
         "bg-white/55 backdrop-blur-xl border border-white/60 shadow-[0_20px_40px_-20px_rgba(0,0,0,0.15)] rounded-3xl";
@@ -65,9 +74,25 @@ export default function UserHomePage_yyr({
                     <div className={`${glass} p-6`}>
                         <p className="text-xs text-slate-500 font-semibold">Job</p>
                         <p className="text-base font-extrabold mt-1">지원 공고 선택</p>
-                        <p className="text-sm text-slate-500 mt-2">
-                            (MVP) 공고 리스트/검색 영역. 선택된 공고가 면접 세션과 연결될 예정.
-                        </p>
+                        <div className="mt-3 space-y-2">
+                            {jobs.filter(j => j.status === "모집중").map(j => (
+                                <button
+                                    key={j.job_code}
+                                    onClick={() => setSelectedJob(j)}
+                                    className={`w-full text-left px-4 py-3 rounded-2xl border text-sm font-bold transition
+                ${selectedJob?.job_code === j.job_code
+                                            ? "bg-sky-500 text-white border-sky-500"
+                                            : "bg-white/70 border-white/60 hover:bg-white"
+                                        }`}
+                                >
+                                    <div>{j.title}</div>
+                                    <div className="text-xs font-normal opacity-70">{j.job_code} · {j.role}</div>
+                                </button>
+                            ))}
+                        </div>
+                        {selectedJob && (
+                            <p className="text-xs text-emerald-600 font-bold mt-3">✅ {selectedJob.title} 선택됨</p>
+                        )}
                     </div>
                 </section>
 
