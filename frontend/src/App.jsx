@@ -36,6 +36,7 @@ function App() {
 
   // ✅ 면접 세션(thread_id)
   const [sessionId, setSessionId] = useState(null);
+  const [selectedJob, setSelectedJob] = useState(null);  // ✅ 추가
 
   // 리포트 모달 상태
   const [showReport, setShowReport] = useState(false);
@@ -61,6 +62,7 @@ function App() {
 
     setVisionResult("분석 대기 중...");
     setInterviewPhase("lobby");
+    setSelectedJob(null);
     setIsProcessing(false);
 
     console.log("✅ Session reset:", newId);
@@ -166,6 +168,7 @@ function App() {
       const response = await axios.post(`${API_BASE_URL}/chat/text`, {
         user_input: cleaned,
         thread_id: sessionId,
+        role: selectedJob?.role || "tech"
       });
 
       const data = response.data; // { status, thread_id, user_text, ai_text, audio_url }
@@ -314,6 +317,8 @@ function App() {
               onStartInterview={handleStartInterview}
               onResetSession={handleResetSession}
               onLogout={handleLogout}
+              selectedJob={selectedJob}
+              onSelectJob={setSelectedJob}
             />
           </RequireAuth_yyr>
         }
