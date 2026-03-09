@@ -21,20 +21,58 @@
 
 ---
 
-## 2. 기술 스택 (Tech Stack)
+## 2. 소스코드 및 개발 환경 구성
+
+### 2.1. 개발 디렉토리 구성
+본 시스템은 관리 효율성을 위해 계층화된 디렉토리 구조를 따릅니다. 주요 파일 및 디렉토리 구성은 다음과 같습니다.
+
+- **`app/`**: 애플리케이션의 핵심 로직이 위치합니다.
+  - **`main.py`**: FastAPI 인스턴스 생성, CORS 설정, 라우터 등록 등 앱의 진입점 역할을 합니다.
+  - **`config.py`**: API 키, 파일 경로, 서버 설정 등 전역 설정을 중앙 관리합니다.
+  - **`database.py`**: SQLAlchemy를 이용한 DB 연결 엔진 및 세션 설정을 담당합니다.
+  - **`models.py`**: 유저, 면접 세션, 질문, 분석 결과 등 DB 테이블 스키마를 정의합니다.
+  - **`routers/`**: 기능별 API 엔드포인트를 정의합니다 (`auth`, `user`, `interview`, `admin`, `job`, `video_router`).
+  - **`services/`**: 핵심 비즈니스 기능을 수행합니다.
+    - `stt_service.py`: Google Web Speech(주력) 및 Whisper(보조)를 활용한 음성 인식 로직. 모든 주석 한글화 완료.
+    - `tts_service.py`: Edge-TTS를 활용한 음성 합성 및 비디오 폴백 처리.
+    - `llm_service.py`: Gemini를 이용한 면접 질문 생성 및 답변 분석.
+    - `analysis_service.py`: 음성 데이터(성량, 피치 등) 정밀 분석.
+    - `video_analysis_service.py`: 실시간 자세 및 표정 분석 데이터 처리.
+    - `video_gen_service.py`: Wav2Lip 기반 립싱크 비디오 생성.
+    - `vad_service.py`: 목소리 활동 감지(VAD)를 통한 답변 유무 판단.
+- **`scripts/`**: 데이터 관리 및 환경 설정을 위한 유틸리티 폴더입니다.
+  - `check_env.py`: 실행 환경(FFmpeg, 패키지 등) 사전 점검.
+  - `setup_test_user.py`: 초기 테스트 계정(`test`/`test`) 생성.
+  - `export_db.py` / `import_db.py`: 데이터베이스 백업 및 복구.
+  - `diagnose_numpy.py`: numpy 버전 및 바이너리 호환성 진단.
+- **`static/`**: 웹 프론트엔드 자산입니다.
+  - `index.html`: 메인 웹 페이지 구조.
+  - `app.js`: 실시간 면접 진행, 미디어 처리, API 통신 등 클라이언트 로직.
+  - `style.css`: UI 디자인 및 레이아웃 스타일.
+- **`tests/`**: 시스템 안정성 검증을 위한 테스트 코드입니다.
+  - `manual_verification/`: 주요 기능(FFmpeg, 오디오 인식 등)의 수동 검증 스크립트.
+  - `test_stt_verification.py`, `test_video_gen.py` 등 각 모듈별 유닛 테스트.
+- **`data/`**: 시스템에서 사용하는 공통 리소스와 백업 데이터 저장소입니다.
+  - **`archive/`**: 프로젝트 루트 디렉토리를 정리하면서 사용하지 않게 된 부수적인 잉여 스크립트 및 이전 버전 파일들을 모아두는 보관용 폴더입니다.
+- **`models/`**: AI 모델 실행에 필요한 각종 가중치(pth, bin) 파일이 위치합니다.
+- **`uploads/`**: 사용자가 업로드한 파일(resume) 및 녹음된 원본 데이터(audio, Wav2Lip_mp4)가 저장됩니다.
+- **`LivePortrait`, `SadTalker`, `Wav2Lip`**: 외부 AI 이미지/비디오 생성 엔진 소스 코드 및 관련 모듈입니다.
+- **`db_data/`**: PostgreSQL 등 컨테이너 환경의 데이터 영구 보관용 폴더입니다.
+
+### 2.2. 기술 스택 (Tech Stack)
 
 이 프로젝트는 안정적인 서비스 운영과 복잡한 AI 모델 처리를 동시에 만족시키기 위해 크게 백엔드, 프론트엔드, AI/ML, 데이터베이스, 컴퓨팅 인프라 환경으로 분리되어 설계되었습니다.
 
-### 2.1. Backend
+#### 2.2.1. Backend
 - **Framework**: `FastAPI (v0.115.8)` - 비동기 처리(Asynchronous)를 기본 지원하여 LLM 및 비디오 생성과 같이 I/O 대기가 긴 작업에 최적화되었습니다.
 - **Server**: `Uvicorn (v0.34.0)` - ASGI 서버로 FastAPI 앱을 구동합니다.
 - **ORM & DB Access**: `SQLAlchemy (v2.0.38)`, `psycopg2-binary`, `asyncpg`
 
-### 2.2. Frontend
+#### 2.2.2. Frontend
 - **HTML/CSS/JS**: 의존성 없는 Vanilla Javascript 구조로 작성하여 백엔드(Jinja2 템플릿 대체 및 정적 서빙)와 매끄럽게 연동되도록 구성하였습니다.
 - **Media API**: `MediaRecorder` API를 적극 활용하여 브라우저에서 바로 음성 및 비디오 데이터를 캡쳐합니다.
 
-### 2.3. AI/ML 및 데이터 파이프라인
+#### 2.2.3. AI/ML 및 데이터 파이프라인
 프로젝트의 성패를 가르는 가장 중요한 요소로 다음과 같은 심층 AI 모델들이 융합되었습니다.
 - **LLM 엔진**: `Gemini 2.0 Flash` (via `google-generativeai`) 및 꼬리 질문 문맥 연결을 위한 `LangChain` 활용
 - **음성 인식 (STT)**: `OpenAI Whisper (로컬 GPU 기반)` 및 보조 엔진으로 `Google Web Speech API`
@@ -43,7 +81,7 @@
 - **비전 / 비디오 생성**: 사용자 경험을 극대화하기 위해 `Wav2Lip` GAN 모델을 활용해 오디오와 이미지(면접관)의 입모양을 실시간 수준으로 동기화 처리
 - **문서 Parsing**: `pypdf`, `pymupdf` (PDF 텍스트 추출)
 
-### 2.4. Database & Infrastructure
+#### 2.2.4. Database & Infrastructure
 - **RDBMS**: `PostgreSQL 14+` - 복잡한 외래키 관계(유저, 직무, 진행 상황, 결과 등) 관리
 - **Job Queue**: `FastAPI BackgroundTasks` 활용 (향후 Celery/Redis 확장 고려형태)
 - **미디어 처리 도구**: `FFmpeg` - H.264 인코딩 및 mp3/wav/webm 형식 간의 상호 변환 파이프라인
