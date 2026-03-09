@@ -186,6 +186,7 @@ export default function AdminJobsPage_yyr() {
                                     <tr className="text-left text-slate-500">
                                         <th className="py-2 pr-3">상태</th>
                                         <th className="py-2 pr-3">공고</th>
+                                        <th className="py-2 pr-3">직무</th>  {/* ✅ 추가 */}
                                         <th className="py-2 pr-3">지원자</th>
                                         <th className="py-2 pr-3">업데이트</th>
                                     </tr>
@@ -198,6 +199,7 @@ export default function AdminJobsPage_yyr() {
                                                 <div className="font-bold text-slate-900">{j.title}</div>
                                                 <div className="text-xs text-slate-500">{j.job_code}</div>
                                             </td>
+                                            <td className="py-3 pr-3 text-slate-600">{j.role || "tech"}</td>
                                             <td className="py-3 pr-3 font-bold">{j.applicants}</td>
                                             <td className="py-3 pr-3 text-slate-600">
                                                 {String(j.updated_at).slice(0, 10)}
