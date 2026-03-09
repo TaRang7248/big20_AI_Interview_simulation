@@ -15,6 +15,7 @@ export default function AdminJobsPage_yyr() {
     const [title, setTitle] = useState("");
     const [status, setStatus] = useState("모집중");
     const [applicants, setApplicants] = useState(0);
+    const [role, setRole] = useState("tech");
 
     const glass =
         "bg-white/70 backdrop-blur-xl border border-white/60 shadow-[0_20px_40px_-20px_rgba(0,0,0,0.15)] rounded-3xl";
@@ -48,6 +49,7 @@ export default function AdminJobsPage_yyr() {
             await axios.post(`${API_BASE_URL}/admin/jobs`, {
                 job_code: jobCode.trim(),
                 title: title.trim(),
+                role,
                 status,
                 applicants: Number(applicants) || 0,
             });
@@ -123,6 +125,18 @@ export default function AdminJobsPage_yyr() {
                                     <option value="모집중">모집중</option>
                                     <option value="마감">마감</option>
                                     <option value="임시저장">임시저장</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label className="text-xs font-bold text-slate-600">role</label>
+                                <select
+                                    value={role}
+                                    onChange={(e) => setRole(e.target.value)}
+                                    className="mt-1 w-full px-3 py-2 rounded-xl border border-slate-200 bg-white"
+                                >
+                                    <option value="tech">tech (백엔드/프론트)</option>
+                                    <option value="data">data (데이터 분석)</option>
+                                    <option value="ux">ux (UX/UI 디자인)</option>
                                 </select>
                             </div>
 

@@ -131,6 +131,7 @@ export default function LoginPage_yyr() {
                     <button
                         onClick={() => {
                             localStorage.setItem("role", "admin");
+                            localStorage.setItem("auth_token", "loggedin");
                             nav("/admin");
                         }}
                         className="w-full mt-2 px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold hover:bg-black transition"

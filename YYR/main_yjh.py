@@ -559,7 +559,7 @@ async def list_jobs():
     db = SessionLocal()
     try:
         rows = db.execute(text("""
-            SELECT id, job_code, title, status, applicants, updated_at, created_at
+            SELECT id, job_code, title, role, status, applicants, updated_at, created_at
             FROM jobs
             ORDER BY created_at DESC
         """)).mappings().all()
