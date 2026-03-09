@@ -17,9 +17,9 @@ import AdminJobsPage_yyr from "./pages_yyr/AdminJobsPage_yyr";
 // 백엔드 주소
 const API_BASE_URL = "http://127.0.0.1:8001";
 
-// ✅ 새 세션ID 생성 함수
 function createSessionId() {
-  return `session_${Date.now()}`;
+  const userId = localStorage.getItem("user_id") || "guest";
+  return `session_${userId}_${Date.now()}`;
 }
 
 function App() {

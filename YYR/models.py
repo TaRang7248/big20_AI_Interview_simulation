@@ -79,3 +79,16 @@ class Resume(Base):
     user_id = Column(Integer, index=True)
     filename = Column(String)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+# Job: 공고 정보
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    job_code = Column(String, unique=True, index=True, nullable=False)
+    title = Column(String, nullable=False)
+    role = Column(String, default="tech")  # "ux" | "tech" | "data"
+    status = Column(String, default="모집중")  # 모집중 | 마감 | 임시저장
+    applicants = Column(Integer, default=0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

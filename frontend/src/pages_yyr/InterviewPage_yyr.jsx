@@ -245,13 +245,7 @@ export default function InterviewPage_yyr({
                         <div className="px-6 py-5 border-t border-white/60">
                             {interviewPhase === "live" ? (
                                 <>
-                                    <button
-                                        onClick={() => onAudioSubmit("모르겠습니다")}
-                                        disabled={isProcessing}
-                                        className="mb-3 w-full px-4 py-3 rounded-2xl bg-slate-900 text-white font-bold"
-                                    >
-                                        (테스트) “모르겠습니다” 보내기
-                                    </button>
+
                                     <AudioRecorder onTextSubmit={onAudioSubmit} isProcessing={isProcessing} />
                                     <audio ref={audioPlayerRef} hidden />
                                 </>

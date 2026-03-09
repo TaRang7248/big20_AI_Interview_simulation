@@ -31,8 +31,12 @@ from YYR.services.rag_service import process_resume_pdf, get_relevant_context
 from sqlalchemy import text
 from YYR.models import User
 
+
 from passlib.context import CryptContext
 import bcrypt as _bcrypt
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
+
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -70,8 +74,6 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     user_input: str
     thread_id: str = "session_1"
-
-from typing import Literal
 
 class TextChatRequest(BaseModel):
     user_input: str
@@ -571,11 +573,11 @@ async def list_jobs():
         db.close()
 
 # [추가] 공고 등록 API (POST /admin/jobs)
-from pydantic import BaseModel, Field
 
 class JobCreateRequest(BaseModel):
     job_code: str = Field(..., min_length=1)
     title: str = Field(..., min_length=1)
+    role: str = "tech"              # ✅ ux | tech | data
     status: str = "모집중"          # 모집중 | 마감 | 임시저장
     applicants: int = 0
 
@@ -586,18 +588,20 @@ async def create_job(payload: JobCreateRequest):
         # job_code 중복이면 업데이트(UPSERT) / 없으면 삽입
         row = db.execute(
             text("""
-                INSERT INTO jobs (job_code, title, status, applicants, updated_at, created_at)
-                VALUES (:job_code, :title, :status, :applicants, NOW(), NOW())
+                INSERT INTO jobs (job_code, title, role, status, applicants, updated_at, created_at)
+                VALUES (:job_code, :title, :role, :status, :applicants, NOW(), NOW())
                 ON CONFLICT (job_code) DO UPDATE
                 SET title = EXCLUDED.title,
+                    role = EXCLUDED.role,
                     status = EXCLUDED.status,
                     applicants = EXCLUDED.applicants,
                     updated_at = NOW()
-                RETURNING id, job_code, title, status, applicants, updated_at, created_at
+                RETURNING id, job_code, title, role, status, applicants, updated_at, created_at
             """),
             {
                 "job_code": payload.job_code.strip(),
                 "title": payload.title.strip(),
+                "role": payload.role,
                 "status": payload.status,
                 "applicants": int(payload.applicants or 0),
             }
@@ -606,42 +610,6 @@ async def create_job(payload: JobCreateRequest):
         db.commit()
         return {"status": "success", "job": dict(row) if row else None}
 
-    except Exception as e:
-        db.rollback()
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        db.close()
-
-from pydantic import BaseModel
-from typing import Optional
-
-class JobUpsertRequest(BaseModel):
-    job_code: str
-    title: str
-    status: str = "모집중"       # 모집중 | 마감
-    applicants: int = 0
-
-@app.post("/admin/jobs")
-async def upsert_job(payload: JobUpsertRequest):
-    db = SessionLocal()
-    try:
-        row = db.execute(
-            text("""
-                INSERT INTO jobs (job_code, title, status, applicants)
-                VALUES (:job_code, :title, :status, :applicants)
-                ON CONFLICT (job_code) DO UPDATE
-                SET title = EXCLUDED.title,
-                    status = EXCLUDED.status,
-                    applicants = EXCLUDED.applicants,
-                    updated_at = NOW()
-                RETURNING id, job_code, title, status, applicants, updated_at, created_at
-            """),
-            payload.model_dump()
-        ).mappings().first()
-
-        db.commit()
-        return {"status": "success", "job": dict(row)}
     except Exception as e:
         db.rollback()
         traceback.print_exc()
