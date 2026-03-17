@@ -11,9 +11,10 @@ export default function UserHomePage_yyr({
     onStartInterview,
     onResetSession,   // ✅ 추가: 세션 리셋(새 면접 시작)
     onLogout,
+    selectedJob,
+    onSelectJob
 }) {
     const [jobs, setJobs] = useState([]);
-    const [selectedJob, setSelectedJob] = useState(null);
 
     useEffect(() => {
         axios.get("http://127.0.0.1:8001/admin/jobs")
@@ -78,7 +79,7 @@ export default function UserHomePage_yyr({
                             {jobs.filter(j => j.status === "모집중").map(j => (
                                 <button
                                     key={j.job_code}
-                                    onClick={() => setSelectedJob(j)}
+                                    onClick={() => onSelectJob(j)}
                                     className={`w-full text-left px-4 py-3 rounded-2xl border text-sm font-bold transition
                 ${selectedJob?.job_code === j.job_code
                                             ? "bg-sky-500 text-white border-sky-500"
