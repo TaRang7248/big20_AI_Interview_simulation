@@ -162,7 +162,7 @@ def node_generate_question(state: InterviewState):
         return {
             "messages": [msg],
             "phase": next_phase,
-            "question_count": q_count,
+            "question_count": q_count + 1,
             "role": role,
         }
 

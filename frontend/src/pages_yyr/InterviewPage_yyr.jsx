@@ -33,12 +33,12 @@ export default function InterviewPage_yyr({
        진행도 계산
     ========================= */
     const progress = useMemo(() => {
-        if (showReport) return 100;
+        if (showReport || interviewPhase === "report") return 100;
         const userTurns = chatLog.filter((m) => m.sender === "user").length;
         const base = isResumeUploaded ? 22 : 10;
         const inc = Math.min(userTurns * 12, 68);
         return Math.min(base + inc, 92);
-    }, [chatLog, isResumeUploaded, showReport]);
+    }, [chatLog, isResumeUploaded, showReport, interviewPhase]);
 
     const stageLabel = useMemo(() => {
         if (showReport) return "리포트";

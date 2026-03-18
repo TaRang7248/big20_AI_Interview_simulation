@@ -187,6 +187,11 @@ function App() {
         return next;
       });
 
+      // ✅ 면접 종료 감지
+      if (data.is_finished) {
+        setInterviewPhase("report");
+      }
+
       // 2) 🔊 오디오 재생 (setChatLog 바깥!)
       if (data.audio_url && audioPlayerRef?.current) {
         const fullUrl = `${API_BASE_URL}${data.audio_url}`;

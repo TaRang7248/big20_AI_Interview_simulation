@@ -86,6 +86,7 @@ class TextChatResponse(BaseModel):
     user_text: str
     ai_text: str
     audio_url: str | None = None
+    is_finished: bool = False
 
 class ChatResponse(BaseModel):
     response: str
@@ -297,12 +298,18 @@ async def chat_text_with_tts(req: TextChatRequest):
                 print("✅ [TTS] target_path =", target_path)
                 print("✅ [TTS] exists? =", os.path.exists(target_path))
 
+        print(f"🔍 [result keys] {result.keys()}")
+        print(f"🔢 [question_count] {result.get('question_count', 0)}")
+        is_finished = result.get("question_count", 0) >= 7
+        print(f"🏁 [is_finished] {is_finished}")
+
         return TextChatResponse(
             status="success",
             thread_id=req.thread_id,
             user_text=user_text,
             ai_text=ai_text,
-            audio_url=audio_url
+            audio_url=audio_url,
+            is_finished=is_finished
         )
 
     except Exception as e:
