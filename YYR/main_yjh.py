@@ -78,7 +78,7 @@ class ChatRequest(BaseModel):
 class TextChatRequest(BaseModel):
     user_input: str
     thread_id: str
-    role: Literal["ux", "tech"] = "tech"   # ✅ 기본값은 tech
+    role: Literal["ux", "tech", "data"] = "tech"   # ✅ data 추가
 
 class TextChatResponse(BaseModel):
     status: str
@@ -656,3 +656,24 @@ async def get_report_result_by_session_id(session_id: int):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("YYR.main_yjh:app", host="0.0.0.0", port=8001, reload=True)
+
+@app.get("/user/{user_id}/sessions")
+async def get_user_sessions(user_id: int):
+    db = SessionLocal()
+    try:
+        sessions = db.execute(text("""
+            SELECT s.id, s.thread_id, s.status, s.created_at,
+                   r.total_score, r.details->>'final_result' as final_result
+            FROM interview_sessions s
+            LEFT JOIN evaluation_reports r ON r.session_id = s.id
+            WHERE s.thread_id LIKE :pattern
+            ORDER BY s.created_at DESC
+            LIMIT 10
+        """), {"pattern": f"session_{user_id}_%"}).mappings().all()
+
+        return {"status": "success", "sessions": [dict(s) for s in sessions]}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()

@@ -5,7 +5,7 @@ import { jsPDF } from "jspdf";
 // 면접자 화면에서 '근거(rationale)'를 보여줄지 여부
 const SHOW_RATIONALE_TO_USER = false;
 
-export default function ResultPage_yyr({ reportData }) {
+export default function ResultPage_yyr({ reportData, sessionId, isModal = false }) {
   const pdfRef = useRef(null);
   const [open, setOpen] = useState({
     hard_skill: false,
@@ -133,6 +133,14 @@ export default function ResultPage_yyr({ reportData }) {
         >
           PDF 저장
         </button>
+        {isModal && (
+          <button
+            onClick={() => window.location.href = `/result/${sessionId}`}
+            className="px-4 py-2 rounded-lg bg-slate-900 text-white font-semibold"
+          >
+            결과 페이지로 이동 →
+          </button>
+        )}
       </div>
     </div>
   );

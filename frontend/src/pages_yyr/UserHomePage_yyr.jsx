@@ -15,12 +15,21 @@ export default function UserHomePage_yyr({
     onSelectJob
 }) {
     const [jobs, setJobs] = useState([]);
+    const [sessions, setSessions] = useState([]);
 
     useEffect(() => {
         axios.get("http://127.0.0.1:8001/admin/jobs")
             .then(res => setJobs(res.data?.jobs ?? []))
             .catch(err => console.error(err));
+
+        const userId = localStorage.getItem("user_id");
+        if (userId) {
+            axios.get(`http://127.0.0.1:8001/user/${userId}/sessions`)
+                .then(res => setSessions(res.data?.sessions ?? []))
+                .catch(err => console.error(err));
+        }
     }, []);
+
     const userName = localStorage.getItem("name") || localStorage.getItem("email") || "사용자";
     const glass =
         "bg-white/55 backdrop-blur-xl border border-white/60 shadow-[0_20px_40px_-20px_rgba(0,0,0,0.15)] rounded-3xl";
@@ -62,13 +71,30 @@ export default function UserHomePage_yyr({
             <main className="max-w-6xl mx-auto px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-6">
                 {/* Left */}
                 <section className="lg:col-span-7 space-y-6">
-                    {/* 2.1-1 이전 면접 기록 조회 (MVP: 자리만) */}
+                    {/* 2.1-1 이전 면접 기록 조회 */}
                     <div className={`${glass} p-6`}>
                         <p className="text-xs text-slate-500 font-semibold">History</p>
                         <p className="text-base font-extrabold mt-1">이전 면접 기록</p>
-                        <p className="text-sm text-slate-500 mt-2">
-                            (MVP) 합/불합 + 간단 요약 리스트 영역. 나중에 API 연결.
-                        </p>
+                        <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
+                            {sessions.filter(s => s.total_score).length === 0 ? (
+                                <p className="text-sm text-slate-500">아직 면접 기록이 없어요.</p>
+                            ) : (
+                                sessions
+                                    .filter(s => s.total_score)
+                                    .map(s => (
+                                        <button
+                                            key={s.id}
+                                            onClick={() => window.location.href = `/result/${s.thread_id}`}
+                                            className="w-full text-left px-4 py-3 rounded-2xl bg-white/70 border border-white/60 text-sm hover:bg-white transition"
+                                        >
+                                            <div className="font-bold">{String(s.created_at).slice(0, 10)}</div>
+                                            <div className="text-xs text-slate-500 mt-1">
+                                                {s.total_score}점 · {s.final_result}
+                                            </div>
+                                        </button>
+                                    ))
+                            )}
+                        </div>
                     </div>
 
                     {/* 2.1-2 지원 공고 선택 (MVP: 자리만) */}

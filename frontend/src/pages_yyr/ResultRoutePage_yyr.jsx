@@ -79,10 +79,10 @@ export default function ResultRoutePage_yyr() {
                     </div>
 
                     <Link
-                        to="/interview"
+                        to="/user/home"
                         className="px-3 py-2 rounded-lg bg-gray-800 text-white text-sm font-bold hover:bg-black"
                     >
-                        면접으로
+                        로비로
                     </Link>
                 </div>
 

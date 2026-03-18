@@ -283,7 +283,7 @@ export default function InterviewPage_yyr({
                             {loadingReport ? (
                                 <p className="text-center text-slate-500">리포트 생성 중…</p>
                             ) : (
-                                <ResultPage_yyr reportData={reportData} />
+                                <ResultPage_yyr reportData={reportData} sessionId={sessionId} isModal={true} />
                             )}
                         </div>
                     </div>
