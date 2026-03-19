@@ -156,7 +156,6 @@ ENV/
 env.bak/
 venv.bak/
 interview_env.bak/
-.env.example
 
 # Spyder project settings
 .spyderproject
